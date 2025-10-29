@@ -121,6 +121,19 @@ enum PieceKind {
     Custom(Box<dyn Piece>),
 }
 
+impl PieceKind {
+    fn symbol(&self) -> String {
+        match self {
+            PieceKind::Pawn(p) => p.symbol().to_string(),
+            PieceKind::Rook(r) => r.symbol().to_string(),
+            PieceKind::Knight(n) => n.symbol().to_string(),
+            PieceKind::Bishop(b) => b.symbol().to_string(),
+            PieceKind::Queen(q) => q.symbol().to_string(),
+            PieceKind::King(k) => k.symbol().to_string(),
+            PieceKind::Custom(p) => p.symbol(),
+        }
+    }
+}
 /// ------------- End Pieces -------------
 
 /// ------------- Square types -------------
@@ -185,49 +198,29 @@ struct Square {
 }
 
 fn square_to_fen(square: &Square) -> String {
+    let piece_symbol = square.piece.as_ref().map(|p| p.symbol()).unwrap_or("".to_string());
+    let is_standard_square = matches!(square.square_type, SquareType::Standard) && square.conditions.is_empty();
+
+    if piece_symbol.len() == 1 && is_standard_square {
+        return piece_symbol; // e.g., "P" or "r"
+    }
+
+    // Non-standard notation
     let mut parts = vec![];
 
-    // Piece
-    if let Some(piece_kind) = &square.piece {
-        match piece_kind {
-            PieceKind::Custom(p) => parts.push(format!("P={}", p.symbol())),
-            PieceKind::Pawn(p) => if square.square_type != SquareType::Standard || !square.conditions.is_empty() {
-                parts.push(format!("P={}", p.symbol()));
-            },
-            PieceKind::Rook(p) => if square.square_type != SquareType::Standard || !square.conditions.is_empty() {
-                parts.push(format!("P={}", p.symbol()));
-            },
-            _ => {}
-        }
+    if !piece_symbol.is_empty() {
+        parts.push(format!("P={}", piece_symbol));
     }
 
-    // Square type
-    if square.square_type != SquareType::Standard {
-        parts.push(format!("T={}", square.square_type.as_str()).to_uppercase());
+    if !matches!(square.square_type, SquareType::Standard) {
+        parts.push(format!("T={}", square.square_type.as_str()));
     }
 
-    // Square conditions
     for cond in &square.conditions {
-        parts.push(format!("C={:?}", cond.as_str()).to_uppercase());
+        parts.push(format!("C={}", cond.as_str()));
     }
 
-    if parts.is_empty() {
-        // Standard square with standard piece
-        match &square.piece {
-            Some(piece) => match piece {
-                PieceKind::Pawn(p) => p.symbol().to_string(),
-                PieceKind::Rook(p) => p.symbol().to_string(),
-                PieceKind::Knight(p) => p.symbol().to_string(),
-                PieceKind::Bishop(p) => p.symbol().to_string(),
-                PieceKind::Queen(p) => p.symbol().to_string(),
-                PieceKind::King(p) => p.symbol().to_string(),
-                PieceKind::Custom(p) => format!("({})", p.symbol()),
-            },
-            None => "1".to_string(), // empty square
-        }
-    } else {
-        format!("({})", parts.join(","))
-    }
+    format!("({})", parts.join(","))
 }
 
 
@@ -246,7 +239,7 @@ fn board_to_fen(board: &Board) -> String {
         for square in row {
             let fen = square_to_fen(square);
 
-            if fen.is_empty() {
+            if fen.is_empty() || fen == "()" {
                 empty_count += 1;
             } else {
                 if empty_count > 0 {
@@ -269,7 +262,7 @@ fn board_to_fen(board: &Board) -> String {
 
 fn main() {
     let mut board = Board {
-        grid: vec![vec![Square { piece: Some(PieceKind::Rook(Rook{ color: Color::White })), square_type: SquareType::Vent, conditions: vec![SquareCondition::Frozen] }; 8]; 8],
+        grid: vec![vec![Square { piece: None, square_type: SquareType::Standard, conditions: vec![] }; 8]; 8],
         flags: BoardFlags {
             white_can_castle_kingside: true,
             white_can_castle_queenside: true,
