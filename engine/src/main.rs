@@ -4,7 +4,7 @@ trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)>;
-    fn symbol(&self) -> char;
+    fn symbol(&self) -> String;
 }
 
 #[derive(Clone, Copy)]
@@ -17,7 +17,7 @@ impl Piece for Pawn {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'P' }
+    fn symbol(&self) -> String { 'P'.to_string() }
 }
 
 struct Rook { color: Color }
@@ -27,7 +27,7 @@ impl Piece for Rook {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'R' }
+    fn symbol(&self) -> String { 'R'.to_string() }
 }
 
 struct Knight { color: Color }
@@ -37,7 +37,7 @@ impl Piece for Knight {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'N' }
+    fn symbol(&self) -> String { 'N'.to_string() }
 }
 
 struct Bishop { color: Color }
@@ -47,7 +47,7 @@ impl Piece for Bishop {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'B' }
+    fn symbol(&self) -> String { 'B'.to_string() }
 }
 
 struct Queen { color: Color }
@@ -57,7 +57,7 @@ impl Piece for Queen {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'Q' }
+    fn symbol(&self) -> String { 'Q'.to_string() }
 }
 
 struct King { color: Color }
@@ -67,7 +67,7 @@ impl Piece for King {
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
         todo!()
     }
-    fn symbol(&self) -> char { 'K' }
+    fn symbol(&self) -> String { 'K'.to_string() }
 }
 
 // the rest
@@ -82,15 +82,37 @@ enum PieceKind {
     Custom(Box<dyn Piece>),
 }
 
+impl PieceKind {
+    fn symbol(&self) -> String {
+        match self {
+            PieceKind::Pawn(p) => p.symbol().to_string(),
+            PieceKind::Rook(r) => r.symbol().to_string(),
+            PieceKind::Knight(n) => n.symbol().to_string(),
+            PieceKind::Bishop(b) => b.symbol().to_string(),
+            PieceKind::Queen(q) => q.symbol().to_string(),
+            PieceKind::King(k) => k.symbol().to_string(),
+            PieceKind::Custom(p) => p.symbol(),
+        }
+    }
+}
+
 /// ------------- End Pieces -------------
 
 /// ------------- Square types -------------
 #[derive(PartialEq)]
 enum SquareType {
     Standard,
-    Turret,
     Vent,
     // adding more later on
+}
+
+impl SquareType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SquareType::Standard => "STANDARD",
+            SquareType::Vent => "VENT",
+        }
+    }
 }
 /// ------------- End Square types -------------
 
@@ -100,6 +122,14 @@ enum SquareType {
 enum SquareCondition {
     Frozen,
     // adding more later on
+}
+
+impl SquareCondition {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SquareCondition::Frozen => "FROZEN",
+        }
+    }
 }
 /// ------------- End Square conditions -------------
 
@@ -126,58 +156,76 @@ struct Square {
 }
 
 fn square_to_fen(square: &Square) -> String {
+    let piece_symbol = square.piece.as_ref().map(|p| p.symbol()).unwrap_or("".to_string());
+    let is_standard_square = matches!(square.square_type, SquareType::Standard) && square.conditions.is_empty();
+
+    // if the square can be represented by a single character, return that character
+    if piece_symbol.len() == 1 && is_standard_square {
+        return piece_symbol;
+    }
+
+    // Non-standard notation
     let mut parts = vec![];
 
-    // Piece
-    if let Some(piece_kind) = &square.piece {
-        match piece_kind {
-            PieceKind::Custom(p) => parts.push(format!("P={}", p.symbol())),
-            PieceKind::Pawn(p) => if square.square_type != SquareType::Standard || !square.conditions.is_empty() {
-                parts.push(format!("P={}", p.symbol()));
-            },
-            PieceKind::Rook(p) => if square.square_type != SquareType::Standard || !square.conditions.is_empty() {
-                parts.push(format!("P={}", p.symbol()));
-            },
-            _ => {}
-        }
+    if !piece_symbol.is_empty() {
+        parts.push(format!("P={}", piece_symbol));
     }
 
-    // Square type
-    if square.square_type != SquareType::Standard {
-        parts.push(format!("T={:?}", square.square_type).to_uppercase());
+    if !matches!(square.square_type, SquareType::Standard) {
+        parts.push(format!("T={}", square.square_type.as_str()));
     }
 
-    // Square conditions
     for cond in &square.conditions {
-        parts.push(format!("C={:?}", cond).to_uppercase());
+        parts.push(format!("C={}", cond.as_str()));
     }
 
-    if parts.is_empty() {
-        // Standard square with standard piece
-        match &square.piece {
-            Some(piece) => match piece {
-                PieceKind::Pawn(p) => p.symbol().to_string(),
-                PieceKind::Rook(p) => p.symbol().to_string(),
-                PieceKind::Knight(p) => p.symbol().to_string(),
-                PieceKind::Bishop(p) => p.symbol().to_string(),
-                PieceKind::Queen(p) => p.symbol().to_string(),
-                PieceKind::King(p) => p.symbol().to_string(),
-                PieceKind::Custom(p) => format!("({})", p.symbol()),
-            },
-            None => "1".to_string(), // empty square
-        }
-    } else {
-        format!("({})", parts.join(","))
-    }
+    format!("({})", parts.join(","))
 }
 
+/// ------------- End Square logic -------------
 
+
+/// ------------- Board logic -------------
 struct Board {
     grid: Vec<Vec<Square>>,
     flags: BoardFlags,
 }
 
+fn board_to_fen(board: &Board) -> String {
+    let mut rows = vec![];
+
+    for row in &board.grid {
+        let mut fen_row = String::new();
+        let mut empty_count = 0;
+
+        for square in row {
+            let fen = square_to_fen(square);
+
+            if fen.is_empty() {
+                empty_count += 1;
+            } else {
+                if empty_count > 0 {
+                    fen_row.push_str(&empty_count.to_string());
+                    empty_count = 0;
+                }
+                fen_row.push_str(&fen);
+            }
+        }
+
+        if empty_count > 0 {
+            fen_row.push_str(&empty_count.to_string());
+        }
+
+        rows.push(fen_row);
+    }
+
+    rows.join("/")
+}
+
+/// ------------- End Board logic -------------
+
 fn main() {
 
 }
+
 
