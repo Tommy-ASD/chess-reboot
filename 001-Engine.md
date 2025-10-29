@@ -1,0 +1,239 @@
+Okay we want a Chess engine
+How do we build this?
+We need a type to represent the board. I guess this could be as simple as a `Vec<Vec<T>>`? Maybe?
+That would represent the grid.
+We also want some way to store flags, such as whether the king has moved (for castling)
+
+I don't think we do `Vec<Vec<T>>`, as it doesn't account for all the empty squares on the board
+Nooo wait actually
+We want each square to be able to hold extra info about itself
+Such as whether a spell has been cast on it, whether it's a portal or a vent to another square, etc
+Yeah I know this will not be normal chess
+So, we build a custom `Square` struct, holding all this info
+
+We build this by a method like this;
+```rs
+/// We use this so there's no confusion with which index is 
+struct BoardIndex {
+    x: usize,
+    y: usize
+}
+
+struct BoardFlags {
+    white_can_castle_kingside: bool,
+    white_can_castle_queenside: bool,
+    black_can_castle_kingside: bool,
+    black_can_castle_queenside: bool,
+    en_passant_target: Option<BoardIndex>,
+    // more fields we can figure out later
+}
+
+struct Square {
+    // we want SquareType, SquareCondition, Piece 
+    // Maybe pieces plural? Sounds complex, maybe later
+}
+
+struct Board {
+    grid: Vec<Vec<Square>>,
+    flags: BoardFlags,
+}
+```
+
+Okay I think that's reasonable
+But what do we do for pieces?
+Do we use a trait, do we use an enum, do we use some other method?
+I do like enum, but when there will be dozens of pieces, it may get overly complex
+Also, I want end users to be able to build their own pieces, following a predefined template
+I guess we could make an enum with all the built-in pieces, and a failover `Other<Box<dyn Piece>>`?
+
+```rs
+trait Piece {
+    fn name(&self) -> &str;
+    fn color(&self) -> Color;
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)>;
+    fn symbol(&self) -> char;
+}
+
+#[derive(Clone, Copy)]
+enum Color { White, Black }
+
+struct Rook { color: Color }
+impl Piece for Rook {
+    fn name(&self) -> &str { "Rook" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'R' }
+}
+
+// the rest
+
+enum PieceKind {
+    Pawn(Pawn),
+    Rook(Rook),
+    Knight(Knight),
+    Bishop(Bishop),
+    Queen(Queen),
+    King(King),
+    Custom(Box<dyn Piece>),
+}
+```
+
+One immediately clear issue is with piece symbols
+There will be too many pieces for all symbols, and I need to map symbols to pieces
+First issue could be solved by using strings instead of single characters, maybe?
+Or maybe I could use a piece ID per piece?
+But still, mapping the symbol to a piece type could be difficult
+
+Okay current snapshot;
+```rs
+/// ------------- Pieces -------------
+
+trait Piece {
+    fn name(&self) -> &str;
+    fn color(&self) -> Color;
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)>;
+    fn symbol(&self) -> char;
+}
+
+#[derive(Clone, Copy)]
+enum Color { White, Black }
+
+struct Pawn { color: Color }
+impl Piece for Pawn {
+    fn name(&self) -> &str { "Pawn" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'P' }
+}
+
+struct Rook { color: Color }
+impl Piece for Rook {
+    fn name(&self) -> &str { "Rook" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'R' }
+}
+
+struct Knight { color: Color }
+impl Piece for Knight {
+    fn name(&self) -> &str { "Knight" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'N' }
+}
+
+struct Bishop { color: Color }
+impl Piece for Bishop {
+    fn name(&self) -> &str { "Bishop" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'B' }
+}
+
+struct Queen { color: Color }
+impl Piece for Queen {
+    fn name(&self) -> &str { "Queen" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'Q' }
+}
+
+struct King { color: Color }
+impl Piece for King {
+    fn name(&self) -> &str { "King" }
+    fn color(&self) -> Color { self.color }
+    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+        todo!()
+    }
+    fn symbol(&self) -> char { 'K' }
+}
+
+// the rest
+
+enum PieceKind {
+    Pawn(Pawn),
+    Rook(Rook),
+    Knight(Knight),
+    Bishop(Bishop),
+    Queen(Queen),
+    King(King),
+    Custom(Box<dyn Piece>),
+}
+
+/// ------------- End Pieces -------------
+
+/// ------------- Square types -------------
+enum SquareType {
+    Standard,
+    Turret,
+    Vent,
+    // adding more later on
+}
+/// ------------- End Square types -------------
+
+
+/// ------------- Square conditions -------------
+enum SquareCondition {
+    Frozen,
+    // adding more later on
+}
+/// ------------- End Square conditions -------------
+
+/// We use this so there's no confusion with which index is 
+struct BoardIndex {
+    x: usize,
+    y: usize
+}
+
+struct BoardFlags {
+    white_can_castle_kingside: bool,
+    white_can_castle_queenside: bool,
+    black_can_castle_kingside: bool,
+    black_can_castle_queenside: bool,
+    en_passant_target: Option<BoardIndex>,
+    // more fields we can figure out later
+}
+
+struct Square {
+    piece: Option<PieceKind>,
+    square_type: SquareType,
+    conditions: Vec<SquareCondition>,
+}
+
+struct Board {
+    grid: Vec<Vec<Square>>,
+    flags: BoardFlags,
+}
+
+fn main() {
+
+}
+```
+
+Already scope creep. I'm gonna have to make be *very* good with documenting all this.
+Before doing anything else, let's get FEN (or a customized version) working
+`rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1` should build the standard board
+BUT for non-standard squares, with special types, conditions, or pieces, we do the following;
+- If the piece is non-standard, but the square is otherwise normal, add `(P=<symbol>)`. If the symbol is `BUS`, the notation would be `(P=BUS)`
+- If the piece is non-standard, and the square has an abnormal type, add `(P=<symbol>,T=<type>)`. If the symbol is `BUS` and type is `vent`, the notation would be `(P=BUS,T=VENT)`
+- Same logic applies to condition, replacing `T` with `C`
+- Same logic applies to normal pieces, if there is an abnormal type or condition
+- A "normal" piece is any piece with a single-character symbol
+
+So, building this as a function;
+1. Check if we need abnormal FEN notation. Single character piece, otherwise standard square? Return the symbol
+2. At this point, we know abnormal FEN is required. We create a new string "(P=" and add the piece
+3. We add the type if applicable, afterwards adding the condition if applicable. Comma between each item.
+4. We end off closing the paranthesis
