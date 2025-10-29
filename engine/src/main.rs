@@ -1,3 +1,4 @@
+#![allow(unused)]
 /// ------------- Pieces -------------
 
 trait Piece {
@@ -5,11 +6,19 @@ trait Piece {
     fn color(&self) -> Color;
     fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)>;
     fn symbol(&self) -> String;
+
+    fn clone_box(&self) -> Box<dyn Piece>;
+}
+impl Clone for Box<dyn Piece> {
+    fn clone(&self) -> Box<dyn Piece> {
+        self.clone_box()
+    }
 }
 
 #[derive(Clone, Copy)]
 enum Color { White, Black }
 
+#[derive(Clone)]
 struct Pawn { color: Color }
 impl Piece for Pawn {
     fn name(&self) -> &str { "Pawn" }
@@ -18,8 +27,13 @@ impl Piece for Pawn {
         todo!()
     }
     fn symbol(&self) -> String { 'P'.to_string() }
+
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 struct Rook { color: Color }
 impl Piece for Rook {
     fn name(&self) -> &str { "Rook" }
@@ -28,8 +42,13 @@ impl Piece for Rook {
         todo!()
     }
     fn symbol(&self) -> String { 'R'.to_string() }
+    
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 struct Knight { color: Color }
 impl Piece for Knight {
     fn name(&self) -> &str { "Knight" }
@@ -38,8 +57,13 @@ impl Piece for Knight {
         todo!()
     }
     fn symbol(&self) -> String { 'N'.to_string() }
+    
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 struct Bishop { color: Color }
 impl Piece for Bishop {
     fn name(&self) -> &str { "Bishop" }
@@ -48,8 +72,13 @@ impl Piece for Bishop {
         todo!()
     }
     fn symbol(&self) -> String { 'B'.to_string() }
+
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 struct Queen { color: Color }
 impl Piece for Queen {
     fn name(&self) -> &str { "Queen" }
@@ -58,8 +87,13 @@ impl Piece for Queen {
         todo!()
     }
     fn symbol(&self) -> String { 'Q'.to_string() }
+    
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 struct King { color: Color }
 impl Piece for King {
     fn name(&self) -> &str { "King" }
@@ -68,10 +102,14 @@ impl Piece for King {
         todo!()
     }
     fn symbol(&self) -> String { 'K'.to_string() }
+    
+    fn clone_box(&self) -> Box<dyn Piece> {
+        Box::new(self.clone())
+    }
 }
 
 // the rest
-
+#[derive(Clone)]
 enum PieceKind {
     Pawn(Pawn),
     Rook(Rook),
@@ -99,7 +137,7 @@ impl PieceKind {
 /// ------------- End Pieces -------------
 
 /// ------------- Square types -------------
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum SquareType {
     Standard,
     Vent,
@@ -118,7 +156,7 @@ impl SquareType {
 
 
 /// ------------- Square conditions -------------
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum SquareCondition {
     Frozen,
     // adding more later on
@@ -149,6 +187,7 @@ struct BoardFlags {
 }
 
 /// ------------- Square logic -------------
+#[derive(Clone)]
 struct Square {
     piece: Option<PieceKind>,
     square_type: SquareType,
@@ -225,7 +264,18 @@ fn board_to_fen(board: &Board) -> String {
 /// ------------- End Board logic -------------
 
 fn main() {
+    // Example: 1 white custom piece on A1, rest empty
+    let mut board = Board {
+        grid: vec![vec![Square { piece: Some(PieceKind::Rook(Rook{ color: Color::White })), square_type: SquareType::Vent, conditions: vec![SquareCondition::Frozen] }; 8]; 8],
+        flags: BoardFlags {
+            white_can_castle_kingside: true,
+            white_can_castle_queenside: true,
+            black_can_castle_kingside: true,
+            black_can_castle_queenside: true,
+            en_passant_target: None,
+        },
+    };
 
+    let fen = board_to_fen(&board);
+    println!("{}", fen);
 }
-
-
