@@ -1,6 +1,6 @@
 use std::fmt::{Formatter, Debug, Result};
 
-use crate::Board;
+use crate::board::Board;
 
 pub mod bishop;pub mod queen;pub mod rook;pub mod pawn;pub mod knight;pub mod king;
 pub mod piecekind;

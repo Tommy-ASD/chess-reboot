@@ -1,4 +1,4 @@
-use crate::{Board, pieces::{Color, Piece}};
+use crate::{board::Board, pieces::{Color, Piece}};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Knight { pub color: Color }
