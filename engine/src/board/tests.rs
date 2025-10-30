@@ -2,7 +2,8 @@
 mod tests {
     use crate::{
         board::{
-            Board, BoardFlags, board_to_fen, fen_to_board,
+            Board, BoardFlags,
+            fen::{board_to_fen, fen_to_board},
             square::{Square, SquareCondition, SquareType},
         },
         pieces::{Color, piecekind::PieceKind},
