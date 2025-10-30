@@ -3,9 +3,9 @@ use crate::pieces::piecekind::PieceKind;
 /// ------------- Square logic -------------
 #[derive(Clone, PartialEq, Debug)]
 pub struct Square {
-   pub piece: Option<PieceKind>,
-   pub square_type: SquareType,
-   pub conditions: Vec<SquareCondition>,
+    pub piece: Option<PieceKind>,
+    pub square_type: SquareType,
+    pub conditions: Vec<SquareCondition>,
 }
 
 /// ------------- Square types -------------
@@ -28,14 +28,12 @@ impl SquareType {
 }
 /// ------------- End Square types -------------
 
-
 /// ------------- Square conditions -------------
 #[derive(PartialEq, Debug, Clone)]
 pub enum SquareCondition {
     Frozen,
     // adding more later on
 }
-
 
 impl SquareCondition {
     fn as_str(&self) -> &'static str {
@@ -51,7 +49,7 @@ impl Square {
         Self {
             piece: None,
             square_type: SquareType::Standard,
-            conditions: vec![]
+            conditions: vec![],
         }
     }
     pub fn set_piece(mut self, piece: PieceKind) -> Self {
@@ -73,8 +71,13 @@ impl Square {
 }
 
 pub fn square_to_fen(square: &Square) -> String {
-    let piece_symbol = square.piece.as_ref().map(|p| p.symbol()).unwrap_or("".to_string());
-    let is_standard_square = matches!(square.square_type, SquareType::Standard) && square.conditions.is_empty();
+    let piece_symbol = square
+        .piece
+        .as_ref()
+        .map(|p| p.symbol())
+        .unwrap_or("".to_string());
+    let is_standard_square =
+        matches!(square.square_type, SquareType::Standard) && square.conditions.is_empty();
 
     if piece_symbol.len() == 1 && is_standard_square {
         return piece_symbol; // e.g., "P" or "r"
@@ -110,14 +113,16 @@ pub fn fen_to_square(fen: &str) -> Square {
 
     // Extended format (P=...,T=...,C=...)
     if fen.starts_with('(') && fen.ends_with(')') {
-        let inner = &fen[1..fen.len()-1];
+        let inner = &fen[1..fen.len() - 1];
         let mut piece = None;
         let mut square_type = SquareType::Standard;
         let mut conditions = vec![];
 
         for part in inner.split(',') {
             let kv: Vec<&str> = part.split('=').collect();
-            if kv.len() != 2 { continue; }
+            if kv.len() != 2 {
+                continue;
+            }
 
             match kv[0] {
                 "P" => {
@@ -127,19 +132,20 @@ pub fn fen_to_square(fen: &str) -> Square {
                     } else {
                         println!("Unknown piece!! {sym}");
                     }
-                },
+                }
                 "T" => {
                     square_type = {
-                    let sqty = kv[1];    
-                    match sqty {
-                        "TURRET" => SquareType::Turret,
-                        "VENT" => SquareType::Vent,
-                        _ => {
-                            println!("Unknown square type!! {sqty}");
-                            SquareType::Standard
-                        },
-                    }}
-                },
+                        let sqty = kv[1];
+                        match sqty {
+                            "TURRET" => SquareType::Turret,
+                            "VENT" => SquareType::Vent,
+                            _ => {
+                                println!("Unknown square type!! {sqty}");
+                                SquareType::Standard
+                            }
+                        }
+                    }
+                }
                 "C" => {
                     let sqcon = kv[1];
                     match sqcon {
@@ -148,7 +154,7 @@ pub fn fen_to_square(fen: &str) -> Square {
                             println!("Unknown square condition!! {sqcon}");
                         }
                     }
-                },
+                }
                 _ => {}
             }
         }

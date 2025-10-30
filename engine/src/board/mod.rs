@@ -3,11 +3,11 @@ use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
 pub mod square;
 mod tests;
 
-/// We use this so there's no confusion with which index is 
+/// We use this so there's no confusion with which index is
 #[derive(PartialEq, Debug)]
 pub struct BoardIndex {
-   pub x: usize,
-   pub y: usize
+    pub x: usize,
+    pub y: usize,
 }
 
 #[derive(PartialEq, Debug)]
@@ -28,7 +28,11 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
         if ch.is_digit(10) {
             let count = ch.to_digit(10).unwrap();
             for _ in 0..count {
-                squares.push(Square { piece: None, square_type: SquareType::Standard, conditions: vec![] });
+                squares.push(Square {
+                    piece: None,
+                    square_type: SquareType::Standard,
+                    conditions: vec![],
+                });
             }
             chars.next();
         } else if ch == '(' {
@@ -37,8 +41,15 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
             let mut depth = 0;
             while let Some(c) = chars.next() {
                 fen_piece.push(c);
-                if c == '(' { depth += 1; }
-                if c == ')' { depth -= 1; if depth == 0 { break; } }
+                if c == '(' {
+                    depth += 1;
+                }
+                if c == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
             }
             squares.push(fen_to_square(&fen_piece));
         } else {

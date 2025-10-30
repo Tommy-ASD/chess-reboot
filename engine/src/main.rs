@@ -2,11 +2,16 @@
 
 use std::fmt::{Debug, Formatter, Result};
 
-use crate::{board::{Board, BoardFlags, board_to_fen, fen_to_board, square::{Square, SquareType}}, pieces::{Color, piecekind::PieceKind}};
+use crate::{
+    board::{
+        Board, BoardFlags, board_to_fen, fen_to_board,
+        square::{Square, SquareType},
+    },
+    pieces::{Color, piecekind::PieceKind},
+};
 
-mod pieces;
 mod board;
-
+mod pieces;
 
 fn main() {
     let mut board = Board {
@@ -19,8 +24,10 @@ fn main() {
             en_passant_target: None,
         },
     };
-    
-    let rook_vent_test_square = Square::new().set_piece(PieceKind::new_rook(Color::White)).set_square_type(SquareType::Vent);
+
+    let rook_vent_test_square = Square::new()
+        .set_piece(PieceKind::new_rook(Color::White))
+        .set_square_type(SquareType::Vent);
 
     board.grid[0][0] = rook_vent_test_square;
 

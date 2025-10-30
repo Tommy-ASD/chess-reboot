@@ -1,9 +1,14 @@
-use std::fmt::{Formatter, Debug, Result};
+use std::fmt::{Debug, Formatter, Result};
 
 use crate::board::Board;
 
-pub mod bishop;pub mod queen;pub mod rook;pub mod pawn;pub mod knight;pub mod king;
+pub mod bishop;
+pub mod king;
+pub mod knight;
+pub mod pawn;
 pub mod piecekind;
+pub mod queen;
+pub mod rook;
 
 /// ------------- Pieces -------------
 
@@ -35,5 +40,7 @@ impl Clone for Box<dyn Piece> {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Color { White, Black }
-
+pub enum Color {
+    White,
+    Black,
+}
