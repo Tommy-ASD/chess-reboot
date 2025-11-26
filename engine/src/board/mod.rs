@@ -8,7 +8,7 @@ pub type File = u8; // 0–7 for default boards
 pub type Rank = u8; // 0–7 for default boards
 
 /// We use this so there's no confusion with which index is
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Coord {
     pub file: File,
     pub rank: Rank,
@@ -25,6 +25,8 @@ fn sq_to_coord(sq: Sq) -> Coord {
     }
 }
 
+pub type Direction = (isize, isize);
+
 #[derive(PartialEq, Debug)]
 pub struct BoardFlags {
     pub white_can_castle_kingside: bool,
@@ -39,4 +41,19 @@ pub struct BoardFlags {
 pub struct Board {
     pub grid: Vec<Vec<Square>>,
     pub flags: BoardFlags,
+}
+
+impl Board {
+    /// Get an immutable reference to the square at `coord`, if within bounds.
+    pub fn get_square_at(&self, coord: Coord) -> Option<&Square> {
+        self.grid
+            .get(coord.rank as usize)
+            .and_then(|row| row.get(coord.file as usize))
+    }
+    /// Get a mutable reference to the square at `coord`, if within bounds.
+    pub fn get_square_mut(&mut self, coord: Coord) -> Option<&mut Square> {
+        self.grid
+            .get_mut(coord.rank as usize)
+            .and_then(|row| row.get_mut(coord.file as usize))
+    }
 }

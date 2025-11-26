@@ -1,5 +1,6 @@
 use crate::{
-    board::Board,
+    board::{Board, Coord},
+    movement::glider::{STRAIGHT_DIRS, generate_glider_moves},
     pieces::{Color, Piece},
 };
 
@@ -14,8 +15,8 @@ impl Piece for Rook {
     fn color(&self) -> Color {
         self.color
     }
-    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
-        todo!()
+    fn legal_moves(&self, board: &Board, from: Coord) -> Vec<Coord> {
+        generate_glider_moves(board, from, &STRAIGHT_DIRS, usize::MAX)
     }
     fn symbol(&self) -> String {
         match self.color {

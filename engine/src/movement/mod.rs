@@ -1,5 +1,7 @@
 use crate::{board::Sq, pieces::piecetype::PieceType};
 
+pub mod glider;
+
 /// Movement types
 pub enum MoveKind {
     Normal,

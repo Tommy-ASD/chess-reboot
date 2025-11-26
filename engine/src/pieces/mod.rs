@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter, Result};
 
-use crate::board::Board;
+use crate::board::{Board, Coord};
 
 pub mod bishop;
 pub mod king;
@@ -15,7 +15,7 @@ pub mod rook;
 pub(crate) trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
-    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)>;
+    fn legal_moves(&self, board: &Board, from: Coord) -> Vec<Coord>;
     fn symbol(&self) -> String;
 
     fn clone_box(&self) -> Box<dyn Piece>;

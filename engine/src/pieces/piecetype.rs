@@ -92,4 +92,11 @@ impl PieceType {
     pub fn new_king(color: Color) -> PieceType {
         Self::King(King { color })
     }
+
+    /// Does this piece block the path of other pieces?
+    /// Currently, all pieces block paths, but maybe we add ghosts or whatnot later.
+    /// This will likely also take in more parameters in the future.
+    pub fn blocks_path(&self) -> bool {
+        true
+    }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    board::Board,
+    board::{Board, Coord},
     pieces::{Color, Piece},
 };
 
@@ -14,7 +14,7 @@ impl Piece for Pawn {
     fn color(&self) -> Color {
         self.color
     }
-    fn legal_moves(&self, board: &Board, from: (usize, usize)) -> Vec<(usize, usize)> {
+    fn legal_moves(&self, board: &Board, from: Coord) -> Vec<Coord> {
         todo!()
     }
     fn symbol(&self) -> String {
