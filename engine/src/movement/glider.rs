@@ -28,7 +28,7 @@ pub const OMNI_DIRS: &[Direction] = &[
 ///              usize::MAX to indicate "unbounded" (slide to edge)
 pub fn generate_glider_moves(
     board: &Board,
-    from: Coord,
+    from: &Coord,
     directions: &[Direction],
     max_range: usize,
 ) -> Vec<Coord> {
@@ -60,7 +60,7 @@ pub fn generate_glider_moves(
             moves.push(coord.clone());
 
             // check for blockers
-            if let Some(sq) = board.get_square_at(coord) {
+            if let Some(sq) = board.get_square_at(&coord) {
                 if let Some(piece) = &sq.piece
                     && piece.blocks_path()
                 {

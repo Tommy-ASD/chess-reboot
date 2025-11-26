@@ -15,7 +15,7 @@ pub mod rook;
 pub(crate) trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
-    fn legal_moves(&self, board: &Board, from: Coord) -> Vec<Coord>;
+    fn legal_moves(&self, board: &Board, from: &Coord) -> Vec<Coord>;
     fn symbol(&self) -> String;
 
     fn clone_box(&self) -> Box<dyn Piece>;

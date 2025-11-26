@@ -40,4 +40,9 @@ fn main() {
     assert_eq!(b2, board);
     println!("Success!!");
     println!("{board:?}");
+
+    // see if moves work
+    let from = crate::board::Coord { file: 0, rank: 0 };
+    let moves = board.get_moves(&from);
+    println!("Moves from {from:?}: {moves:?}");
 }

@@ -99,4 +99,20 @@ impl PieceType {
     pub fn blocks_path(&self) -> bool {
         true
     }
+
+    pub fn legal_moves(
+        &self,
+        board: &crate::board::Board,
+        from: &crate::board::Coord,
+    ) -> Vec<crate::board::Coord> {
+        match self {
+            PieceType::Pawn(p) => p.legal_moves(board, from),
+            PieceType::Rook(r) => r.legal_moves(board, from),
+            PieceType::Knight(n) => n.legal_moves(board, from),
+            PieceType::Bishop(b) => b.legal_moves(board, from),
+            PieceType::Queen(q) => q.legal_moves(board, from),
+            PieceType::King(k) => k.legal_moves(board, from),
+            PieceType::Custom(p) => p.legal_moves(board, from),
+        }
+    }
 }

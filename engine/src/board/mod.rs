@@ -45,15 +45,27 @@ pub struct Board {
 
 impl Board {
     /// Get an immutable reference to the square at `coord`, if within bounds.
-    pub fn get_square_at(&self, coord: Coord) -> Option<&Square> {
+    pub fn get_square_at(&self, coord: &Coord) -> Option<&Square> {
         self.grid
             .get(coord.rank as usize)
             .and_then(|row| row.get(coord.file as usize))
     }
     /// Get a mutable reference to the square at `coord`, if within bounds.
-    pub fn get_square_mut(&mut self, coord: Coord) -> Option<&mut Square> {
+    pub fn get_square_mut(&mut self, coord: &Coord) -> Option<&mut Square> {
         self.grid
             .get_mut(coord.rank as usize)
             .and_then(|row| row.get_mut(coord.file as usize))
+    }
+
+    pub fn get_moves(&self, from: &Coord) -> Vec<Coord> {
+        if let Some(square) = self.get_square_at(from) {
+            if let Some(piece) = &square.piece {
+                piece.legal_moves(self, from)
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
     }
 }

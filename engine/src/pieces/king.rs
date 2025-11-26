@@ -15,7 +15,7 @@ impl Piece for King {
     fn color(&self) -> Color {
         self.color
     }
-    fn legal_moves(&self, board: &Board, from: Coord) -> Vec<Coord> {
+    fn legal_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
         generate_glider_moves(board, from, &OMNI_DIRS, 1)
     }
     fn symbol(&self) -> String {
