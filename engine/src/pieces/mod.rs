@@ -6,7 +6,7 @@ pub mod bishop;
 pub mod king;
 pub mod knight;
 pub mod pawn;
-pub mod piecekind;
+pub mod piecetype;
 pub mod queen;
 pub mod rook;
 

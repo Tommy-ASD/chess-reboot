@@ -8,10 +8,11 @@ use crate::{
         fen::{board_to_fen, fen_to_board},
         square::{Square, SquareType},
     },
-    pieces::{Color, piecekind::PieceKind},
+    pieces::{Color, piecetype::PieceType},
 };
 
 mod board;
+mod movement;
 mod pieces;
 
 fn main() {
@@ -27,7 +28,7 @@ fn main() {
     };
 
     let rook_vent_test_square = Square::new()
-        .set_piece(PieceKind::new_rook(Color::White))
+        .set_piece(PieceType::new_rook(Color::White))
         .set_square_type(SquareType::Vent);
 
     board.grid[0][0] = rook_vent_test_square;

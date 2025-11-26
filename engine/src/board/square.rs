@@ -1,9 +1,9 @@
-use crate::pieces::piecekind::PieceKind;
+use crate::pieces::piecetype::PieceType;
 
 /// ------------- Square logic -------------
 #[derive(Clone, PartialEq, Debug)]
 pub struct Square {
-    pub piece: Option<PieceKind>,
+    pub piece: Option<PieceType>,
     pub square_type: SquareType,
     pub conditions: Vec<SquareCondition>,
 }
@@ -52,7 +52,7 @@ impl Square {
             conditions: vec![],
         }
     }
-    pub fn set_piece(mut self, piece: PieceKind) -> Self {
+    pub fn set_piece(mut self, piece: PieceType) -> Self {
         self.piece = Some(piece);
         self
     }
@@ -127,7 +127,7 @@ pub fn fen_to_square(fen: &str) -> Square {
             match kv[0] {
                 "P" => {
                     let sym = kv[1];
-                    if let Some(p) = PieceKind::symbol_to_piece(sym.chars().next().unwrap()) {
+                    if let Some(p) = PieceType::symbol_to_piece(sym.chars().next().unwrap()) {
                         piece = Some(p);
                     } else {
                         println!("Unknown piece!! {sym}");
@@ -167,7 +167,7 @@ pub fn fen_to_square(fen: &str) -> Square {
     }
 
     // Standard single-character piece
-    let piece = PieceKind::symbol_to_piece(fen.chars().next().unwrap());
+    let piece = PieceType::symbol_to_piece(fen.chars().next().unwrap());
     Square {
         piece,
         square_type: SquareType::Standard,

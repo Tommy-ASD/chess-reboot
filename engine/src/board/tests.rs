@@ -6,7 +6,7 @@ mod tests {
             fen::{board_to_fen, fen_to_board},
             square::{Square, SquareCondition, SquareType},
         },
-        pieces::{Color, piecekind::PieceKind},
+        pieces::{Color, piecetype::PieceType},
     };
 
     use super::*;
@@ -44,8 +44,8 @@ mod tests {
             },
         };
 
-        board.grid[0][0] = Square::new().set_piece(PieceKind::new_rook(Color::White));
-        board.grid[7][7] = Square::new().set_piece(PieceKind::new_king(Color::Black));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
 
         let fen = board_to_fen(&board);
         assert_eq!(fen, "R7/8/8/8/8/8/8/7k");
@@ -69,7 +69,7 @@ mod tests {
 
         // Place a white rook on a vent square
         board.grid[0][0] = Square::new()
-            .set_piece(PieceKind::new_rook(Color::White))
+            .set_piece(PieceType::new_rook(Color::White))
             .set_square_type(SquareType::Vent);
 
         let fen = board_to_fen(&board);
@@ -93,7 +93,7 @@ mod tests {
         };
 
         board.grid[1][1] = Square::new()
-            .set_piece(PieceKind::new_knight(Color::Black))
+            .set_piece(PieceType::new_knight(Color::Black))
             .add_square_condition(SquareCondition::Frozen);
 
         let fen = board_to_fen(&board);
@@ -117,7 +117,7 @@ mod tests {
         };
 
         board.grid[1][1] = Square::new()
-            .set_piece(PieceKind::new_knight(Color::Black))
+            .set_piece(PieceType::new_knight(Color::Black))
             .add_square_condition(SquareCondition::Frozen)
             .set_square_type(SquareType::Vent);
 
@@ -142,9 +142,9 @@ mod tests {
         };
 
         // Mix of standard and extended squares
-        board.grid[0][0] = Square::new().set_piece(PieceKind::new_rook(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
         board.grid[0][1] = Square::new()
-            .set_piece(PieceKind::new_knight(Color::Black))
+            .set_piece(PieceType::new_knight(Color::Black))
             .set_square_type(SquareType::Turret)
             .add_square_condition(SquareCondition::Frozen);
 
