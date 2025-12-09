@@ -2,18 +2,13 @@ use std::fmt::{Debug, Formatter, Result};
 
 use crate::board::{Board, Coord, GameMove};
 
-pub mod bishop;
-pub mod king;
-pub mod knight;
 pub mod monkey;
-pub mod pawn;
 pub mod piecetype;
-pub mod queen;
-pub mod rook;
+pub mod standard;
 
 /// ------------- Pieces -------------
 
-pub(crate) trait Piece {
+pub trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove>;

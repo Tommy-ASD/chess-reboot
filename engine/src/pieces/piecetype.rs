@@ -1,5 +1,6 @@
 use crate::pieces::{
-    Color, Piece, bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook,
+    Color, Piece, standard::bishop::Bishop, standard::king::King, standard::knight::Knight,
+    standard::pawn::Pawn, standard::queen::Queen, standard::rook::Rook,
 };
 
 // the rest
