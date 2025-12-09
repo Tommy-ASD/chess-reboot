@@ -11,7 +11,7 @@ use crate::{
     pieces::{Color, piecetype::PieceType},
 };
 
-mod board;
+pub mod board;
 mod movement;
 mod pieces;
 

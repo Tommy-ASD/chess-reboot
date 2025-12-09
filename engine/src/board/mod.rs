@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
 
 pub mod fen;
@@ -8,7 +10,7 @@ pub type File = u8; // 0–7 for default boards
 pub type Rank = u8; // 0–7 for default boards
 
 /// We use this so there's no confusion with which index is
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub struct Coord {
     pub file: File,
     pub rank: Rank,
@@ -60,7 +62,7 @@ impl Board {
     pub fn get_moves(&self, from: &Coord) -> Vec<Coord> {
         if let Some(square) = self.get_square_at(from) {
             if let Some(piece) = &square.piece {
-                piece.legal_moves(self, from)
+                piece.get_moves(self, from)
             } else {
                 vec![]
             }

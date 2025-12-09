@@ -14,7 +14,7 @@ impl Piece for Knight {
     fn color(&self) -> Color {
         self.color
     }
-    fn legal_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
         todo!()
     }
     fn symbol(&self) -> String {

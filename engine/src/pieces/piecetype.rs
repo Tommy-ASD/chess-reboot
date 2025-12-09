@@ -100,19 +100,46 @@ impl PieceType {
         true
     }
 
-    pub fn legal_moves(
+    pub fn get_color(&self) -> Color {
+        match self {
+            PieceType::Pawn(p) => p.color(),
+            PieceType::Rook(r) => r.color(),
+            PieceType::Knight(n) => n.color(),
+            PieceType::Bishop(b) => b.color(),
+            PieceType::Queen(q) => q.color(),
+            PieceType::King(k) => k.color(),
+            PieceType::Custom(p) => p.color(),
+        }
+    }
+
+    pub fn get_moves(
         &self,
         board: &crate::board::Board,
         from: &crate::board::Coord,
     ) -> Vec<crate::board::Coord> {
-        match self {
-            PieceType::Pawn(p) => p.legal_moves(board, from),
-            PieceType::Rook(r) => r.legal_moves(board, from),
-            PieceType::Knight(n) => n.legal_moves(board, from),
-            PieceType::Bishop(b) => b.legal_moves(board, from),
-            PieceType::Queen(q) => q.legal_moves(board, from),
-            PieceType::King(k) => k.legal_moves(board, from),
-            PieceType::Custom(p) => p.legal_moves(board, from),
-        }
+        let mut moves = match self {
+            PieceType::Pawn(p) => p.initial_moves(board, from),
+            PieceType::Rook(r) => r.initial_moves(board, from),
+            PieceType::Knight(n) => n.initial_moves(board, from),
+            PieceType::Bishop(b) => b.initial_moves(board, from),
+            PieceType::Queen(q) => q.initial_moves(board, from),
+            PieceType::King(k) => k.initial_moves(board, from),
+            PieceType::Custom(p) => p.initial_moves(board, from),
+        };
+
+        // if the square has a piece of the same color, filter it out
+        moves.retain(|to| {
+            if let Some(target_square) = board.get_square_at(to) {
+                if let Some(target_piece) = &target_square.piece {
+                    target_piece.get_color() != self.get_color()
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        });
+
+        moves
     }
 }
