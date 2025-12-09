@@ -1,0 +1,46 @@
+Piece which can move to any spot which enemy pieces can move to
+
+Goblin - Moves like a queen at first, but once it takes a piece, 
+    it "kidnaps" that piece and has to take it back to home base
+    After taking a piece, the goblin moves like a king until it reaches it's home square. 
+    Once it reaches the home square, the "kidnapped" piece is changes color to that of who took it.
+    If the goblin is taken by an enemy piece while it has a piece kidnapped, 
+    the kidnapped piece is placed where the goblin was located, and the taking piece can move again
+
+
+Mind control piece
+
+Blender piece
+    The blender has an internal point score. It starts with a point value of 0, and for each piece it takes, that piece's value is added to the blender's point value. 
+    The player controlling the blender can make use a turn to turn the blender into *any* piece of equal or lower value to itself.
+    Maybe add limit to how many point blencerrt can be worth??
+
+Jackhammer piece
+    When taken (or taking another piece? would only be able to use once), the Jackhammer creates a hole where it once was. The hole acts as a barrier.
+
+Dog
+    It shits and the shit is slippery
+
+Skibidi
+    Stuns all pieces (enemy and ally) in a given circle radius. They can no longer move due to extreme brainrot.
+    No effect on others (phase 1) -> the 4 non-diagonal neighboring cells (circle of radius with 1, phase 2) -> 
+        a circle with a radius of 2 (phase 3) -> a circle with a radius of 3 (phase 4)
+    This effect is removed once the Skibidi is captured, or another neutralizing Skibidi enters the Brainrot radius.
+    Any Skibidi (enemy or ally) entering the Brainrot radius acts as a neutralizing Skibidi.
+    After being neutralized, the Skibidi is set back to phase 1.
+    The Skibidi can move, but it is set back to phase 1 each time it moves.
+    Increasing the radius of brainrot uses a move.
+    If there is no opposing Skibidi, the maximum phase your Skibidi can reach is 3.
+    It moves like a king (to any directly neighboring cells), but cannot take other pieces. 
+    It can take other Skibidis
+    If your Skibidi your enemy cannot make a move due to your Brainrot, 
+        you win by Brainrot instead of stalemate being declared.
+    If your Skibidi is captured while your opponent's Skibidi is in phase 4, there is nothing you can do.
+
+    Aesthetics;
+        The Skibidi has a unique sprite for each phase.
+            Phase 1; Closed toilet.
+            Phase 2; Slightly opened toilet.
+            Phase 3; Completely open toilet.
+            Phase 4 (God help us all); Skibidi Toilet.
+        Upon winning by Brainrot, a sound effect is played.

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
+use crate::{
+    board::square::{Square, SquareType, fen_to_square, square_to_fen},
+    pieces::piecetype::PieceType,
+};
 
 pub mod fen;
 pub mod make_move;
@@ -66,6 +69,12 @@ impl Board {
         self.grid
             .get_mut(coord.rank as usize)
             .and_then(|row| row.get_mut(coord.file as usize))
+    }
+
+    pub fn set_piece_at(&mut self, coord: &Coord, piece: PieceType) {
+        if let Some(square) = self.get_square_mut(coord) {
+            square.piece = Some(piece);
+        }
     }
 
     pub fn square_is_empty(&self, coord: &Coord) -> bool {

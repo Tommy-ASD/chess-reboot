@@ -2,7 +2,8 @@ use std::fmt::{Debug, Formatter, Result};
 
 use crate::board::{Board, Coord, GameMove};
 
-pub mod monkey;
+pub mod chess2;
+pub mod fairy;
 pub mod piecetype;
 pub mod standard;
 
@@ -15,6 +16,16 @@ pub trait Piece {
     fn symbol(&self) -> String;
 
     fn clone_box(&self) -> Box<dyn Piece>;
+
+    fn post_move_effects(
+        &self,
+        _board_before: &Board,
+        _board_after: &mut Board,
+        _from: &Coord,
+        _to: &Coord,
+    ) {
+        // Default: do nothing
+    }
 }
 
 impl PartialEq for dyn Piece {

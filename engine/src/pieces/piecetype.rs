@@ -13,7 +13,7 @@ pub enum PieceType {
     Queen(Queen),
     King(King),
 
-    Monkey(crate::pieces::monkey::Monkey),
+    Monkey(crate::pieces::chess2::monkey::Monkey),
 
     Custom(Box<dyn Piece>),
 }
@@ -73,10 +73,10 @@ impl PieceType {
                 color: Color::Black,
             })),
 
-            'M' => Some(PieceType::Monkey(crate::pieces::monkey::Monkey {
+            'M' => Some(PieceType::Monkey(crate::pieces::chess2::monkey::Monkey {
                 color: Color::White,
             })),
-            'm' => Some(PieceType::Monkey(crate::pieces::monkey::Monkey {
+            'm' => Some(PieceType::Monkey(crate::pieces::chess2::monkey::Monkey {
                 color: Color::Black,
             })),
 
@@ -158,5 +158,40 @@ impl PieceType {
         });
 
         moves
+    }
+
+    pub fn post_move_effects(
+        &self,
+        board_before: &crate::board::Board,
+        board_after: &mut crate::board::Board,
+        from: &crate::board::Coord,
+        to: &crate::board::Coord,
+    ) {
+        match self {
+            PieceType::Pawn(p) => {
+                let _ = p.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Rook(r) => {
+                let _ = r.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Knight(n) => {
+                let _ = n.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Bishop(b) => {
+                let _ = b.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Queen(q) => {
+                let _ = q.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::King(k) => {
+                let _ = k.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Monkey(m) => {
+                let _ = m.post_move_effects(board_before, board_after, from, to);
+            }
+            PieceType::Custom(p) => {
+                let _ = p.post_move_effects(board_before, board_after, from, to);
+            }
+        }
     }
 }
