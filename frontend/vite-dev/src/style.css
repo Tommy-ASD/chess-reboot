@@ -32,6 +32,13 @@ body {
   background: #b58863;
 }
 
+/* Additional styles for special square types and conditions */
+
+/* Frozen square. Turns the square light blue. */
+.square.frozen {
+  background: #a0c4ff !important;
+}
+
 .highlight {
   border: 3px solid yellow;
 }

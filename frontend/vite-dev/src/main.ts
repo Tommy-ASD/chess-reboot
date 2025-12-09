@@ -25,7 +25,7 @@ function renderBoard(fen: string) {
   // Loop rank 8 → 1 (FEN order)
   for (let rank = 0; rank < 8; rank++) {
     for (let file = 0; file < 8; file++) {
-      const piece = grid[rank][file];
+      const square_data = grid[rank][file];
 
       const square = document.createElement("div");
       square.classList.add("square");
@@ -34,8 +34,13 @@ function renderBoard(fen: string) {
       const isDark = (rank + file) % 2 === 1;
       square.classList.add(isDark ? "dark" : "light");
 
-      if (piece) {
-        square.textContent = pieceToSymbol(piece);
+      if (square_data) {
+        if (square_data.piece) {
+          square.textContent = pieceToSymbol(square_data.piece);
+        }
+        if (square_data.conditions.includes("FROZEN")) {
+          square.classList.add("frozen");
+        }
       }
 
       square.onclick = () => {
