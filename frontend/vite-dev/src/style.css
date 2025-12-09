@@ -57,6 +57,9 @@ body {
 /* standard -> frozen -> cond2 -> standard -> frozen -> cond2 -> ... */
 /* etc */
 
+/* ugh this won't be necessary until way down the road */
+/* so we'll leave it for now */
+
 .highlight {
   border: 3px solid yellow;
 }
