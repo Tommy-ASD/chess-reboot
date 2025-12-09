@@ -1,4 +1,4 @@
-/// Builds with: npx tsc main.ts --watch
+/// Builds with: npx tsc
 
 // Converts piece letters into unicode chess symbols (optional)
 const pieceToSymbol = (p: string): string => {
@@ -75,10 +75,47 @@ function renderBoard(fen: string) {
                 square.textContent = pieceToSymbol(piece);
             }
 
+            square.onclick = () => {
+                handleSquareClick(rank, file);
+            };
+
             boardEl.appendChild(square);
         }
     }
 }
+
+async function handleSquareClick(rank: number, file: number) {
+    alert(`Square clicked: Rank ${8 - rank}, File ${String.fromCharCode(97 + file)}`);
+
+    try {
+        const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+        const moves = await fetchMoves(fen, rank, file);
+
+        console.log("Legal moves:", moves);
+    } catch (err) {
+        console.error("Error fetching moves:", err);
+    }
+}
+
+async function fetchMoves(fen: string, rank: number, file: number): Promise<Coord[]> {
+    const response = await fetch("http://localhost:8080/board/moves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            board_fen: fen,
+            from: { file, rank }
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.moves; // Vec<Coord> from Rust
+}
+
+type Coord = { file: number; rank: number };
 
 
 // ---------------------------
