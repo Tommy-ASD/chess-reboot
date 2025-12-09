@@ -116,7 +116,7 @@ impl PieceType {
         &self,
         board: &crate::board::Board,
         from: &crate::board::Coord,
-    ) -> Vec<crate::board::Coord> {
+    ) -> Vec<crate::board::GameMove> {
         let mut moves = match self {
             PieceType::Pawn(p) => p.initial_moves(board, from),
             PieceType::Rook(r) => r.initial_moves(board, from),
@@ -128,8 +128,8 @@ impl PieceType {
         };
 
         // if the square has a piece of the same color, filter it out
-        moves.retain(|to| {
-            if let Some(target_square) = board.get_square_at(to) {
+        moves.retain(|game_move| {
+            if let Some(target_square) = board.get_square_at(&game_move.to) {
                 if let Some(target_piece) = &target_square.piece {
                     target_piece.get_color() != self.get_color()
                 } else {

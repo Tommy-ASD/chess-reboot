@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, Coord},
+    board::{Board, Coord, GameMove},
     pieces::{Color, Piece},
 };
 
@@ -14,7 +14,7 @@ impl Piece for Pawn {
     fn color(&self) -> Color {
         self.color
     }
-    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let mut moves = Vec::new();
         let direction: isize = match self.color {
             Color::White => 1,
@@ -30,7 +30,11 @@ impl Piece for Pawn {
             };
             if let Some(square) = board.get_square_at(&forward_coord) {
                 if square.piece.is_none() {
-                    moves.push(forward_coord);
+                    let game_move = GameMove {
+                        from: from.clone(),
+                        to: forward_coord.clone(),
+                    };
+                    moves.push(game_move);
 
                     // Two squares forward from starting position
                     let starting_rank = match self.color {
@@ -44,7 +48,11 @@ impl Piece for Pawn {
                         };
                         if let Some(two_square) = board.get_square_at(&two_forward_coord) {
                             if two_square.piece.is_none() {
-                                moves.push(two_forward_coord);
+                                let game_move = GameMove {
+                                    from: from.clone(),
+                                    to: two_forward_coord.clone(),
+                                };
+                                moves.push(game_move);
                             }
                         }
                     }
@@ -63,7 +71,11 @@ impl Piece for Pawn {
                 if let Some(square) = board.get_square_at(&capture_coord) {
                     if let Some(piece) = &square.piece {
                         if piece.get_color() != self.color {
-                            moves.push(capture_coord);
+                            let game_move = GameMove {
+                                from: from.clone(),
+                                to: capture_coord.clone(),
+                            };
+                            moves.push(game_move);
                         }
                     }
                 }

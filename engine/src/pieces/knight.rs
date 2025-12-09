@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, Coord},
+    board::{Board, Coord, GameMove},
     pieces::{Color, Piece},
 };
 
@@ -14,7 +14,7 @@ impl Piece for Knight {
     fn color(&self) -> Color {
         self.color
     }
-    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let knight_moves: [(isize, isize); 8] = [
             (2, 1),
             (1, 2),
@@ -31,10 +31,15 @@ impl Piece for Knight {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
             if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-                moves.push(Coord {
+                let coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,
-                });
+                };
+                let game_move = GameMove {
+                    from: from.clone(),
+                    to: coord.clone(),
+                };
+                moves.push(game_move);
             }
         }
         moves

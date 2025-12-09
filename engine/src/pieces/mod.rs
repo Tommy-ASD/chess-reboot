@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter, Result};
 
-use crate::board::{Board, Coord};
+use crate::board::{Board, Coord, GameMove};
 
 pub mod bishop;
 pub mod king;
@@ -15,7 +15,7 @@ pub mod rook;
 pub(crate) trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
-    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<Coord>;
+    fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove>;
     fn symbol(&self) -> String;
 
     fn clone_box(&self) -> Box<dyn Piece>;

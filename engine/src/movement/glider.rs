@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
-use crate::board::{Board, Coord, Direction, File, Rank, Sq};
+use crate::board::{Board, Coord, Direction, File, GameMove, Rank, Sq};
 
 /// Directions for glider movement
 pub const STRAIGHT_DIRS: &[Direction] = &[(1, 0), (-1, 0), (0, 1), (0, -1)];
@@ -31,7 +31,7 @@ pub fn generate_glider_moves(
     from: &Coord,
     directions: &[Direction],
     max_range: usize,
-) -> Vec<Coord> {
+) -> Vec<GameMove> {
     // Board size assumptions (standard 8x8). If your board may vary,
     // compute from board.grid dimensions instead.
     let files = board.grid.get(0).map(|r| r.len()).unwrap_or(8) as isize;
@@ -57,7 +57,12 @@ pub fn generate_glider_moves(
                 rank: r as Rank,
             };
 
-            moves.push(coord.clone());
+            let game_move = GameMove {
+                from: from.clone(),
+                to: coord.clone(),
+            };
+
+            moves.push(game_move);
 
             // check for blockers
             if let Some(sq) = board.get_square_at(&coord) {

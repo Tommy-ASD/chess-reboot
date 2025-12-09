@@ -27,6 +27,14 @@ fn sq_to_coord(sq: Sq) -> Coord {
     }
 }
 
+/// Represents a move from one coordinate to another.
+/// Will likely be expanded later with more info.
+#[derive(PartialEq, Debug)]
+pub struct GameMove {
+    pub from: Coord,
+    pub to: Coord,
+}
+
 pub type Direction = (isize, isize);
 
 #[derive(PartialEq, Debug)]
@@ -59,7 +67,8 @@ impl Board {
             .and_then(|row| row.get_mut(coord.file as usize))
     }
 
-    pub fn get_moves(&self, from: &Coord) -> Vec<Coord> {
+    /// Get all possible moves for the piece at `from`.
+    pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
         if let Some(square) = self.get_square_at(from) {
             if let Some(piece) = &square.piece {
                 piece.get_moves(self, from)
@@ -69,5 +78,11 @@ impl Board {
         } else {
             vec![]
         }
+    }
+
+    /// Takes a from and to coordinate and returns true if the move is valid.
+    pub fn is_valid_move(&self, from: &Coord, to: &Coord) -> bool {
+        let possible_moves = self.get_moves(from);
+        possible_moves.iter().any(|m| &m.to == to)
     }
 }
