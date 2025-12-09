@@ -1,0 +1,44 @@
+# Compiled JavaScript and Source Map files (output directory)
+# Change 'dist', 'build', 'out' to match your tsconfig.json 'outDir'
+/dist
+/build
+/out
+*.js
+*.js.map
+*.d.ts
+
+# Node.js dependencies
+/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.info
+
+# Coverage directory used by tools like Istanbul
+coverage
+.nyc_output
+
+# Environment variables
+.env
+.env.local
+
+# Optional editor or OS files
+.DS_Store # macOS
+Thumbs.db # Windows
+.vscode/* # VS Code settings, if not shared
+
+# NPM cache
+.npm
+
+# Optional VS Code extensions manifest
+.vscode/extensions.json
