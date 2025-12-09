@@ -68,6 +68,14 @@ impl Board {
             .and_then(|row| row.get_mut(coord.file as usize))
     }
 
+    pub fn square_is_empty(&self, coord: &Coord) -> bool {
+        if let Some(square) = self.get_square_at(coord) {
+            square.square_type == SquareType::Standard && square.piece.is_none()
+        } else {
+            false
+        }
+    }
+
     /// Get all possible moves for the piece at `from`.
     pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
         if let Some(square) = self.get_square_at(from) {

@@ -5,6 +5,7 @@ use crate::board::{Board, Coord, GameMove};
 pub mod bishop;
 pub mod king;
 pub mod knight;
+pub mod monkey;
 pub mod pawn;
 pub mod piecetype;
 pub mod queen;
@@ -43,4 +44,13 @@ impl Clone for Box<dyn Piece> {
 pub enum Color {
     White,
     Black,
+}
+
+impl Color {
+    pub fn opposite(&self) -> Color {
+        match self {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        }
+    }
 }

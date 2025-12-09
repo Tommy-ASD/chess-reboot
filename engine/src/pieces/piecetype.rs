@@ -11,6 +11,9 @@ pub enum PieceType {
     Bishop(Bishop),
     Queen(Queen),
     King(King),
+
+    Monkey(crate::pieces::monkey::Monkey),
+
     Custom(Box<dyn Piece>),
 }
 
@@ -23,6 +26,9 @@ impl PieceType {
             PieceType::Bishop(b) => b.symbol().to_string(),
             PieceType::Queen(q) => q.symbol().to_string(),
             PieceType::King(k) => k.symbol().to_string(),
+
+            PieceType::Monkey(m) => m.symbol().to_string(),
+
             PieceType::Custom(p) => p.symbol(),
         }
     }
@@ -65,6 +71,14 @@ impl PieceType {
             'k' => Some(PieceType::King(King {
                 color: Color::Black,
             })),
+
+            'M' => Some(PieceType::Monkey(crate::pieces::monkey::Monkey {
+                color: Color::White,
+            })),
+            'm' => Some(PieceType::Monkey(crate::pieces::monkey::Monkey {
+                color: Color::Black,
+            })),
+
             _ => None,
         }
     }
@@ -108,6 +122,7 @@ impl PieceType {
             PieceType::Bishop(b) => b.color(),
             PieceType::Queen(q) => q.color(),
             PieceType::King(k) => k.color(),
+            PieceType::Monkey(m) => m.color(),
             PieceType::Custom(p) => p.color(),
         }
     }
@@ -124,6 +139,7 @@ impl PieceType {
             PieceType::Bishop(b) => b.initial_moves(board, from),
             PieceType::Queen(q) => q.initial_moves(board, from),
             PieceType::King(k) => k.initial_moves(board, from),
+            PieceType::Monkey(m) => m.initial_moves(board, from),
             PieceType::Custom(p) => p.initial_moves(board, from),
         };
 

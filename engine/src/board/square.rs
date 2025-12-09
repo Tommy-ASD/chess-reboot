@@ -68,6 +68,18 @@ impl Square {
         self.conditions.push(square_condition);
         self
     }
+
+    pub fn has_piece(&self) -> bool {
+        self.piece.is_some()
+    }
+
+    pub fn has_piece_of_color(&self, color: crate::pieces::Color) -> bool {
+        if let Some(piece) = &self.piece {
+            piece.get_color() == color
+        } else {
+            false
+        }
+    }
 }
 
 pub fn square_to_fen(square: &Square) -> String {
