@@ -39,8 +39,9 @@ function renderBoard(fen: string) {
           square.textContent = pieceToSymbol(square_data.piece);
         }
         if (square_data.conditions.includes("FROZEN")) {
-          square.classList.add("frozen");
+          square.classList.add("cond-frozen");
         }
+
       }
 
       square.onclick = () => {

@@ -34,9 +34,14 @@ body {
 
 /* Additional styles for special square types and conditions */
 
-/* Frozen square. Turns the square light blue. */
-.square.frozen {
-  background: #a0c4ff !important;
+/* Frozen: light blue diagonal stripe pattern */
+.square.cond-frozen {
+  background-image:
+    repeating-linear-gradient(45deg,
+      rgba(126, 178, 255, 0.6) 0px,
+      rgba(126, 178, 255, 0.6) 1px,
+      transparent 6px,
+      transparent 6px);
 }
 
 .highlight {
