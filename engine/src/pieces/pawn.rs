@@ -15,7 +15,62 @@ impl Piece for Pawn {
         self.color
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<Coord> {
-        todo!()
+        let mut moves = Vec::new();
+        let direction: isize = match self.color {
+            Color::White => 1,
+            Color::Black => -1,
+        };
+
+        // One square forward
+        let new_rank = from.rank as isize + direction;
+        if new_rank >= 0 && new_rank < 8 {
+            let forward_coord = Coord {
+                file: from.file,
+                rank: new_rank as u8,
+            };
+            if let Some(square) = board.get_square_at(&forward_coord) {
+                if square.piece.is_none() {
+                    moves.push(forward_coord);
+
+                    // Two squares forward from starting position
+                    let starting_rank = match self.color {
+                        Color::White => 1,
+                        Color::Black => 6,
+                    };
+                    if from.rank == starting_rank {
+                        let two_forward_coord = Coord {
+                            file: from.file,
+                            rank: (new_rank + direction) as u8,
+                        };
+                        if let Some(two_square) = board.get_square_at(&two_forward_coord) {
+                            if two_square.piece.is_none() {
+                                moves.push(two_forward_coord);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Captures
+        for df in &[-1, 1] {
+            let new_file = from.file as isize + df;
+            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+                let capture_coord = Coord {
+                    file: new_file as u8,
+                    rank: new_rank as u8,
+                };
+                if let Some(square) = board.get_square_at(&capture_coord) {
+                    if let Some(piece) = &square.piece {
+                        if piece.get_color() != self.color {
+                            moves.push(capture_coord);
+                        }
+                    }
+                }
+            }
+        }
+
+        moves
     }
     fn symbol(&self) -> String {
         match self.color {
