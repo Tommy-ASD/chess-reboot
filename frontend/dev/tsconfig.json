@@ -8,11 +8,11 @@
         "module": "ES6",
         "strict": true,
         "outDir": "dist",
-        "rootDir": "src"
+        "rootDir": "src",
     },
     "include": [
         "src/**/*",
         "src/main.ts",
-        "src/styles.css"
+        "src/fen.ts",
     ]
 }

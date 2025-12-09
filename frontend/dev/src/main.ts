@@ -1,58 +1,14 @@
+// src/main.ts
 /// Builds with: npx tsc
+/// Runs with: npx serve
 
-// Converts piece letters into unicode chess symbols (optional)
-const pieceToSymbol = (p: string): string => {
-    const map: Record<string, string> = {
-        "K": "♔", "Q": "♕", "R": "♖",
-        "B": "♗", "N": "♘", "P": "♙",
-        "k": "♚", "q": "♛", "r": "♜",
-        "b": "♝", "n": "♞", "p": "♟",
-    };
-
-    return map[p] ?? p;
-};
+import { parseFEN, pieceToSymbol } from "./fen";
 
 let selectedSquare: Coord | null = null;
 let allowedSquares: Coord[] = []; // returned from API
 
 function isAllowedSquare(c: Coord): boolean {
     return allowedSquares.some(m => m.rank === c.rank && m.file === c.file);
-}
-
-
-// ---------------------------
-// FEN Parsing
-// ---------------------------
-
-function parseFEN(fen: string): (string | null)[][] {
-    const rows = fen.split("/");
-
-    if (rows.length !== 8) {
-        throw new Error("Invalid FEN: must contain 8 rows");
-    }
-
-    return rows.map(row => {
-        const squares: (string | null)[] = [];
-
-        for (const char of row) {
-            if (!isNaN(Number(char))) {
-                // number → empty squares
-                const count = Number(char);
-                for (let i = 0; i < count; i++) {
-                    squares.push(null);
-                }
-            } else {
-                // piece letter
-                squares.push(char);
-            }
-        }
-
-        if (squares.length !== 8) {
-            throw new Error("Invalid FEN row: " + row);
-        }
-
-        return squares;
-    });
 }
 
 
@@ -94,9 +50,6 @@ function renderBoard(fen: string) {
 /// Handler attached to each square on the board
 /// On click, fetches legal moves from backend and highlights them
 async function handleSquareClick(rank: number, file: number) {
-    alert(`Square clicked: Rank ${8 - rank}, File ${String.fromCharCode(97 + file)}`);
-
-
     const clicked = { rank, file };
 
     // if the user clicks the selected square again, clear selection
