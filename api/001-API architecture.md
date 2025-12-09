@@ -1,0 +1,1 @@
+`GET /board/moves` - gets legal moves for a square
