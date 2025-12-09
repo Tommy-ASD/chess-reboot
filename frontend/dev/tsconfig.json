@@ -12,6 +12,7 @@
     },
     "include": [
         "src/**/*",
-        "src/main.ts"
+        "src/main.ts",
+        "src/styles.css"
     ]
 }

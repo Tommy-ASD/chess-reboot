@@ -12,6 +12,9 @@ const pieceToSymbol = (p: string): string => {
     return map[p] ?? p;
 };
 
+let selectedSquare: Coord | null = null;
+let allowedSquares: Coord[] = []; // returned from API
+
 
 // ---------------------------
 // FEN Parsing
@@ -92,6 +95,8 @@ async function handleSquareClick(rank: number, file: number) {
         const moves = await fetchMoves(fen, rank, file);
 
         console.log("Legal moves:", moves);
+
+        highlightMoves(moves);
     } catch (err) {
         console.error("Error fetching moves:", err);
     }
@@ -116,6 +121,16 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Coor
 }
 
 type Coord = { file: number; rank: number };
+
+function highlightMoves(moves: Coord[]) {
+    const squares = document.querySelectorAll(".square");
+    squares.forEach(sq => sq.classList.remove("highlight"));
+
+    for (const m of moves) {
+        const index = m.rank * 8 + m.file;
+        squares[index].classList.add("highlight");
+    }
+}
 
 
 // ---------------------------

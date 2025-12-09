@@ -31,3 +31,7 @@ body {
 .dark {
     background: #b58863;
 }
+
+.highlight {
+    border: 3px solid yellow;
+}
