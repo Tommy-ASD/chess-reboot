@@ -28,7 +28,7 @@ pub async fn serve_api() {
     let port = 8080;
     let binding_address = "0.0.0.0".to_string() + ":" + &port.to_string();
 
-    let app = Router::new().route("/board/moves", get(get_moves_handler));
+    let app = Router::new().route("/board/moves", post(get_moves_handler));
 
     let listener = tokio::net::TcpListener::bind(&binding_address)
         .await
