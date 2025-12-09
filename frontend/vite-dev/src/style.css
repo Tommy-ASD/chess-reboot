@@ -25,31 +25,24 @@ body {
 }
 
 .light {
-  background: #f0d9b5;
+  background-color: #f0d9b5;
 }
 
 .dark {
-  background: #b58863;
+  background-color: #b58863;
 }
 
 /* Additional styles for special square types and conditions */
 
-.square {
-  --patterns: none;
-  /* start empty */
-  background-image: var(--patterns);
-}
-
 
 /* Frozen: light blue diagonal stripe pattern */
 .square.cond-frozen {
-  --patterns:
+  background-image:
     repeating-linear-gradient(45deg,
       rgba(126, 178, 255, 0.6) 0px,
       rgba(126, 178, 255, 0.6) 1px,
-      transparent 1px,
-      transparent 6px),
-    var(--patterns);
+      transparent 6px,
+      transparent 6px);
 }
 
 /* okay great, we got diagonal stripes working */
