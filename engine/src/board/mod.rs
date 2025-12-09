@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
 
 pub mod fen;
+pub mod make_move;
 pub mod square;
 mod tests;
 
