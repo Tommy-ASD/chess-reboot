@@ -57,6 +57,12 @@ body {
 /* right now, it alternates, every other stripe being standard color, every other being blue */
 /* if we add more conditions, we can go standard -> frozen -> optional third one -> optional fourth one -> etc */
 /* how to do this? */
+/* to define the problem more clearly; */
+/* when we have one condition, we want every other stripe to be the condition color */
+/* standard -> frozen -> standard -> frozen -> ... */
+/* when we have two conditions, we want every third stripe to be the first condition color, every third stripe to be the second condition color, and the rest standard */
+/* standard -> frozen -> cond2 -> standard -> frozen -> cond2 -> ... */
+/* etc */
 
 .highlight {
   border: 3px solid yellow;
