@@ -33,3 +33,44 @@ Run `board.handle_post_move_effects`, passing in a mutable reference to self, im
 This is a hook which can affect the board after a move is made
 The `Piece` trait also has `Piece::post_move_effects`. Currently, this is only used by `Goblin`, which replaces itself with the kidnapped piece upon returning to home square
 
+Okay we gotta go bedtime now
+but for certain pieces (currently thinking of the Skibidi), the current GameMove struct won't be sufficient
+```
+Skibidi
+    Stuns all pieces (enemy and ally) in a given circle radius. They can no longer move due to extreme brainrot.
+    No effect on others (phase 1) -> the 4 non-diagonal neighboring cells (circle of radius with 1, phase 2) -> 
+        a circle with a radius of 2 (phase 3) -> a circle with a radius of 3 (phase 4)
+    This effect is removed once the Skibidi is captured, or another neutralizing Skibidi enters the Brainrot radius.
+    Any Skibidi (enemy or ally) entering the Brainrot radius acts as a neutralizing Skibidi.
+    After being neutralized, the Skibidi is set back to phase 1.
+    The Skibidi can move, but it is set back to phase 1 each time it moves.
+    Increasing the radius of brainrot uses a move.
+    If there is no opposing Skibidi, the maximum phase your Skibidi can reach is 3.
+    It moves like a king (to any directly neighboring cells), but cannot take other pieces. 
+    It can take other Skibidis
+    If your Skibidi your enemy cannot make a move due to your Brainrot, 
+        you win by Brainrot instead of stalemate being declared.
+    If your Skibidi is captured while your opponent's Skibidi is in phase 4, there is nothing you can do.
+```
+So, I'm thinking, maybe we add a `MoveType` enum?
+That has variants like `MoveTo`, `CaptureWithoutMove`
+And `PhaseShift`
+And each of these variants could have relevant fields in them
+Something like 
+```
+enum MoveType {
+    MoveTo(Coord),
+    CaptureWithoutMove(Coord),
+    PhaseShift, // no necessary fields, yet
+}
+```
+
+And GameMove could be changed to be 
+```
+struct GameMove {
+    from: Coord,
+    move_type: MoveType
+}
+```
+
+This pattern can also work with the bus, but we'll deal with that when we get there
