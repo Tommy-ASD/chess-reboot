@@ -6,11 +6,16 @@
 import { parseFEN, pieceToSymbol } from "./fen";
 
 let selectedSquare: Coord | null = null;
-let allowedSquares: Coord[] = []; // returned from API
+let allowedMoves: GameMove[] = []; // returned from API
 
 
 function isAllowedSquare(c: Coord): boolean {
-  return allowedSquares.some(m => m.rank === c.rank && m.file === c.file);
+  // filter allowedMoves for MoveTo moves only
+  let allowedCoords = allowedMoves
+    .filter(m => isMoveTo(m))
+    .map(m => m.move_type.target);
+
+  return allowedCoords.some(ac => ac.file === c.file && ac.rank === c.rank);
 }
 
 
@@ -92,11 +97,11 @@ async function handleSquareClick(rank: number, file: number) {
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    allowedSquares = (await fetchMoves(fen, rank, file)).map(m => m.move_type.kind === "MoveTo" ? m.move_type.target : null).filter((c): c is Coord => c !== null);
+    allowedMoves = (await fetchMoves(fen, rank, file));
 
-    console.log("Legal moves:", allowedSquares);
+    console.log("Legal moves:", allowedMoves);
 
-    highlightMoves(allowedSquares);
+    highlightMoves(allowedMoves);
   } catch (err) {
     console.error("Error fetching moves:", err);
   }
@@ -130,12 +135,21 @@ type MoveType =
 
 type GameMove = { from: Coord; move_type: MoveType };
 
+function isMoveTo(m: GameMove): m is GameMove & { move_type: { kind: "MoveTo"; target: Coord } } {
+  return m.move_type.kind === "MoveTo";
+}
+
 /// Simple helper to highlight squares given a list of coordinates
-function highlightMoves(moves: Coord[]) {
+function highlightMoves(moves: GameMove[]) {
   const squares = document.querySelectorAll(".square");
   squares.forEach(sq => sq.classList.remove("highlight"));
 
-  for (const m of moves) {
+  // filter moves for MoveTo only
+  let moveCoords = moves
+    .filter(m => isMoveTo(m))
+    .map(m => m.move_type.target);
+
+  for (const m of moveCoords) {
     const index = m.rank * 8 + m.file;
     squares[index].classList.add("highlight");
   }
@@ -144,7 +158,7 @@ function highlightMoves(moves: Coord[]) {
 /// Clears any selected square and highlighted moves
 function clearSelection() {
   selectedSquare = null;
-  allowedSquares = [];
+  allowedMoves = [];
 
   const squares = document.querySelectorAll(".square");
   squares.forEach(s => s.classList.remove("selected", "highlight"));
