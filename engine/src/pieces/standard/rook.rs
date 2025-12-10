@@ -15,6 +15,9 @@ impl Piece for Rook {
     fn color(&self) -> Color {
         self.color
     }
+    fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         generate_glider_moves(board, from, &STRAIGHT_DIRS, usize::MAX)
     }

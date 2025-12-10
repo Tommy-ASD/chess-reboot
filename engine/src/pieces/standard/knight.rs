@@ -14,6 +14,9 @@ impl Piece for Knight {
     fn color(&self) -> Color {
         self.color
     }
+    fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let knight_moves: [(isize, isize); 8] = [
             (2, 1),

@@ -7,12 +7,23 @@ use crate::{
 };
 
 fn fen_row_to_squares(row: &str) -> Vec<Square> {
-    let mut squares = vec![];
+    // println!("=== fen_row_to_squares BEGIN ===");
+    // println!("row = \"{}\"", row);
+
+    let mut squares = Vec::new();
     let mut chars = row.chars().peekable();
+    let mut index = 0usize;
 
     while let Some(&ch) = chars.peek() {
-        if ch.is_digit(10) {
+        // println!("char[{}] = '{}'", index, ch);
+
+        // -------------------------------
+        // 1. DIGIT → run-length empties
+        // -------------------------------
+        if ch.is_ascii_digit() {
             let count = ch.to_digit(10).unwrap();
+            // println!("  -> digit found: {} → pushing {} empty squares", ch, count);
+
             for _ in 0..count {
                 squares.push(Square {
                     piece: None,
@@ -21,29 +32,64 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                 });
             }
             chars.next();
-        } else if ch == '(' {
-            // Extended square: find the closing ')'
-            let mut fen_piece = String::new();
-            let mut depth = 0;
+            index += 1;
+            continue;
+        }
+
+        // -------------------------------
+        // 2. EXTENDED BLOCK STARTS WITH '('
+        // -------------------------------
+        if ch == '(' {
+            // println!("  -> extended square begins at index {}", index);
+
+            let mut buf = String::new();
+            let mut depth = 0usize;
+
             while let Some(c) = chars.next() {
-                fen_piece.push(c);
-                if c == '(' {
-                    depth += 1;
-                }
-                if c == ')' {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
+                // println!(
+                //     "    collecting '{}', depth={} → buffer=\"{}\"",
+                //     c, depth, buf
+                // );
+
+                buf.push(c);
+
+                match c {
+                    '(' => {
+                        depth += 1;
+                        // println!("      '(' increases depth → {}", depth);
                     }
+                    ')' => {
+                        depth -= 1;
+                        // println!("      ')' decreases depth → {}", depth);
+
+                        if depth == 0 {
+                            // println!("      extended block closed → \"{}\"", buf);
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
-            squares.push(fen_to_square(&fen_piece));
-        } else {
-            // Normal piece
-            squares.push(fen_to_square(&ch.to_string()));
-            chars.next();
+
+            // println!("  -> parsing extended square: {}", buf);
+            squares.push(fen_to_square(&buf));
+
+            index += buf.len();
+            continue;
         }
+
+        // -------------------------------
+        // 3. STANDARD SINGLE-CHAR PIECE
+        // -------------------------------
+        // println!("  -> standard piece '{}'", ch);
+        squares.push(fen_to_square(&ch.to_string()));
+
+        chars.next();
+        index += 1;
     }
+
+    // println!("Row result ({} squares): {:?}", squares.len(), squares);
+    // println!("=== fen_row_to_squares END ===\n");
 
     squares
 }
@@ -82,6 +128,9 @@ pub fn board_to_fen(board: &Board) -> String {
 pub fn fen_to_board(fen: &str) -> Board {
     let rows: Vec<&str> = fen.split('/').collect();
     let mut grid = vec![];
+
+    dbg!();
+    println!("Parsing board from FEN: {}", fen);
 
     for row in rows {
         grid.push(fen_row_to_squares(row));
@@ -131,45 +180,56 @@ pub fn square_to_fen(square: &Square) -> String {
 }
 
 fn split_top_level(input: &str) -> Vec<String> {
+    // println!("--- split_top_level BEGIN ---");
+    // println!("input = \"{}\"", input);
+
     let mut parts = Vec::new();
     let mut buf = String::new();
-    let mut depth = 0;
+    let mut depth = 0usize;
 
-    for ch in input.chars() {
+    for (i, ch) in input.chars().enumerate() {
+        // println!(
+        //     "char[{}] = '{}'  depth = {}  buf = \"{}\"",
+        //     i, ch, depth, buf
+        // );
+
         match ch {
             '(' => {
                 depth += 1;
+                // println!("  -> '(' encountered, increasing depth to {}", depth);
                 buf.push(ch);
             }
             ')' => {
+                // println!("  -> ')' encountered, decreasing depth from {}", depth);
                 depth -= 1;
                 buf.push(ch);
+                // println!("     new depth = {}", depth);
             }
             ',' if depth == 0 => {
+                // println!(
+                //     "  -> TOP-LEVEL COMMA at index {}, pushing part: \"{}\"",
+                //     i,
+                //     buf.trim()
+                // );
+
                 parts.push(buf.trim().to_string());
                 buf.clear();
             }
-            _ => buf.push(ch),
+            _ => {
+                buf.push(ch);
+            }
         }
     }
 
     if !buf.is_empty() {
+        // println!("END OF STRING, pushing final part: \"{}\"", buf.trim());
         parts.push(buf.trim().to_string());
     }
 
+    // println!("FINAL PARTS = {:?}", parts);
+    // println!("--- split_top_level END ---\n");
+
     parts
-}
-
-fn parse_nested_piece(sym: &str) -> Option<PieceType> {
-    // If nested (begins with "(" or something like G(...)) we treat
-    // the entire string as a full fen_to_square() call.
-    if sym.contains('(') {
-        let sq = fen_to_square(sym);
-        return sq.piece; // piece extracted from nested square
-    }
-
-    // Otherwise treat as normal piece symbol
-    PieceType::symbol_to_piece(sym)
 }
 
 pub fn fen_to_square(fen: &str) -> Square {
@@ -199,7 +259,7 @@ pub fn fen_to_square(fen: &str) -> Square {
 
             match key {
                 "P" => {
-                    piece = parse_nested_piece(value);
+                    piece = PieceType::symbol_to_piece(value);
                 }
                 "T" => {
                     square_type = match value {

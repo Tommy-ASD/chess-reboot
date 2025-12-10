@@ -64,10 +64,13 @@ impl PieceType {
     pub fn symbol_to_piece(symbol: &str) -> Option<PieceType> {
         // get initial symbol (before first bracket, if any)
         // can't just be first character, as some symbols may be multiple characters
-        let sym = symbol.split('[').next().unwrap();
+        let sym = symbol.split('(').next().unwrap();
 
         // next, lower case to match both colors
         let sym_lower = sym.to_lowercase();
+
+        // println!("Parsing piece from symbol: {}", symbol);
+        // println!("  -> base symbol: {}", sym);
 
         // match symbol to create piece
         // give full symbol to piece constructors
@@ -151,6 +154,20 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.color(),
             PieceType::Goblin(piece) => piece.color(),
             PieceType::Custom(piece) => piece.color(),
+        }
+    }
+
+    pub fn set_color(&mut self, color: Color) {
+        match self {
+            PieceType::Pawn(piece) => piece.set_color(color),
+            PieceType::Rook(piece) => piece.set_color(color),
+            PieceType::Knight(piece) => piece.set_color(color),
+            PieceType::Bishop(piece) => piece.set_color(color),
+            PieceType::Queen(piece) => piece.set_color(color),
+            PieceType::King(piece) => piece.set_color(color),
+            PieceType::Monkey(piece) => piece.set_color(color),
+            PieceType::Goblin(piece) => piece.set_color(color),
+            PieceType::Custom(piece) => piece.set_color(color),
         }
     }
 

@@ -102,12 +102,12 @@ impl Goblin {
     }
 
     // this one is tricky because the symbol changes based on state
-    // so usually, it's G[H=0-0] for free goblin
+    // so usually, it's G(H=0-0) for free goblin
     // where H=0-0 indicates home square
 
     // but when kidnapping, it could be something else
     // and inside the brackets, the symbol of the piece being carried
-    // e.g. `G[H=0-0,P=n]` for white goblin carrying black knight
+    // e.g. `G(H=0-0,P=n)` for white goblin carrying black knight
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
         // debug print
         dbg!();
@@ -122,7 +122,7 @@ impl Goblin {
 
         // No bracket, fallback: a generic free goblin with default home?
         // fallback to home square at a1
-        let Some(start) = symbol.find('[') else {
+        let Some(start) = symbol.find('(') else {
             return Some(PieceType::Goblin(Goblin {
                 color,
                 state: GoblinState::Free,
@@ -130,7 +130,7 @@ impl Goblin {
             }));
         };
 
-        let end = symbol.find(']')?;
+        let end = symbol.find(')')?;
         let inside = &symbol[start + 1..end];
 
         let mut home_square: Option<Coord> = None;
@@ -160,11 +160,8 @@ impl Goblin {
             }
         }
 
-        // Home square MUST be present in Goblin notation
-        let Some(home_sq) = home_square else {
-            println!("Goblin missing required home square notation (H=file-rank)");
-            return None;
-        };
+        // default to home square at a1 if not specified
+        let home_sq = home_square.unwrap_or(Coord { file: 0, rank: 0 });
 
         let state = if let Some(p) = kidnapped_piece {
             GoblinState::Kidnapping { piece: p.into() }
@@ -188,6 +185,9 @@ impl Piece for Goblin {
     fn color(&self) -> Color {
         self.color
     }
+    fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
 
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         println!("Hello :3");
@@ -204,7 +204,7 @@ impl Piece for Goblin {
             GoblinState::Free => {
                 // Free state only encodes home square
                 format!(
-                    "{}[H={}-{}]",
+                    "{}(H={}-{})",
                     prefix, self.home_square.file, self.home_square.rank
                 )
             }
@@ -212,7 +212,7 @@ impl Piece for Goblin {
             GoblinState::Kidnapping { piece } => {
                 // Include home square AND kidnapped piece symbol
                 format!(
-                    "{}[H={}-{},P={}]",
+                    "{}(H={}-{},P={})",
                     prefix,
                     self.home_square.file,
                     self.home_square.rank,
@@ -263,9 +263,11 @@ impl Piece for Goblin {
             }
             // handle the conversion of and dropping off of kidnapped piece
             GoblinState::Kidnapping { piece } => {
+                let mut p: PieceType = piece.clone().into();
+                p.set_color(self.color);
                 if to == &self.home_square {
                     // drop off the kidnapped piece
-                    board_after.set_piece_at(to, piece.clone().into());
+                    board_after.set_piece_at(to, p);
                     // goblin dies (maybe change later?)
                 }
             }

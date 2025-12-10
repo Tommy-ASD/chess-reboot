@@ -15,6 +15,7 @@ pub mod standard;
 pub trait Piece {
     fn name(&self) -> &str;
     fn color(&self) -> Color;
+    fn set_color(&mut self, color: Color);
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove>;
     fn symbol(&self) -> String;
 

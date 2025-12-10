@@ -47,6 +47,8 @@ impl Board {
             to_sq.piece = Some(piece);
         }
 
+        println!("Move executed: {:?} -> {:?}", from, to);
+
         // 5. Special movement hooks (stub)
         self.handle_post_move_effects(&board_before, game_move)?;
 

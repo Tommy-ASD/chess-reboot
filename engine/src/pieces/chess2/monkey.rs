@@ -27,6 +27,9 @@ impl Piece for Monkey {
     fn color(&self) -> Color {
         self.color
     }
+    fn set_color(&mut self, color: Color) {
+        self.color = color;
+    }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let mut moves = Vec::new();
         let directions: [(isize, isize); 8] = [
