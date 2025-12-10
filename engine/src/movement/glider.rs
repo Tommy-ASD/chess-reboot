@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
-use crate::board::square::{Square, SquareType, fen_to_square, square_to_fen};
 use crate::board::{Board, Coord, Direction, File, GameMove, Rank, Sq};
+use crate::board::{
+    fen::{fen_to_square, square_to_fen},
+    square::{Square, SquareType},
+};
 
 /// Directions for glider movement
 pub const STRAIGHT_DIRS: &[Direction] = &[(1, 0), (-1, 0), (0, 1), (0, -1)];
@@ -32,9 +35,7 @@ pub fn generate_glider_moves(
     directions: &[Direction],
     max_range: usize,
 ) -> Vec<GameMove> {
-    // Board size assumptions (standard 8x8). If your board may vary,
-    // compute from board.grid dimensions instead.
-    let files = board.grid.get(0).map(|r| r.len()).unwrap_or(8) as isize;
+    let files = board.grid[0].len() as isize;
     let ranks = board.grid.len() as isize;
 
     let mut moves = Vec::new();
@@ -43,11 +44,14 @@ pub fn generate_glider_moves(
     let start_rank = from.rank as isize;
 
     for &(dx, dy) in directions {
-        let mut step = 1isize;
-        loop {
-            let f = start_file + dx * step;
-            let r = start_rank + dy * step;
+        let unbounded = max_range == usize::MAX;
 
+        let mut step = 1usize;
+        loop {
+            let f = start_file + dx * step as isize;
+            let r = start_rank + dy * step as isize;
+
+            // out of bounds
             if f < 0 || r < 0 || f >= files || r >= ranks {
                 break;
             }
@@ -57,26 +61,26 @@ pub fn generate_glider_moves(
                 rank: r as Rank,
             };
 
-            let game_move = GameMove {
+            moves.push(GameMove {
                 from: from.clone(),
                 to: coord.clone(),
-            };
+            });
 
-            moves.push(game_move);
-
-            // check for blockers
+            // stop if encountering a piece that blocks
             if let Some(sq) = board.get_square_at(&coord) {
                 if let Some(piece) = &sq.piece
                     && piece.blocks_path()
                 {
-                    break; // blocked by piece
+                    break;
                 }
             }
 
-            step += 1;
-            if step > max_range as isize {
+            // stop if bounded and reached max range
+            if !unbounded && step >= max_range {
                 break;
             }
+
+            step += 1;
         }
     }
 

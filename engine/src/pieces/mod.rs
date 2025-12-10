@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Formatter, Result};
+use std::{
+    any::Any,
+    fmt::{Debug, Formatter, Result},
+};
 
 use crate::board::{Board, Coord, GameMove};
 
@@ -26,6 +29,10 @@ pub trait Piece {
     ) {
         // Default: do nothing
     }
+
+    /// For downcasting support
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl PartialEq for dyn Piece {

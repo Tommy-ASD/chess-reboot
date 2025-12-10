@@ -1,6 +1,9 @@
+use std::rc::Rc;
+
 use crate::pieces::{
-    Color, Piece, standard::bishop::Bishop, standard::king::King, standard::knight::Knight,
-    standard::pawn::Pawn, standard::queen::Queen, standard::rook::Rook,
+    Color, Piece,
+    fairy::goblin::Goblin,
+    standard::{bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook},
 };
 
 // the rest
@@ -14,71 +17,93 @@ pub enum PieceType {
     King(King),
 
     Monkey(crate::pieces::chess2::monkey::Monkey),
+    Goblin(crate::pieces::fairy::goblin::Goblin),
 
     Custom(Box<dyn Piece>),
 }
 
+impl From<Rc<PieceType>> for PieceType {
+    fn from(rc: Rc<PieceType>) -> Self {
+        rc.as_ref().clone()
+    }
+}
+
 impl PieceType {
-    pub fn symbol(&self) -> String {
+    pub fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         match self {
-            PieceType::Pawn(p) => p.symbol().to_string(),
-            PieceType::Rook(r) => r.symbol().to_string(),
-            PieceType::Knight(n) => n.symbol().to_string(),
-            PieceType::Bishop(b) => b.symbol().to_string(),
-            PieceType::Queen(q) => q.symbol().to_string(),
-            PieceType::King(k) => k.symbol().to_string(),
+            PieceType::Pawn(piece) => piece.as_any_mut(),
+            PieceType::Rook(piece) => piece.as_any_mut(),
+            PieceType::Knight(piece) => piece.as_any_mut(),
+            PieceType::Bishop(piece) => piece.as_any_mut(),
+            PieceType::Queen(piece) => piece.as_any_mut(),
+            PieceType::King(piece) => piece.as_any_mut(),
 
-            PieceType::Monkey(m) => m.symbol().to_string(),
+            PieceType::Monkey(piece) => piece.as_any_mut(),
+            PieceType::Goblin(piece) => piece.as_any_mut(),
 
-            PieceType::Custom(p) => p.symbol(),
+            PieceType::Custom(piece) => piece.as_any_mut(),
         }
     }
 
-    pub fn symbol_to_piece(symbol: char) -> Option<PieceType> {
-        match symbol {
-            'P' => Some(PieceType::Pawn(Pawn {
-                color: Color::White,
+    pub fn symbol(&self) -> String {
+        match self {
+            PieceType::Pawn(piece) => piece.symbol(),
+            PieceType::Rook(piece) => piece.symbol(),
+            PieceType::Knight(piece) => piece.symbol(),
+            PieceType::Bishop(piece) => piece.symbol(),
+            PieceType::Queen(piece) => piece.symbol(),
+            PieceType::King(piece) => piece.symbol(),
+
+            PieceType::Monkey(piece) => piece.symbol(),
+            PieceType::Goblin(piece) => piece.symbol(),
+
+            PieceType::Custom(piece) => piece.symbol(),
+        }
+    }
+
+    pub fn symbol_to_piece(symbol: &str) -> Option<PieceType> {
+        // get initial symbol (before first bracket, if any)
+        // can't just be first character, as some symbols may be multiple characters
+        let sym = symbol.split('[').next().unwrap();
+
+        // next, lower case to match both colors
+        let sym_lower = sym.to_lowercase();
+
+        // match symbol to create piece
+        // give full symbol to piece constructors
+        match sym_lower.as_str() {
+            "p" => Some(PieceType::new_pawn(if sym == "P" {
+                Color::White
+            } else {
+                Color::Black
             })),
-            'R' => Some(PieceType::Rook(Rook {
-                color: Color::White,
+            "r" => Some(PieceType::new_rook(if sym == "R" {
+                Color::White
+            } else {
+                Color::Black
             })),
-            'N' => Some(PieceType::Knight(Knight {
-                color: Color::White,
+            "n" => Some(PieceType::new_knight(if sym == "N" {
+                Color::White
+            } else {
+                Color::Black
             })),
-            'B' => Some(PieceType::Bishop(Bishop {
-                color: Color::White,
+            "b" => Some(PieceType::new_bishop(if sym == "B" {
+                Color::White
+            } else {
+                Color::Black
             })),
-            'Q' => Some(PieceType::Queen(Queen {
-                color: Color::White,
+            "q" => Some(PieceType::new_queen(if sym == "Q" {
+                Color::White
+            } else {
+                Color::Black
             })),
-            'K' => Some(PieceType::King(King {
-                color: Color::White,
-            })),
-            'p' => Some(PieceType::Pawn(Pawn {
-                color: Color::Black,
-            })),
-            'r' => Some(PieceType::Rook(Rook {
-                color: Color::Black,
-            })),
-            'n' => Some(PieceType::Knight(Knight {
-                color: Color::Black,
-            })),
-            'b' => Some(PieceType::Bishop(Bishop {
-                color: Color::Black,
-            })),
-            'q' => Some(PieceType::Queen(Queen {
-                color: Color::Black,
-            })),
-            'k' => Some(PieceType::King(King {
-                color: Color::Black,
+            "k" => Some(PieceType::new_king(if sym == "K" {
+                Color::White
+            } else {
+                Color::Black
             })),
 
-            'M' => Some(PieceType::Monkey(crate::pieces::chess2::monkey::Monkey {
-                color: Color::White,
-            })),
-            'm' => Some(PieceType::Monkey(crate::pieces::chess2::monkey::Monkey {
-                color: Color::Black,
-            })),
+            "g" => Goblin::from_symbol(symbol),
 
             _ => None,
         }
@@ -117,14 +142,15 @@ impl PieceType {
 
     pub fn get_color(&self) -> Color {
         match self {
-            PieceType::Pawn(p) => p.color(),
-            PieceType::Rook(r) => r.color(),
-            PieceType::Knight(n) => n.color(),
-            PieceType::Bishop(b) => b.color(),
-            PieceType::Queen(q) => q.color(),
-            PieceType::King(k) => k.color(),
-            PieceType::Monkey(m) => m.color(),
-            PieceType::Custom(p) => p.color(),
+            PieceType::Pawn(piece) => piece.color(),
+            PieceType::Rook(piece) => piece.color(),
+            PieceType::Knight(piece) => piece.color(),
+            PieceType::Bishop(piece) => piece.color(),
+            PieceType::Queen(piece) => piece.color(),
+            PieceType::King(piece) => piece.color(),
+            PieceType::Monkey(piece) => piece.color(),
+            PieceType::Goblin(piece) => piece.color(),
+            PieceType::Custom(piece) => piece.color(),
         }
     }
 
@@ -134,14 +160,15 @@ impl PieceType {
         from: &crate::board::Coord,
     ) -> Vec<crate::board::GameMove> {
         let mut moves = match self {
-            PieceType::Pawn(p) => p.initial_moves(board, from),
-            PieceType::Rook(r) => r.initial_moves(board, from),
-            PieceType::Knight(n) => n.initial_moves(board, from),
-            PieceType::Bishop(b) => b.initial_moves(board, from),
-            PieceType::Queen(q) => q.initial_moves(board, from),
-            PieceType::King(k) => k.initial_moves(board, from),
-            PieceType::Monkey(m) => m.initial_moves(board, from),
-            PieceType::Custom(p) => p.initial_moves(board, from),
+            PieceType::Pawn(piece) => piece.initial_moves(board, from),
+            PieceType::Rook(piece) => piece.initial_moves(board, from),
+            PieceType::Knight(piece) => piece.initial_moves(board, from),
+            PieceType::Bishop(piece) => piece.initial_moves(board, from),
+            PieceType::Queen(piece) => piece.initial_moves(board, from),
+            PieceType::King(piece) => piece.initial_moves(board, from),
+            PieceType::Monkey(piece) => piece.initial_moves(board, from),
+            PieceType::Goblin(piece) => piece.initial_moves(board, from),
+            PieceType::Custom(piece) => piece.initial_moves(board, from),
         };
 
         // if the square has a piece of the same color, filter it out
@@ -168,29 +195,24 @@ impl PieceType {
         to: &crate::board::Coord,
     ) {
         match self {
-            PieceType::Pawn(p) => {
-                let _ = p.post_move_effects(board_before, board_after, from, to);
+            PieceType::Pawn(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::Rook(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::Knight(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
             }
-            PieceType::Rook(r) => {
-                let _ = r.post_move_effects(board_before, board_after, from, to);
+            PieceType::Bishop(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
             }
-            PieceType::Knight(n) => {
-                let _ = n.post_move_effects(board_before, board_after, from, to);
+            PieceType::Queen(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::King(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::Monkey(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
             }
-            PieceType::Bishop(b) => {
-                let _ = b.post_move_effects(board_before, board_after, from, to);
+            PieceType::Goblin(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
             }
-            PieceType::Queen(q) => {
-                let _ = q.post_move_effects(board_before, board_after, from, to);
-            }
-            PieceType::King(k) => {
-                let _ = k.post_move_effects(board_before, board_after, from, to);
-            }
-            PieceType::Monkey(m) => {
-                let _ = m.post_move_effects(board_before, board_after, from, to);
-            }
-            PieceType::Custom(p) => {
-                let _ = p.post_move_effects(board_before, board_after, from, to);
+            PieceType::Custom(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
             }
         }
     }

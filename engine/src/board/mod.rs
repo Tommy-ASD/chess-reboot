@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    board::square::{Square, SquareType, fen_to_square, square_to_fen},
+    board::{
+        fen::{board_to_fen, fen_to_board, fen_to_square, square_to_fen},
+        square::{Square, SquareType},
+    },
     pieces::piecetype::PieceType,
 };
 
@@ -41,7 +44,7 @@ pub struct GameMove {
 
 pub type Direction = (isize, isize);
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct BoardFlags {
     pub white_can_castle_kingside: bool,
     pub white_can_castle_queenside: bool,
@@ -51,7 +54,7 @@ pub struct BoardFlags {
     // more fields we can figure out later
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Board {
     pub grid: Vec<Vec<Square>>,
     pub flags: BoardFlags,

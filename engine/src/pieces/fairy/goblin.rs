@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 /// Goblin - Moves like a queen at first, but once it takes a piece,
 /// it "kidnaps" that piece and has to take it back to home base
 /// After taking a piece, the goblin moves like a king until it reaches it's home square.
@@ -14,11 +16,12 @@ use crate::{
 pub enum GoblinState {
     Free, // hasn't kidnapped any piece
     Kidnapping {
-        piece: PieceType, // the piece being carried
-        home: Coord,      // goblin’s home
+        piece: Rc<PieceType>, // the piece being carried
+        home: Coord,          // goblin’s home
     },
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Goblin {
     pub color: Color,
     pub state: GoblinState,
@@ -48,10 +51,12 @@ impl Goblin {
     }
 
     pub fn generate_goblin_free_moves(&self, board: &Board, from: Coord) -> Vec<GameMove> {
-        generate_glider_moves(board, &from, &OMNI_DIRS, 1)
+        dbg!();
+        generate_glider_moves(board, &from, &OMNI_DIRS, usize::MAX)
     }
 
     pub fn generate_goblin_kidnapping_moves(&self, board: &Board, from: Coord) -> Vec<GameMove> {
+        dbg!();
         let mut moves = Vec::new();
         let directions: [(isize, isize); 8] = [
             (1, 0),
@@ -91,6 +96,54 @@ impl Goblin {
             GoblinState::Kidnapping { .. } => self.generate_goblin_kidnapping_moves(board, from),
         }
     }
+
+    // this one is tricky because the symbol changes based on state
+    // so usually, it's just G/g for free goblin
+    // but when kidnapping, it could be something else
+    // thinking brackets [] for carrying a piece
+    // and inside the brackets, the symbol of the piece being carried
+    // e.g. `G[P=n]` for white goblin carrying black knight
+    pub fn from_symbol(symbol: &str) -> Option<PieceType> {
+        let color = match symbol.chars().next()? {
+            'G' => Color::White,
+            'g' => Color::Black,
+            _ => return None,
+        };
+        // check for kidnapping state
+        // e.g. G[P=n]
+        // check for brackets, inside brackets, check for P=, if found, get the piece symbol after = (which lasts until , or ])
+        if let Some(start) = symbol.find('[') {
+            if let Some(end) = symbol.find(']') {
+                let inside = &symbol[start + 1..end];
+                let parts: Vec<&str> = inside.split(',').collect();
+                for part in parts {
+                    let kv: Vec<&str> = part.split('=').collect();
+                    if kv.len() == 2 && kv[0] == "P" {
+                        let sym = kv[1];
+                        if let Some(p) = PieceType::symbol_to_piece(sym) {
+                            return Some(PieceType::Goblin(Goblin {
+                                color,
+                                state: GoblinState::Kidnapping {
+                                    piece: Rc::new(p),
+                                    home: match color {
+                                        Color::White => Coord { file: 0, rank: 0 },
+                                        Color::Black => Coord { file: 7, rank: 7 },
+                                    },
+                                },
+                            }));
+                        } else {
+                            println!("Unknown piece!! {sym}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(PieceType::Goblin(Goblin {
+            color,
+            state: GoblinState::Free,
+        }))
+    }
 }
 
 impl Piece for Goblin {
@@ -103,13 +156,30 @@ impl Piece for Goblin {
     }
 
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        println!("Hello :3");
         self.generate_goblin_base_moves(board, from.clone())
     }
 
+    // this one is tricky because the symbol changes based on state
+    // so usually, it's just G/g for free goblin
+    // but when kidnapping, it could be something else
+    // thinking brackets [] for carrying a piece
+    // and inside the brackets, the symbol of the piece being carried
+    // e.g. `G[P=n]` for white goblin carrying black knight
+    // need to refactor fen generation to handle this properly
     fn symbol(&self) -> String {
-        match self.color {
-            Color::White => 'G'.to_string(),
-            Color::Black => 'g'.to_string(),
+        match &self.state {
+            GoblinState::Free => match self.color {
+                Color::White => 'G'.to_string(),
+                Color::Black => 'g'.to_string(),
+            },
+            GoblinState::Kidnapping { piece, .. } => {
+                let piece_symbol = piece.symbol();
+                match self.color {
+                    Color::White => format!("G[P={}]", piece_symbol),
+                    Color::Black => format!("g[P={}]", piece_symbol),
+                }
+            }
         }
     }
 
@@ -143,7 +213,7 @@ impl Piece for Goblin {
                                         piece.as_any_mut().downcast_mut::<Goblin>()
                                     {
                                         goblin.state = GoblinState::Kidnapping {
-                                            piece: captured_piece.clone(),
+                                            piece: captured_piece.clone().into(),
                                             home,
                                         };
                                     }
@@ -157,11 +227,19 @@ impl Piece for Goblin {
             GoblinState::Kidnapping { piece, home } => {
                 if to == home {
                     // drop off the kidnapped piece
-                    board.set_piece_at(to, piece.clone());
+                    board_after.set_piece_at(to, piece.clone().into());
                     // goblin dies (maybe change later?)
                 }
             }
             _ => {}
         }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
