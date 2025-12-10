@@ -194,25 +194,30 @@ impl Piece for Goblin {
         self.generate_goblin_base_moves(board, from.clone())
     }
 
-    // this one is tricky because the symbol changes based on state
-    // so usually, it's just G/g for free goblin
-    // but when kidnapping, it could be something else
-    // thinking brackets [] for carrying a piece
-    // and inside the brackets, the symbol of the piece being carried
-    // e.g. `G[P=n]` for white goblin carrying black knight
-    // need to refactor fen generation to handle this properly
     fn symbol(&self) -> String {
+        let prefix = match self.color {
+            Color::White => "G",
+            Color::Black => "g",
+        };
+
         match &self.state {
-            GoblinState::Free => match self.color {
-                Color::White => 'G'.to_string(),
-                Color::Black => 'g'.to_string(),
-            },
-            GoblinState::Kidnapping { piece, .. } => {
-                let piece_symbol = piece.symbol();
-                match self.color {
-                    Color::White => format!("G[P={}]", piece_symbol),
-                    Color::Black => format!("g[P={}]", piece_symbol),
-                }
+            GoblinState::Free => {
+                // Free state only encodes home square
+                format!(
+                    "{}[H={}-{}]",
+                    prefix, self.home_square.file, self.home_square.rank
+                )
+            }
+
+            GoblinState::Kidnapping { piece } => {
+                // Include home square AND kidnapped piece symbol
+                format!(
+                    "{}[H={}-{},P={}]",
+                    prefix,
+                    self.home_square.file,
+                    self.home_square.rank,
+                    piece.symbol()
+                )
             }
         }
     }
