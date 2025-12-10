@@ -20,19 +20,24 @@ impl Piece for Pawn {
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let mut moves = Vec::new();
         let direction: isize = match self.color {
-            Color::White => 1,
-            Color::Black => -1,
+            Color::White => -1,
+            Color::Black => 1,
         };
+
+        dbg!(&direction);
 
         // One square forward
         let new_rank = from.rank as isize + direction;
         if new_rank >= 0 && new_rank < 8 {
+            dbg!();
             let forward_coord = Coord {
                 file: from.file,
                 rank: new_rank as u8,
             };
             if let Some(square) = board.get_square_at(&forward_coord) {
+                dbg!(&square, &forward_coord);
                 if square.piece.is_none() {
+                    dbg!();
                     let game_move = GameMove {
                         from: from.clone(),
                         to: forward_coord.clone(),
@@ -41,8 +46,8 @@ impl Piece for Pawn {
 
                     // Two squares forward from starting position
                     let starting_rank = match self.color {
-                        Color::White => 1,
-                        Color::Black => 6,
+                        Color::White => 6,
+                        Color::Black => 1,
                     };
                     if from.rank == starting_rank {
                         let two_forward_coord = Coord {
@@ -62,6 +67,8 @@ impl Piece for Pawn {
                 }
             }
         }
+
+        dbg!(&moves);
 
         // Captures
         for df in &[-1, 1] {
@@ -84,6 +91,8 @@ impl Piece for Pawn {
                 }
             }
         }
+
+        dbg!(&moves);
 
         moves
     }
