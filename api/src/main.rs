@@ -20,25 +20,20 @@ pub struct GetMovesRequest {
 
 #[derive(Debug, Serialize)]
 pub struct GetMovesResponse {
-    pub moves: Vec<Coord>,
+    pub moves: Vec<GameMove>,
 }
 
 #[axum::debug_handler]
 async fn get_moves_handler(Json(req): Json<GetMovesRequest>) -> Json<GetMovesResponse> {
     let board = fen_to_board(&req.board_fen);
-    let moves = board
-        .get_moves(&req.from)
-        .iter()
-        .map(|game_move| game_move.to.clone())
-        .collect();
+    let moves = board.get_moves(&req.from);
     Json(GetMovesResponse { moves })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetNewBoardStateRequest {
     pub board_fen: String,
-    pub from: Coord,
-    pub to: Coord,
+    pub game_move: GameMove,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,11 +46,7 @@ async fn get_new_board_state_handler(
     Json(req): Json<GetNewBoardStateRequest>,
 ) -> Json<GetNewBoardStateResponse> {
     let mut board = fen_to_board(&req.board_fen);
-    let game_move = GameMove {
-        from: req.from,
-        to: req.to,
-    };
-    board.make_move(game_move);
+    board.make_move(req.game_move);
     let new_board_fen = board_to_fen(&board);
     Json(GetNewBoardStateResponse { new_board_fen })
 }

@@ -91,7 +91,7 @@ async function handleSquareClick(rank: number, file: number) {
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    allowedSquares = await fetchMoves(fen, rank, file);
+    allowedSquares = (await fetchMoves(fen, rank, file)).map(m => m.to);
 
     console.log("Legal moves:", allowedSquares);
 
@@ -102,7 +102,7 @@ async function handleSquareClick(rank: number, file: number) {
 }
 
 /// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
-async function fetchMoves(fen: string, rank: number, file: number): Promise<Coord[]> {
+async function fetchMoves(fen: string, rank: number, file: number): Promise<GameMove[]> {
   const response = await fetch("http://localhost:8080/board/moves", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -121,6 +121,7 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Coor
 }
 
 type Coord = { file: number; rank: number };
+type GameMove = { from: Coord; to: Coord };
 
 /// Simple helper to highlight squares given a list of coordinates
 function highlightMoves(moves: Coord[]) {
@@ -156,8 +157,7 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       board_fen: fen,
-      from,
-      to
+      game_move: { from, to }
     })
   });
   console.log("Response:", response);

@@ -36,7 +36,7 @@ fn sq_to_coord(sq: Sq) -> Coord {
 
 /// Represents a move from one coordinate to another.
 /// Will likely be expanded later with more info.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct GameMove {
     pub from: Coord,
     pub to: Coord,
