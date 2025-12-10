@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::board::{Board, Coord, Direction, File, GameMove, Rank, Sq};
+use crate::board::{Board, Coord, Direction, File, GameMove, MoveType, Rank, Sq};
 use crate::board::{
     fen::{fen_to_square, square_to_fen},
     square::{Square, SquareType},
@@ -63,7 +63,7 @@ pub fn generate_glider_moves(
 
             moves.push(GameMove {
                 from: from.clone(),
-                to: coord.clone(),
+                move_type: MoveType::MoveTo(coord.clone()),
             });
 
             // stop if encountering a piece that blocks

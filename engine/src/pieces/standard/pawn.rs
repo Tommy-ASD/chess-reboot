@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, Coord, GameMove},
+    board::{Board, Coord, GameMove, MoveType},
     pieces::{Color, Piece},
 };
 
@@ -40,7 +40,7 @@ impl Piece for Pawn {
                     dbg!();
                     let game_move = GameMove {
                         from: from.clone(),
-                        to: forward_coord.clone(),
+                        move_type: MoveType::MoveTo(forward_coord.clone()),
                     };
                     moves.push(game_move);
 
@@ -58,7 +58,7 @@ impl Piece for Pawn {
                             if two_square.piece.is_none() {
                                 let game_move = GameMove {
                                     from: from.clone(),
-                                    to: two_forward_coord.clone(),
+                                    move_type: MoveType::MoveTo(two_forward_coord.clone()),
                                 };
                                 moves.push(game_move);
                             }
@@ -83,7 +83,7 @@ impl Piece for Pawn {
                         if piece.get_color() != self.color {
                             let game_move = GameMove {
                                 from: from.clone(),
-                                to: capture_coord.clone(),
+                                move_type: MoveType::MoveTo(capture_coord.clone()),
                             };
                             moves.push(game_move);
                         }

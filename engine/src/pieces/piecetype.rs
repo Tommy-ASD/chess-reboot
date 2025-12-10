@@ -190,7 +190,13 @@ impl PieceType {
 
         // if the square has a piece of the same color, filter it out
         moves.retain(|game_move| {
-            if let Some(target_square) = board.get_square_at(&game_move.to) {
+            let target = match &game_move.move_type {
+                crate::board::MoveType::MoveTo(coord) => coord,
+                _ => {
+                    todo!("Handle other move types in get_moves filtering");
+                }
+            };
+            if let Some(target_square) = board.get_square_at(&target) {
                 if let Some(target_piece) = &target_square.piece {
                     target_piece.get_color() != self.get_color()
                 } else {

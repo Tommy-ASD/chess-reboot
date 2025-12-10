@@ -7,7 +7,7 @@ use std::rc::Rc;
 /// If the goblin is taken by an enemy piece while it has a piece kidnapped,
 /// the kidnapped piece is placed where the goblin was located, and the taking piece can move again
 use crate::{
-    board::{Board, Coord, GameMove},
+    board::{Board, Coord, GameMove, MoveType},
     movement::glider::{OMNI_DIRS, generate_glider_moves},
     pieces::{Color, Piece, piecetype::PieceType},
 };
@@ -76,7 +76,7 @@ impl Goblin {
                 if board.square_is_empty(&coord) {
                     let game_move = GameMove {
                         from: from.clone(),
-                        to: coord.clone(),
+                        move_type: MoveType::MoveTo(coord.clone()),
                     };
                     moves.push(game_move);
                 }

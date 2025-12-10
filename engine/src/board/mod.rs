@@ -34,12 +34,19 @@ fn sq_to_coord(sq: Sq) -> Coord {
     }
 }
 
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "target")]
+pub enum MoveType {
+    MoveTo(Coord),
+    PhaseShift,
+}
+
 /// Represents a move from one coordinate to another.
 /// Will likely be expanded later with more info.
 #[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub struct GameMove {
     pub from: Coord,
-    pub to: Coord,
+    pub move_type: MoveType,
 }
 
 pub type Direction = (isize, isize);

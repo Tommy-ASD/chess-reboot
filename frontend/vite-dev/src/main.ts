@@ -91,7 +91,7 @@ async function handleSquareClick(rank: number, file: number) {
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    allowedSquares = (await fetchMoves(fen, rank, file)).map(m => m.to);
+    allowedSquares = (await fetchMoves(fen, rank, file)).map(m => m.move_type.kind === "MoveTo" ? m.move_type.target : null).filter((c): c is Coord => c !== null);
 
     console.log("Legal moves:", allowedSquares);
 
@@ -121,7 +121,13 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Game
 }
 
 type Coord = { file: number; rank: number };
-type GameMove = { from: Coord; to: Coord };
+
+type MoveType =
+  | { kind: "MoveTo"; target: Coord }
+  | { kind: "PhaseShift" };
+
+
+type GameMove = { from: Coord; move_type: MoveType };
 
 /// Simple helper to highlight squares given a list of coordinates
 function highlightMoves(moves: Coord[]) {
@@ -152,14 +158,19 @@ function clearSelection() {
 /// }
 /// Returns the new FEN string on success
 async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
-  const response = await fetch("http://localhost:8080/board/new_state", {
+  let body = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       board_fen: fen,
-      game_move: { from, to }
+      game_move: {
+        from,
+        move_type: { kind: "MoveTo", target: to }
+      }
     })
-  });
+  };
+  console.log("Making move with body:", body);
+  const response = await fetch("http://localhost:8080/board/new_state", body);
   console.log("Response:", response);
 
   if (!response.ok) {

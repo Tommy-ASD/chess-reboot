@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, Coord, GameMove},
+    board::{Board, Coord, GameMove, MoveType},
     pieces::{Color, Piece},
 };
 
@@ -40,7 +40,7 @@ impl Piece for Knight {
                 };
                 let game_move = GameMove {
                     from: from.clone(),
-                    to: coord.clone(),
+                    move_type: MoveType::MoveTo(coord),
                 };
                 moves.push(game_move);
             }

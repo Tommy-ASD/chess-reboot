@@ -12,7 +12,7 @@
 ///
 /// This should be done recursively, to allow for multiple jumps in a single move
 use crate::{
-    board::{Board, Coord, GameMove},
+    board::{Board, Coord, GameMove, MoveType},
     pieces::{Color, Piece},
 };
 
@@ -55,7 +55,7 @@ impl Piece for Monkey {
                 if board.square_is_empty(&coord) {
                     let game_move = GameMove {
                         from: from.clone(),
-                        to: coord.clone(),
+                        move_type: MoveType::MoveTo(coord.clone()),
                     };
                     moves.push(game_move);
                 }
@@ -143,7 +143,7 @@ impl Monkey {
                             if jump_square.piece.is_none() {
                                 let game_move = GameMove {
                                     from: current_coord.clone(),
-                                    to: jump_coord.clone(),
+                                    move_type: MoveType::MoveTo(jump_coord.clone()),
                                 };
                                 moves.push(game_move);
                                 visited.push(jump_coord.clone());
@@ -152,7 +152,7 @@ impl Monkey {
                             if jump_square.has_piece_of_color(self.color.opposite()) {
                                 let game_move = GameMove {
                                     from: current_coord.clone(),
-                                    to: jump_coord.clone(),
+                                    move_type: MoveType::MoveTo(jump_coord.clone()),
                                 };
                                 moves.push(game_move);
                                 visited.push(jump_coord.clone());
