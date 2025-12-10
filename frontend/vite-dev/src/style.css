@@ -92,3 +92,23 @@ body {
 #fen-list li:hover {
   background: #ddd;
 }
+
+#actions-panel {
+  width: 180px;
+  padding-left: 10px;
+}
+
+#special-actions button {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #ccc;
+  border: 1px solid #888;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#special-actions button:hover {
+  background: #bbb;
+}

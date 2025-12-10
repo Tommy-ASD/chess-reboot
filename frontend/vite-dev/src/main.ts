@@ -8,6 +8,7 @@ import { parseFEN, pieceToSymbol } from "./fen";
 let selectedSquare: Coord | null = null;
 let allowedSquares: Coord[] = []; // returned from API
 
+
 function isAllowedSquare(c: Coord): boolean {
   return allowedSquares.some(m => m.rank === c.rank && m.file === c.file);
 }
