@@ -17,7 +17,6 @@ pub enum GoblinState {
     Free, // hasn't kidnapped any piece
     Kidnapping {
         piece: Rc<PieceType>, // the piece being carried
-        home: Coord,          // goblin’s home
     },
 }
 
@@ -25,28 +24,25 @@ pub enum GoblinState {
 pub struct Goblin {
     pub color: Color,
     pub state: GoblinState,
+    pub home_square: Coord,
 }
 
 impl Clone for Goblin {
     fn clone(&self) -> Self {
         Goblin {
             color: self.color,
-            state: match &self.state {
-                GoblinState::Free => GoblinState::Free,
-                GoblinState::Kidnapping { piece, home } => GoblinState::Kidnapping {
-                    piece: piece.clone(),
-                    home: home.clone(),
-                },
-            },
+            state: self.state.clone(),
+            home_square: self.home_square.clone(),
         }
     }
 }
 
 impl Goblin {
-    pub fn new(color: Color) -> Self {
+    pub fn new(color: Color, home_square: Coord) -> Self {
         Goblin {
             color,
             state: GoblinState::Free,
+            home_square,
         }
     }
 
@@ -97,8 +93,18 @@ impl Goblin {
         }
     }
 
+    fn parse_coord(pair: &str) -> Option<Coord> {
+        let mut parts = pair.split('-');
+        let file = parts.next()?.parse::<u8>().ok()?;
+        let rank = parts.next()?.parse::<u8>().ok()?;
+
+        Some(Coord { file, rank })
+    }
+
     // this one is tricky because the symbol changes based on state
-    // so usually, it's just G/g for free goblin
+    // so usually, it's G[H=f3] for free goblin
+    // where H=f3 indicates home square
+
     // but when kidnapping, it could be something else
     // thinking brackets [] for carrying a piece
     // and inside the brackets, the symbol of the piece being carried
@@ -123,13 +129,7 @@ impl Goblin {
                         if let Some(p) = PieceType::symbol_to_piece(sym) {
                             return Some(PieceType::Goblin(Goblin {
                                 color,
-                                state: GoblinState::Kidnapping {
-                                    piece: Rc::new(p),
-                                    home: match color {
-                                        Color::White => Coord { file: 0, rank: 0 },
-                                        Color::Black => Coord { file: 7, rank: 7 },
-                                    },
-                                },
+                                state: GoblinState::Kidnapping { piece: Rc::new(p) },
                             }));
                         } else {
                             println!("Unknown piece!! {sym}");
@@ -144,6 +144,12 @@ impl Goblin {
             state: GoblinState::Free,
         }))
     }
+    // We need to change this to accomodate for the home_square of the goblin
+    // so I'm thinking G[H=<home_square>,P=<piece>]
+    // Like G[H=0-0,P=n], referring to square a1
+    // not using algebraic notation
+    // because the board may not be standard 8x8
+    // so file-rank pairs are more universal
 }
 
 impl Piece for Goblin {
@@ -214,7 +220,6 @@ impl Piece for Goblin {
                                     {
                                         goblin.state = GoblinState::Kidnapping {
                                             piece: captured_piece.clone().into(),
-                                            home,
                                         };
                                     }
                                 }
@@ -224,8 +229,8 @@ impl Piece for Goblin {
                 }
             }
             // handle the conversion of and dropping off of kidnapped piece
-            GoblinState::Kidnapping { piece, home } => {
-                if to == home {
+            GoblinState::Kidnapping { piece } => {
+                if to == &self.home_square {
                     // drop off the kidnapped piece
                     board_after.set_piece_at(to, piece.clone().into());
                     // goblin dies (maybe change later?)
