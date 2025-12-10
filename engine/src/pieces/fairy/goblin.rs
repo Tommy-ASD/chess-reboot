@@ -102,54 +102,82 @@ impl Goblin {
     }
 
     // this one is tricky because the symbol changes based on state
-    // so usually, it's G[H=f3] for free goblin
-    // where H=f3 indicates home square
+    // so usually, it's G[H=0-0] for free goblin
+    // where H=0-0 indicates home square
 
     // but when kidnapping, it could be something else
-    // thinking brackets [] for carrying a piece
     // and inside the brackets, the symbol of the piece being carried
-    // e.g. `G[P=n]` for white goblin carrying black knight
+    // e.g. `G[H=0-0,P=n]` for white goblin carrying black knight
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
-        let color = match symbol.chars().next()? {
+        // debug print
+        dbg!();
+        println!("Parsing Goblin from symbol: {}", symbol);
+
+        let first = symbol.chars().next()?;
+        let color = match first {
             'G' => Color::White,
             'g' => Color::Black,
             _ => return None,
         };
-        // check for kidnapping state
-        // e.g. G[P=n]
-        // check for brackets, inside brackets, check for P=, if found, get the piece symbol after = (which lasts until , or ])
-        if let Some(start) = symbol.find('[') {
-            if let Some(end) = symbol.find(']') {
-                let inside = &symbol[start + 1..end];
-                let parts: Vec<&str> = inside.split(',').collect();
-                for part in parts {
-                    let kv: Vec<&str> = part.split('=').collect();
-                    if kv.len() == 2 && kv[0] == "P" {
-                        let sym = kv[1];
-                        if let Some(p) = PieceType::symbol_to_piece(sym) {
-                            return Some(PieceType::Goblin(Goblin {
-                                color,
-                                state: GoblinState::Kidnapping { piece: Rc::new(p) },
-                            }));
-                        } else {
-                            println!("Unknown piece!! {sym}");
-                        }
+
+        // No bracket, fallback: a generic free goblin with default home?
+        // fallback to home square at a1
+        let Some(start) = symbol.find('[') else {
+            return Some(PieceType::Goblin(Goblin {
+                color,
+                state: GoblinState::Free,
+                home_square: Coord { file: 0, rank: 0 },
+            }));
+        };
+
+        let end = symbol.find(']')?;
+        let inside = &symbol[start + 1..end];
+
+        let mut home_square: Option<Coord> = None;
+        let mut kidnapped_piece: Option<PieceType> = None;
+
+        for field in inside.split(',') {
+            let mut kv = field.splitn(2, '=');
+            let key = kv.next()?.trim();
+            let val = kv.next()?.trim();
+
+            match key {
+                "H" => {
+                    home_square = Self::parse_coord(val);
+                    if home_square.is_none() {
+                        println!("Invalid Goblin home square: {}", val);
                     }
+                }
+                "P" => {
+                    kidnapped_piece = PieceType::symbol_to_piece(val);
+                    if kidnapped_piece.is_none() {
+                        println!("Unknown kidnapped piece symbol: {}", val);
+                    }
+                }
+                _ => {
+                    println!("Unknown Goblin attribute: {}", field);
                 }
             }
         }
 
+        // Home square MUST be present in Goblin notation
+        let Some(home_sq) = home_square else {
+            println!("Goblin missing required home square notation (H=file-rank)");
+            return None;
+        };
+
+        let state = if let Some(p) = kidnapped_piece {
+            GoblinState::Kidnapping { piece: p.into() }
+        } else {
+            GoblinState::Free
+        };
+
         Some(PieceType::Goblin(Goblin {
             color,
-            state: GoblinState::Free,
+            state,
+            home_square: home_sq,
         }))
     }
-    // We need to change this to accomodate for the home_square of the goblin
-    // so I'm thinking G[H=<home_square>,P=<piece>]
-    // Like G[H=0-0,P=n], referring to square a1
-    // not using algebraic notation
-    // because the board may not be standard 8x8
-    // so file-rank pairs are more universal
 }
 
 impl Piece for Goblin {
