@@ -102,8 +102,8 @@ impl Board {
     }
 
     /// Takes a from and to coordinate and returns true if the move is valid.
-    pub fn is_valid_move(&self, from: &Coord, to: &Coord) -> bool {
-        let possible_moves = self.get_moves(from);
-        possible_moves.iter().any(|m| &m.to == to)
+    pub fn is_valid_move(&self, game_move: &GameMove) -> bool {
+        let possible_moves = self.get_moves(&game_move.from);
+        possible_moves.iter().any(|m| m == game_move)
     }
 }

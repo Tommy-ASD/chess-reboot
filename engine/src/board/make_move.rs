@@ -22,7 +22,7 @@ impl Board {
         };
 
         // validate legality of the move
-        if !self.is_valid_move(from, to) {
+        if !self.is_valid_move(&game_move) {
             return Err(format!("Illegal move: {:?} -> {:?}", from, to));
         }
 
