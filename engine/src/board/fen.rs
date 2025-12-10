@@ -151,6 +151,10 @@ pub fn fen_to_square(fen: &str) -> Square {
         dbg!();
         println!("Parsing extended square fen: {}", inner);
 
+        // This needs to accomodate for nested FEN
+        // like
+        // (T=VENT,C=FROZEN,P=G(P=b))
+
         for part in inner.split(',') {
             let kv: Vec<&str> = part.split('=').collect();
             if kv.len() != 2 {
