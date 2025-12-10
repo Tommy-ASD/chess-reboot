@@ -41,6 +41,9 @@ function renderBoard(fen: string) {
         if (square_data.conditions.includes("FROZEN")) {
           square.classList.add("cond-frozen");
         }
+        if (square_data.squareType === "VENT") {
+          square.classList.add("type-vent");
+        }
 
       }
 
