@@ -130,8 +130,50 @@ pub fn square_to_fen(square: &Square) -> String {
     format!("({})", parts.join(","))
 }
 
+fn split_top_level(input: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut buf = String::new();
+    let mut depth = 0;
+
+    for ch in input.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                buf.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                buf.push(ch);
+            }
+            ',' if depth == 0 => {
+                parts.push(buf.trim().to_string());
+                buf.clear();
+            }
+            _ => buf.push(ch),
+        }
+    }
+
+    if !buf.is_empty() {
+        parts.push(buf.trim().to_string());
+    }
+
+    parts
+}
+
+fn parse_nested_piece(sym: &str) -> Option<PieceType> {
+    // If nested (begins with "(" or something like G(...)) we treat
+    // the entire string as a full fen_to_square() call.
+    if sym.contains('(') {
+        let sq = fen_to_square(sym);
+        return sq.piece; // piece extracted from nested square
+    }
+
+    // Otherwise treat as normal piece symbol
+    PieceType::symbol_to_piece(sym)
+}
+
 pub fn fen_to_square(fen: &str) -> Square {
-    // Standard empty square
+    // Standard empty
     if fen.is_empty() || fen == "()" {
         return Square {
             piece: None,
@@ -140,59 +182,40 @@ pub fn fen_to_square(fen: &str) -> Square {
         };
     }
 
-    // Extended format (P=...,T=...,C=...)
+    // Extended form
     if fen.starts_with('(') && fen.ends_with(')') {
         let inner = &fen[1..fen.len() - 1];
-        let mut piece = None;
+        let mut piece: Option<PieceType> = None;
         let mut square_type = SquareType::Standard;
-        let mut conditions = vec![];
+        let mut conditions = Vec::new();
 
-        // debug print
-        dbg!();
-        println!("Parsing extended square fen: {}", inner);
+        // Split only at top-level commas (nested-safe)
+        let fields = split_top_level(inner);
 
-        // This needs to accomodate for nested FEN
-        // like
-        // (T=VENT,C=FROZEN,P=G(P=b))
+        for field in fields {
+            let mut kv = field.splitn(2, '=');
+            let key = kv.next().unwrap_or("").trim();
+            let value = kv.next().unwrap_or("").trim();
 
-        for part in inner.split(',') {
-            let kv: Vec<&str> = part.split('=').collect();
-            if kv.len() != 2 {
-                continue;
-            }
-
-            match kv[0] {
+            match key {
                 "P" => {
-                    let sym = kv[1];
-                    if let Some(p) = PieceType::symbol_to_piece(sym) {
-                        piece = Some(p);
-                    } else {
-                        println!("Unknown piece!! {sym}");
-                    }
+                    piece = parse_nested_piece(value);
                 }
                 "T" => {
-                    square_type = {
-                        let sqty = kv[1];
-                        match sqty {
-                            "TURRET" => SquareType::Turret,
-                            "VENT" => SquareType::Vent,
-                            _ => {
-                                println!("Unknown square type!! {sqty}");
-                                SquareType::Standard
-                            }
-                        }
-                    }
-                }
-                "C" => {
-                    let sqcon = kv[1];
-                    match sqcon {
-                        "FROZEN" => conditions.push(SquareCondition::Frozen),
+                    square_type = match value {
+                        "TURRET" => SquareType::Turret,
+                        "VENT" => SquareType::Vent,
                         _ => {
-                            println!("Unknown square condition!! {sqcon}");
+                            println!("Unknown square type {value}");
+                            SquareType::Standard
                         }
                     }
                 }
-                _ => {}
+                "C" => match value {
+                    "FROZEN" => conditions.push(SquareCondition::Frozen),
+                    _ => println!("Unknown square condition {value}"),
+                },
+                _ => println!("Unknown field {field}"),
             }
         }
 
@@ -204,9 +227,8 @@ pub fn fen_to_square(fen: &str) -> Square {
     }
 
     // Standard single-character piece
-    let piece = PieceType::symbol_to_piece(fen);
     Square {
-        piece,
+        piece: PieceType::symbol_to_piece(fen),
         square_type: SquareType::Standard,
         conditions: vec![],
     }
