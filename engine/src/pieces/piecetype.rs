@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::pieces::{
     Color, Piece,
-    fairy::goblin::Goblin,
+    fairy::{goblin::Goblin, skibidi::Skibidi},
     standard::{bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook},
 };
 
@@ -18,6 +18,7 @@ pub enum PieceType {
 
     Monkey(crate::pieces::chess2::monkey::Monkey),
     Goblin(crate::pieces::fairy::goblin::Goblin),
+    Skibidi(crate::pieces::fairy::skibidi::Skibidi),
 
     Custom(Box<dyn Piece>),
 }
@@ -40,6 +41,7 @@ impl PieceType {
 
             PieceType::Monkey(piece) => piece.as_any_mut(),
             PieceType::Goblin(piece) => piece.as_any_mut(),
+            PieceType::Skibidi(piece) => piece.as_any_mut(),
 
             PieceType::Custom(piece) => piece.as_any_mut(),
         }
@@ -56,6 +58,7 @@ impl PieceType {
 
             PieceType::Monkey(piece) => piece.symbol(),
             PieceType::Goblin(piece) => piece.symbol(),
+            PieceType::Skibidi(piece) => piece.symbol(),
 
             PieceType::Custom(piece) => piece.symbol(),
         }
@@ -107,6 +110,7 @@ impl PieceType {
             })),
 
             "g" => Goblin::from_symbol(symbol),
+            "s" => Skibidi::from_symbol(symbol),
 
             _ => None,
         }
@@ -151,8 +155,11 @@ impl PieceType {
             PieceType::Bishop(piece) => piece.color(),
             PieceType::Queen(piece) => piece.color(),
             PieceType::King(piece) => piece.color(),
+
             PieceType::Monkey(piece) => piece.color(),
             PieceType::Goblin(piece) => piece.color(),
+            PieceType::Skibidi(piece) => piece.color(),
+
             PieceType::Custom(piece) => piece.color(),
         }
     }
@@ -165,8 +172,11 @@ impl PieceType {
             PieceType::Bishop(piece) => piece.set_color(color),
             PieceType::Queen(piece) => piece.set_color(color),
             PieceType::King(piece) => piece.set_color(color),
+
             PieceType::Monkey(piece) => piece.set_color(color),
             PieceType::Goblin(piece) => piece.set_color(color),
+            PieceType::Skibidi(piece) => piece.set_color(color),
+
             PieceType::Custom(piece) => piece.set_color(color),
         }
     }
@@ -183,8 +193,11 @@ impl PieceType {
             PieceType::Bishop(piece) => piece.initial_moves(board, from),
             PieceType::Queen(piece) => piece.initial_moves(board, from),
             PieceType::King(piece) => piece.initial_moves(board, from),
+
             PieceType::Monkey(piece) => piece.initial_moves(board, from),
             PieceType::Goblin(piece) => piece.initial_moves(board, from),
+            PieceType::Skibidi(piece) => piece.initial_moves(board, from),
+
             PieceType::Custom(piece) => piece.initial_moves(board, from),
         };
 
@@ -228,12 +241,17 @@ impl PieceType {
             }
             PieceType::Queen(piece) => piece.post_move_effects(board_before, board_after, from, to),
             PieceType::King(piece) => piece.post_move_effects(board_before, board_after, from, to),
+
             PieceType::Monkey(piece) => {
                 piece.post_move_effects(board_before, board_after, from, to)
             }
             PieceType::Goblin(piece) => {
                 piece.post_move_effects(board_before, board_after, from, to)
             }
+            PieceType::Skibidi(piece) => {
+                piece.post_move_effects(board_before, board_after, from, to)
+            }
+
             PieceType::Custom(piece) => {
                 piece.post_move_effects(board_before, board_after, from, to)
             }
