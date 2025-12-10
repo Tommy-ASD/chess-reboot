@@ -1,4 +1,5 @@
 // src/main.ts
+
 /// Builds with: npx tsc
 /// Runs with: npx serve
 
@@ -78,6 +79,7 @@ async function handleSquareClick(rank: number, file: number) {
       console.log("New FEN:", newFen);
       (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
       renderBoard(newFen);
+      clearSelection();
     } catch (err) {
       console.error("Error making move:", err);
     }
@@ -188,3 +190,36 @@ document.getElementById("fen-input")!.addEventListener("input", (ev) => {
   const value = (ev.target as HTMLInputElement).value;
   try { renderBoard(value); } catch { }
 });
+
+
+// ------------------------------------------
+// FEN PRESET LIST
+// ------------------------------------------
+
+const FEN_PRESETS: { name: string; fen: string }[] = [
+  { name: "Empty Board", fen: "8/8/8/8/8/8/8/8" },
+  { name: "Standard Chess", fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" },
+  { name: "Goblin Test", fen: "(P=g(H=0-0))nbqkbn(P=g(H=7-0))/pppppppp/8/8/8/8/PPPPPPPP/(P=G(H=0-7))NBQKBN(P=G(H=7-7))" },
+  { name: "Vent Test", fen: "(T=VENT)7/8/8/8/8/8/8/8" },
+  { name: "Frozen Test", fen: "(C=FROZEN)7/8/8/8/8/8/8/8" },
+];
+
+function populateFENList() {
+  const list = document.getElementById("fen-list")!;
+  list.innerHTML = "";
+
+  for (const { name, fen } of FEN_PRESETS) {
+    const li = document.createElement("li");
+    li.textContent = name;
+
+    li.onclick = () => {
+      const input = document.getElementById("fen-input") as HTMLInputElement;
+      input.value = fen;
+      renderBoard(fen);
+    };
+
+    list.appendChild(li);
+  }
+}
+
+populateFENList();

@@ -9,10 +9,18 @@
 <body>
   <h1>FEN Renderer</h1>
 
-  <input id="fen-input" type="text" placeholder="Enter FEN here" />
-  <button id="load-btn">Load FEN</button>
+  <div id="layout">
+    <div id="left-panel">
+      <input id="fen-input" type="text" placeholder="Enter FEN here" />
+      <button id="load-btn">Load FEN</button>
 
-  <div id="board"></div>
+      <h3>FEN Presets</h3>
+      <ul id="fen-list"></ul>
+    </div>
+
+    <div id="board"></div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 

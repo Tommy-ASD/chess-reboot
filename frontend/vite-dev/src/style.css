@@ -1,3 +1,5 @@
+/* src/style.css */
+
 body {
   font-family: sans-serif;
   margin: 20px;
@@ -62,4 +64,31 @@ body {
 
 .highlight {
   border: 3px solid yellow;
+}
+
+#layout {
+  display: flex;
+  gap: 20px;
+}
+
+#left-panel {
+  width: 250px;
+}
+
+#fen-list {
+  list-style: none;
+  padding: 0;
+}
+
+#fen-list li {
+  cursor: pointer;
+  background: #eee;
+  padding: 6px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  user-select: none;
+}
+
+#fen-list li:hover {
+  background: #ddd;
 }
