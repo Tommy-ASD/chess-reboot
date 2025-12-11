@@ -4,7 +4,7 @@ use crate::{
     board::GameMove,
     pieces::{
         Color, Piece,
-        fairy::{goblin::Goblin, skibidi::Skibidi},
+        fairy::{bus::Bus, goblin::Goblin, skibidi::Skibidi},
         standard::{
             bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook,
         },
@@ -24,6 +24,7 @@ pub enum PieceType {
     Monkey(crate::pieces::chess2::monkey::Monkey),
     Goblin(crate::pieces::fairy::goblin::Goblin),
     Skibidi(crate::pieces::fairy::skibidi::Skibidi),
+    Bus(crate::pieces::fairy::bus::Bus),
 
     Custom(Box<dyn Piece>),
 }
@@ -47,6 +48,7 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.as_any_mut(),
             PieceType::Goblin(piece) => piece.as_any_mut(),
             PieceType::Skibidi(piece) => piece.as_any_mut(),
+            PieceType::Bus(piece) => piece.as_any_mut(),
 
             PieceType::Custom(piece) => piece.as_any_mut(),
         }
@@ -64,6 +66,7 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.symbol(),
             PieceType::Goblin(piece) => piece.symbol(),
             PieceType::Skibidi(piece) => piece.symbol(),
+            PieceType::Bus(piece) => piece.symbol(),
 
             PieceType::Custom(piece) => piece.symbol(),
         }
@@ -116,6 +119,7 @@ impl PieceType {
 
             "g" => Goblin::from_symbol(symbol),
             "s" => Skibidi::from_symbol(symbol),
+            "bus" => Bus::from_symbol(symbol),
 
             _ => None,
         }
@@ -164,6 +168,7 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.color(),
             PieceType::Goblin(piece) => piece.color(),
             PieceType::Skibidi(piece) => piece.color(),
+            PieceType::Bus(piece) => piece.color(),
 
             PieceType::Custom(piece) => piece.color(),
         }
@@ -181,6 +186,7 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.set_color(color),
             PieceType::Goblin(piece) => piece.set_color(color),
             PieceType::Skibidi(piece) => piece.set_color(color),
+            PieceType::Bus(piece) => piece.set_color(color),
 
             PieceType::Custom(piece) => piece.set_color(color),
         }
@@ -202,6 +208,7 @@ impl PieceType {
             PieceType::Monkey(piece) => piece.initial_moves(board, from),
             PieceType::Goblin(piece) => piece.initial_moves(board, from),
             PieceType::Skibidi(piece) => piece.initial_moves(board, from),
+            PieceType::Bus(piece) => piece.initial_moves(board, from),
 
             PieceType::Custom(piece) => piece.initial_moves(board, from),
         };
@@ -258,6 +265,7 @@ impl PieceType {
             PieceType::Skibidi(piece) => {
                 piece.post_move_effects(board_before, board_after, game_move)
             }
+            PieceType::Bus(piece) => piece.post_move_effects(board_before, board_after, game_move),
 
             PieceType::Custom(piece) => {
                 piece.post_move_effects(board_before, board_after, game_move)

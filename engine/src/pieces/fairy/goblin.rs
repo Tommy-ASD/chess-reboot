@@ -7,7 +7,10 @@ use std::rc::Rc;
 /// If the goblin is taken by an enemy piece while it has a piece kidnapped,
 /// the kidnapped piece is placed where the goblin was located, and the taking piece can move again
 use crate::{
-    board::{Board, Coord, GameMove, MoveType},
+    board::{
+        Board, Coord, GameMove, MoveType,
+        fen::{find_matching_paren, split_top_level},
+    },
     movement::glider::{OMNI_DIRS, generate_glider_moves},
     pieces::{Color, Piece, piecetype::PieceType},
 };
@@ -130,16 +133,18 @@ impl Goblin {
             }));
         };
 
-        let end = symbol.find(')')?;
+        let end = find_matching_paren(symbol, start)?;
         let inside = &symbol[start + 1..end];
 
         let mut home_square: Option<Coord> = None;
         let mut kidnapped_piece: Option<PieceType> = None;
 
-        for field in inside.split(',') {
+        for field in split_top_level(inside) {
             let mut kv = field.splitn(2, '=');
             let key = kv.next()?.trim();
             let val = kv.next()?.trim();
+
+            println!("Handling `{field}` (turned into `{key}={val}`)");
 
             match key {
                 "H" => {

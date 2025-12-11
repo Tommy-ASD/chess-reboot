@@ -6,6 +6,72 @@ use crate::{
     pieces::piecetype::PieceType,
 };
 
+/// Finds the index of the closing parenthesis that matches the opening
+/// parenthesis located at `open_index`.
+///
+/// This function scans forward from `open_index`, keeping track of nested
+/// parentheses. It returns the character index of the `)` that closes the
+/// parenthesis at `open_index`.
+///
+/// # Parameters
+///
+/// - `s`: The input string to search.
+/// - `open_index`: The index of the `'('` character whose matching `')'` we want
+///   to locate.  
+///   The character at `open_index` **must be `'('`**, otherwise the depth
+///   accounting will not behave as intended.
+///
+/// # Returns
+///
+/// - `Some(index)` — the byte index of the matching `)`
+/// - `None` — if no matching closing parenthesis exists (unbalanced or malformed data)
+///
+/// # Examples
+///
+/// ```
+/// let s = "G(H=0-7,P=g(H=0-0))";
+///
+/// // The first '(' occurs at index 1
+/// assert_eq!(find_matching_paren(s, 1), Some(18));
+///
+/// // A nested example:
+/// let s = "foo(bar(baz),qux)";
+/// // '(' at index 3 closes at index 15
+/// assert_eq!(find_matching_paren(s, 3), Some(15));
+///
+/// // Unmatched parentheses:
+/// let s = "(abc(def)";
+/// assert_eq!(find_matching_paren(s, 0), None);
+/// ```
+///
+/// # Notes
+///
+/// - The function uses `char_indices` and returns a byte index into the original
+///   string.
+/// - Nested parentheses are fully supported. Depth increases on `'('` and
+///   decreases on `')'`.
+/// - The match occurs when the depth returns to zero for the first time *after*
+///   processing the opening parenthesis at `open_index`.
+///
+pub fn find_matching_paren(s: &str, open_index: usize) -> Option<usize> {
+    let mut depth = 0;
+
+    for (i, ch) in s.char_indices().skip(open_index) {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn fen_row_to_squares(row: &str) -> Vec<Square> {
     // println!("=== fen_row_to_squares BEGIN ===");
     // println!("row = \"{}\"", row);
@@ -179,38 +245,78 @@ pub fn square_to_fen(square: &Square) -> String {
     format!("({})", parts.join(","))
 }
 
-fn split_top_level(input: &str) -> Vec<String> {
-    // println!("--- split_top_level BEGIN ---");
-    // println!("input = \"{}\"", input);
+/// Splits a string on **top-level commas**, i.e., commas that are **not**
+/// nested inside parentheses.
+///
+/// This is useful for parsing argument lists or comma-separated constructs
+/// where parentheses may contain commas that should *not* act as separators.
+///
+/// # How it works
+/// - Iterates through the input one character at a time.
+/// - Tracks the current *parenthesis depth*.  
+///   - `(` increases depth  
+///   - `)` decreases depth
+/// - A comma is treated as a separator **only when `depth == 0`**.
+/// - Everything else is appended to the current buffer.
+/// - When a top-level comma is encountered, the accumulated buffer becomes a
+///   new part in the result.
+/// - After iteration, any remaining buffered text is pushed as the final part.
+///
+/// # Returns
+/// A `Vec<String>` where each element is a trimmed substring extracted from
+/// the input, split only at top-level commas.
+///
+/// # Examples
+/// ```
+/// let input = "a, b(c, d), e";
+/// let parts = split_top_level(input);
+///
+/// assert_eq!(
+///     parts,
+///     vec![
+///         "a",
+///         "b(c, d)",
+///         "e",
+///     ]
+/// );
+/// ```
+///
+/// # Notes
+/// - The function treats parentheses literally and does not validate that they
+///   are balanced beyond simple depth tracking.
+/// - Whitespace around each extracted part is trimmed.
+pub fn split_top_level(input: &str) -> Vec<String> {
+    println!("--- split_top_level BEGIN ---");
+    println!("input = \"{}\"", input);
 
     let mut parts = Vec::new();
     let mut buf = String::new();
     let mut depth = 0usize;
 
     for (i, ch) in input.chars().enumerate() {
-        // println!(
-        //     "char[{}] = '{}'  depth = {}  buf = \"{}\"",
-        //     i, ch, depth, buf
-        // );
+        println!(
+            "char[{}] = '{}'  depth = {}  buf = \"{}\"",
+            i, ch, depth, buf
+        );
 
         match ch {
             '(' => {
                 depth += 1;
-                // println!("  -> '(' encountered, increasing depth to {}", depth);
+                println!("  -> '(' encountered, increasing depth to {}", depth);
                 buf.push(ch);
             }
             ')' => {
-                // println!("  -> ')' encountered, decreasing depth from {}", depth);
+                println!("  -> ')' encountered, decreasing depth from {}", depth);
                 depth -= 1;
                 buf.push(ch);
-                // println!("     new depth = {}", depth);
+                println!("     new depth = {}", depth);
             }
             ',' if depth == 0 => {
-                // println!(
-                //     "  -> TOP-LEVEL COMMA at index {}, pushing part: \"{}\"",
-                //     i,
-                //     buf.trim()
-                // );
+                println!(
+                    "  -> TOP-LEVEL COMMA at index {}, pushing part: \"{}\"",
+                    i,
+                    buf.trim()
+                );
 
                 parts.push(buf.trim().to_string());
                 buf.clear();
@@ -222,12 +328,12 @@ fn split_top_level(input: &str) -> Vec<String> {
     }
 
     if !buf.is_empty() {
-        // println!("END OF STRING, pushing final part: \"{}\"", buf.trim());
+        println!("END OF STRING, pushing final part: \"{}\"", buf.trim());
         parts.push(buf.trim().to_string());
     }
 
-    // println!("FINAL PARTS = {:?}", parts);
-    // println!("--- split_top_level END ---\n");
+    println!("FINAL PARTS = {:?}", parts);
+    println!("--- split_top_level END ---\n");
 
     parts
 }
