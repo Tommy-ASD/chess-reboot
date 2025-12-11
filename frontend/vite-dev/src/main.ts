@@ -4,8 +4,9 @@
 /// Runs with: npx serve
 
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
-import { parseFEN, pieceToSymbol } from "./fen";
-import { allowedMoves, selectedSquare, setAllowedMoves, setSelectedSquare, type Coord, type GameMove } from "./variables";
+import { buildPalettes, editorMode, selectedEditorCondition, selectedEditorPiece, selectedEditorType } from "./editor";
+import { parseFEN, pieceToSymbol, squaresToFEN } from "./fen";
+import { allowedMoves, currentBoard, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
 
@@ -17,12 +18,12 @@ function renderBoard(fen: string) {
   const boardEl = document.getElementById("board")!;
   boardEl.innerHTML = ""; // clear previous board
 
-  const grid = parseFEN(fen);
+  setCurrentBoard(parseFEN(fen));
 
   // Loop rank 8 → 1 (FEN order)
   for (let rank = 0; rank < 8; rank++) {
     for (let file = 0; file < 8; file++) {
-      const square_data = grid[rank][file];
+      const square_data = currentBoard[rank][file];
 
       const square = document.createElement("div");
       square.classList.add("square");
@@ -49,8 +50,12 @@ function renderBoard(fen: string) {
       }
 
       square.onclick = () => {
-        handleSquareClick(rank, file);
-      };
+        if (editorMode) {
+          handleEditorClick(rank, file);
+        } else {
+          handleSquareClick(rank, file);
+        }
+      }
 
       boardEl.appendChild(square);
     }
@@ -101,6 +106,39 @@ async function handleSquareClick(rank: number, file: number) {
     console.error("Error fetching moves:", err);
   }
 }
+
+function handleEditorClick(rank: number, file: number) {
+  console.log("Handling editor click with ", rank, file);
+  console.log("Current board", currentBoard);
+
+  const sq = currentBoard[rank][file];
+
+  // 1. Place/remove piece
+  if (selectedEditorPiece !== undefined) {
+    if (selectedEditorPiece === "") sq.piece = null;
+    else sq.piece = selectedEditorPiece;
+  }
+
+  // 2. Change square type
+  if (selectedEditorType !== null) {
+    sq.squareType = selectedEditorType;
+  }
+
+  // 3. Toggle conditions
+  if (selectedEditorCondition !== null) {
+    if (sq.conditions.includes(selectedEditorCondition)) {
+      sq.conditions = sq.conditions.filter(c => c !== selectedEditorCondition);
+    } else {
+      sq.conditions.push(selectedEditorCondition);
+    }
+  }
+
+  // Update rendered board
+  const newFEN = squaresToFEN(currentBoard);
+  (document.getElementById("fen-input") as HTMLInputElement).value = newFEN;
+  renderBoard(newFEN);
+}
+
 
 function renderSpecialActions(moves: GameMove[]) {
   const list = document.getElementById("special-actions")!;
@@ -254,3 +292,4 @@ function populateFENList() {
 }
 
 populateFENList();
+buildPalettes();

@@ -32,3 +32,9 @@ export let allowedMoves: GameMove[] = []; // returned from API
 export function setAllowedMoves(a: GameMove[]) {
     allowedMoves = a;
 }
+
+export let currentBoard: Square[][] = []; // the board in memory
+
+export function setCurrentBoard(board: Square[][]) {
+    currentBoard = board
+}
