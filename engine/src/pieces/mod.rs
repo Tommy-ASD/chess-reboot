@@ -19,6 +19,10 @@ pub trait Piece {
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove>;
     fn symbol(&self) -> String;
 
+    fn can_carry_piece(&self) -> bool {
+        false
+    }
+
     fn clone_box(&self) -> Box<dyn Piece>;
 
     fn post_move_effects(

@@ -39,6 +39,7 @@ fn sq_to_coord(sq: Sq) -> Coord {
 #[serde(tag = "kind", content = "target")]
 pub enum MoveType {
     MoveTo(Coord),
+    MoveInto(Coord),
     PhaseShift,
 }
 

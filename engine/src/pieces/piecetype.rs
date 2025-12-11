@@ -156,6 +156,24 @@ impl PieceType {
         true
     }
 
+    fn can_carry_piece(&self) -> bool {
+        match self {
+            PieceType::Pawn(piece) => piece.can_carry_piece(),
+            PieceType::Rook(piece) => piece.can_carry_piece(),
+            PieceType::Knight(piece) => piece.can_carry_piece(),
+            PieceType::Bishop(piece) => piece.can_carry_piece(),
+            PieceType::Queen(piece) => piece.can_carry_piece(),
+            PieceType::King(piece) => piece.can_carry_piece(),
+
+            PieceType::Monkey(piece) => piece.can_carry_piece(),
+            PieceType::Goblin(piece) => piece.can_carry_piece(),
+            PieceType::Skibidi(piece) => piece.can_carry_piece(),
+            PieceType::Bus(piece) => piece.can_carry_piece(),
+
+            PieceType::Custom(piece) => piece.can_carry_piece(),
+        }
+    }
+
     pub fn get_color(&self) -> Color {
         match self {
             PieceType::Pawn(piece) => piece.color(),
@@ -214,7 +232,7 @@ impl PieceType {
         };
 
         // if the square has a piece of the same color, filter it out
-        moves.retain(|game_move| {
+        moves.retain_mut(|game_move| {
             let target = match &game_move.move_type {
                 crate::board::MoveType::MoveTo(coord) => coord,
                 crate::board::MoveType::PhaseShift => return true,
@@ -224,7 +242,15 @@ impl PieceType {
             };
             if let Some(target_square) = board.get_square_at(&target) {
                 if let Some(target_piece) = &target_square.piece {
-                    target_piece.get_color() != self.get_color()
+                    // if target piece is friendly carrying piece
+                    if target_piece.can_carry_piece()
+                        && target_piece.get_color() == self.get_color()
+                    {
+                        game_move.move_type = crate::board::MoveType::MoveInto(target.clone());
+                        true
+                    } else {
+                        target_piece.get_color() != self.get_color()
+                    }
                 } else {
                     true
                 }

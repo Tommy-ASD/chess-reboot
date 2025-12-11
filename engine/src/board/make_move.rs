@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
     pieces::piecetype::PieceType,
@@ -67,6 +69,37 @@ impl Board {
                 }
                 _ => return Err("Non-skibidi piece making phaseshift move".to_string()),
             },
+            MoveType::MoveInto(target) => {
+                // mutate board: remove piece from original square
+                // this logic will change later on with new pieces
+                {
+                    let from_sq = self
+                        .get_square_mut(from)
+                        .ok_or_else(|| format!("No square at {:?}", from))?;
+
+                    from_sq.piece = None;
+                }
+
+                // handle capture or landing on new square
+                // again, logic will change with new pieces
+                {
+                    let to_sq = self
+                        .get_square_mut(target)
+                        .ok_or_else(|| format!("No square at {:?}", target))?;
+
+                    // Whatever piece is there → captured automatically
+                    if let Some(target_piece) = &mut to_sq.piece {
+                        match target_piece {
+                            PieceType::Bus(bus) => bus.pieces.push(piece),
+                            _ => panic!(),
+                        }
+                    } else {
+                        todo!()
+                    }
+                }
+
+                println!("Move into executed: {:?} -> {:?}", from, target);
+            }
         };
 
         // 5. Special movement hooks (stub)
@@ -98,6 +131,7 @@ impl Board {
                 };
                 piece.post_move_effects(before_state, self, &game_move);
             }
+            MoveType::MoveInto(target) => {}
         }
 
         self.recalc_brainrot();
