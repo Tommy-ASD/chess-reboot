@@ -162,7 +162,7 @@ impl Piece for Skibidi {
                 self.phase = 1;
                 board_after.set_piece_at(&target, PieceType::Skibidi(self.clone()));
             }
-            MoveType::MoveInto(target) => todo!(),
+            MoveType::MoveIntoCarrier(target) => todo!(),
         }
     }
 }
