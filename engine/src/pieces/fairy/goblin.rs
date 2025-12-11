@@ -227,17 +227,21 @@ impl Piece for Goblin {
     }
 
     fn post_move_effects(
-        &self,
+        &mut self,
         board_before: &Board,
         board_after: &mut Board,
-        from: &Coord,
-        to: &Coord,
+        game_move: &GameMove,
     ) {
+        let to = match &game_move.move_type {
+            MoveType::MoveTo(target) => target.clone(),
+            _ => panic!("Goblin post move effects, not move to"),
+        };
+        let from = game_move.from.clone();
         match &self.state {
             // handle kidnapping state change
             // check if there was an enemy piece at the destination in the board before the move
             GoblinState::Free => {
-                if let Some(square) = board_before.get_square_at(to) {
+                if let Some(square) = board_before.get_square_at(&to) {
                     if let Some(captured_piece) = &square.piece {
                         if captured_piece.get_color() != self.color {
                             // initiate kidnapping
@@ -246,7 +250,7 @@ impl Piece for Goblin {
                                 Color::Black => Coord { file: 7, rank: 7 },
                             };
                             // update goblin state in the after board
-                            if let Some(goblin_square) = board_after.get_square_mut(to) {
+                            if let Some(goblin_square) = board_after.get_square_mut(&to) {
                                 if let Some(piece) = &mut goblin_square.piece {
                                     if let Some(goblin) =
                                         piece.as_any_mut().downcast_mut::<Goblin>()
@@ -265,9 +269,9 @@ impl Piece for Goblin {
             GoblinState::Kidnapping { piece } => {
                 let mut p: PieceType = piece.clone().into();
                 p.set_color(self.color);
-                if to == &self.home_square {
+                if &to == &self.home_square {
                     // drop off the kidnapped piece
-                    board_after.set_piece_at(to, p);
+                    board_after.set_piece_at(&to, p);
                     // goblin dies (maybe change later?)
                 }
             }

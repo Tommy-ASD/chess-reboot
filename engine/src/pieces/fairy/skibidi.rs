@@ -34,19 +34,44 @@ impl Skibidi {
     // the state only contains phase
     // we can keep it simple and forget the state in phase 1
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
-        let skib = match symbol {
-            "S" => Skibidi {
-                color: Color::White,
-                phase: 1,
-            },
-            "s" => Skibidi {
-                color: Color::Black,
-                phase: 1,
-            },
-            _ => todo!("Haven't implemented complex skibidi yet"),
+        println!("Got symbol {symbol}");
+
+        let color = if symbol.chars().next().unwrap().is_lowercase() {
+            Color::Black
+        } else {
+            Color::White
         };
 
-        Some(PieceType::Skibidi(skib))
+        // if no custom state, skibidi phase 1
+        let Some(start) = symbol.find('(') else {
+            return Some(PieceType::Skibidi(Skibidi { color, phase: 1 }));
+        };
+
+        let end = symbol.find(')')?;
+        let inside = &symbol[start + 1..end];
+
+        let mut phase = 1;
+
+        for field in inside.split(',') {
+            let mut kv = field.splitn(2, '=');
+            let key = kv.next()?.trim();
+            let val = kv.next()?.trim();
+
+            match key {
+                "PHASE" => {
+                    println!("Got phase {val}");
+                    match val.parse::<u8>() {
+                        Ok(ok) => phase = ok,
+                        Err(e) => println!("Got invalid phase for Skibidi: {val}"),
+                    };
+                }
+                _ => {
+                    println!("Unknown Goblin attribute: {}", field);
+                }
+            }
+        }
+
+        Some(PieceType::Skibidi(Skibidi { color, phase }))
     }
 }
 
@@ -105,10 +130,15 @@ impl Piece for Skibidi {
         moves
     }
     fn symbol(&self) -> String {
-        match self.color {
+        let mut sym = match self.color {
             Color::White => 'S'.to_string(),
             Color::Black => 's'.to_string(),
+        };
+        if self.phase > 1 {
+            sym.push_str(&format!("(PHASE={phase})", phase = self.phase));
         }
+
+        sym
     }
     fn clone_box(&self) -> Box<dyn Piece> {
         Box::new(self.clone())
@@ -118,5 +148,20 @@ impl Piece for Skibidi {
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn post_move_effects(
+        &mut self,
+        board_before: &Board,
+        board_after: &mut Board,
+        game_move: &GameMove,
+    ) {
+        match &game_move.move_type {
+            MoveType::PhaseShift => {}
+            MoveType::MoveTo(target) => {
+                self.phase = 1;
+                board_after.set_piece_at(&target, PieceType::Skibidi(self.clone()));
+            }
+        }
     }
 }

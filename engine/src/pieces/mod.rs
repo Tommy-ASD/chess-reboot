@@ -22,11 +22,10 @@ pub trait Piece {
     fn clone_box(&self) -> Box<dyn Piece>;
 
     fn post_move_effects(
-        &self,
+        &mut self,
         _board_before: &Board,
         _board_after: &mut Board,
-        _from: &Coord,
-        _to: &Coord,
+        _game_move: &GameMove,
     ) {
         // Default: do nothing
     }

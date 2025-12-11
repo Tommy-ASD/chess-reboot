@@ -1,9 +1,14 @@
 use std::rc::Rc;
 
-use crate::pieces::{
-    Color, Piece,
-    fairy::{goblin::Goblin, skibidi::Skibidi},
-    standard::{bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook},
+use crate::{
+    board::GameMove,
+    pieces::{
+        Color, Piece,
+        fairy::{goblin::Goblin, skibidi::Skibidi},
+        standard::{
+            bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook,
+        },
+    },
 };
 
 // the rest
@@ -205,6 +210,7 @@ impl PieceType {
         moves.retain(|game_move| {
             let target = match &game_move.move_type {
                 crate::board::MoveType::MoveTo(coord) => coord,
+                crate::board::MoveType::PhaseShift => return true,
                 _ => {
                     todo!("Handle other move types in get_moves filtering");
                 }
@@ -224,36 +230,37 @@ impl PieceType {
     }
 
     pub fn post_move_effects(
-        &self,
+        &mut self,
         board_before: &crate::board::Board,
         board_after: &mut crate::board::Board,
-        from: &crate::board::Coord,
-        to: &crate::board::Coord,
+        game_move: &GameMove,
     ) {
         match self {
-            PieceType::Pawn(piece) => piece.post_move_effects(board_before, board_after, from, to),
-            PieceType::Rook(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::Pawn(piece) => piece.post_move_effects(board_before, board_after, game_move),
+            PieceType::Rook(piece) => piece.post_move_effects(board_before, board_after, game_move),
             PieceType::Knight(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
             PieceType::Bishop(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
-            PieceType::Queen(piece) => piece.post_move_effects(board_before, board_after, from, to),
-            PieceType::King(piece) => piece.post_move_effects(board_before, board_after, from, to),
+            PieceType::Queen(piece) => {
+                piece.post_move_effects(board_before, board_after, game_move)
+            }
+            PieceType::King(piece) => piece.post_move_effects(board_before, board_after, game_move),
 
             PieceType::Monkey(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
             PieceType::Goblin(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
             PieceType::Skibidi(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
 
             PieceType::Custom(piece) => {
-                piece.post_move_effects(board_before, board_after, from, to)
+                piece.post_move_effects(board_before, board_after, game_move)
             }
         }
     }
