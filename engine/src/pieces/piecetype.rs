@@ -246,7 +246,8 @@ impl PieceType {
                     if target_piece.can_carry_piece()
                         && target_piece.get_color() == self.get_color()
                     {
-                        game_move.move_type = crate::board::MoveType::MoveInto(target.clone());
+                        game_move.move_type =
+                            crate::board::MoveType::MoveIntoCarrier(target.clone());
                         true
                     } else {
                         target_piece.get_color() != self.get_color()

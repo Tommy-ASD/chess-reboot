@@ -69,7 +69,7 @@ impl Board {
                 }
                 _ => return Err("Non-skibidi piece making phaseshift move".to_string()),
             },
-            MoveType::MoveInto(target) => {
+            MoveType::MoveIntoCarrier(target) => {
                 // mutate board: remove piece from original square
                 // this logic will change later on with new pieces
                 {
@@ -131,7 +131,7 @@ impl Board {
                 };
                 piece.post_move_effects(before_state, self, &game_move);
             }
-            MoveType::MoveInto(target) => {}
+            MoveType::MoveIntoCarrier(target) => {}
         }
 
         self.recalc_brainrot();
