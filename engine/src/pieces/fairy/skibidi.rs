@@ -163,6 +163,12 @@ impl Piece for Skibidi {
                 board_after.set_piece_at(&target, PieceType::Skibidi(self.clone()));
             }
             MoveType::MoveIntoCarrier(target) => todo!(),
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => {
+                todo!()
+            }
         }
     }
 }

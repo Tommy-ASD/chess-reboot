@@ -235,6 +235,16 @@ impl PieceType {
         moves.retain_mut(|game_move| {
             let target = match &game_move.move_type {
                 crate::board::MoveType::MoveTo(coord) => coord,
+                crate::board::MoveType::PieceInCarrier {
+                    piece_index: idx,
+                    move_type: inner_move_type,
+                } => match inner_move_type.as_ref() {
+                    crate::board::MoveType::MoveTo(coord) => coord,
+                    _ => {
+                        todo!();
+                        return false;
+                    }
+                },
                 crate::board::MoveType::PhaseShift => return true,
                 _ => {
                     todo!("Handle other move types in get_moves filtering");

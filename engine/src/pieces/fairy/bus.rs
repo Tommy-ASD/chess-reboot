@@ -132,6 +132,21 @@ impl Piece for Bus {
             }
         }
 
+        for (idx, piece) in self.pieces.iter().enumerate() {
+            let mut board_clone = board.clone();
+            board_clone.set_piece_at(from, piece.clone());
+            let inner_piece_moves = board_clone.get_moves(from);
+            for game_move in inner_piece_moves {
+                moves.push(GameMove {
+                    from: from.clone(),
+                    move_type: MoveType::PieceInCarrier {
+                        piece_index: idx as u8,
+                        move_type: game_move.move_type.into(),
+                    },
+                });
+            }
+        }
+
         moves
     }
     fn symbol(&self) -> String {

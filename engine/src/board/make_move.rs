@@ -100,6 +100,33 @@ impl Board {
 
                 println!("Move into executed: {:?} -> {:?}", from, target);
             }
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => {
+                match piece.clone() {
+                    PieceType::Bus(bus) => {
+                        let piece_index_deref: u8 = *piece_index;
+                        let piece_index_usize: usize = piece_index_deref.into();
+                        let moving_out_piece: &PieceType =
+                            bus.pieces.get::<usize>(piece_index_usize).unwrap();
+                        match move_type.as_ref() {
+                            MoveType::MoveTo(target) => {
+                                let to_sq = self
+                                    .get_square_mut(target)
+                                    .ok_or_else(|| format!("No square at {:?}", target))?;
+
+                                // Whatever piece is there → captured automatically
+                                to_sq.piece = Some(piece);
+
+                                println!("Moved out of carrier: {:?} -> {:?}", from, target);
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    _ => todo!(),
+                }
+            }
         };
 
         // 5. Special movement hooks (stub)
@@ -132,6 +159,10 @@ impl Board {
                 piece.post_move_effects(before_state, self, &game_move);
             }
             MoveType::MoveIntoCarrier(target) => {}
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => {}
         }
 
         self.recalc_brainrot();

@@ -1,3 +1,5 @@
+use std::{rc::Rc, sync::Arc};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -40,6 +42,10 @@ fn sq_to_coord(sq: Sq) -> Coord {
 pub enum MoveType {
     MoveTo(Coord),
     MoveIntoCarrier(Coord),
+    PieceInCarrier {
+        piece_index: u8,
+        move_type: Arc<MoveType>,
+    },
     PhaseShift,
 }
 
