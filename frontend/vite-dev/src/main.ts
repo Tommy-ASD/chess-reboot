@@ -42,11 +42,15 @@ function renderBoard(fen: string) {
       square.classList.add(isDark ? "dark" : "light");
 
       if (square_data) {
+        console.log(square_data);
         if (square_data.piece) {
           square.textContent = pieceToSymbol(square_data.piece);
         }
         if (square_data.conditions.includes("FROZEN")) {
           square.classList.add("cond-frozen");
+        }
+        if (square_data.conditions.includes("BRAINROT")) {
+          square.classList.add("cond-brainrot");
         }
         if (square_data.squareType === "VENT") {
           square.classList.add("type-vent");
