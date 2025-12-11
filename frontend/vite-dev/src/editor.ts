@@ -16,7 +16,7 @@ document.getElementById("editor-toggle")!.addEventListener("change", (ev) => {
 const PIECES = [
     "K", "Q", "R", "B", "N", "P",
     "k", "q", "r", "b", "n", "p",
-    "G", "g", "S", "s"
+    "G", "g", "S", "s", "bus", "BUS"
 ];
 
 function buildPiecePalette() {
