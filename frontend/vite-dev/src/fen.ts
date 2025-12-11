@@ -1,16 +1,6 @@
 // src/fen.ts
 
-// ----------------------------------------------
-// Type Definitions
-// ----------------------------------------------
-
-export type SquareType = "STANDARD" | "TURRET" | "VENT";
-
-export type Square = {
-  piece: string | null;        // "P", "q", "G(W=...)" etc
-  squareType: SquareType;
-  conditions: string[];        // ["FROZEN", ...]
-};
+import type { Square, SquareType } from "./variables";
 
 // For pretty optional rendering
 export const pieceToSymbol = (p: string): string => {

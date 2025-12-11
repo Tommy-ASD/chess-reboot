@@ -3,20 +3,10 @@
 /// Builds with: npx tsc
 /// Runs with: npx serve
 
+import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { parseFEN, pieceToSymbol } from "./fen";
+import { allowedMoves, selectedSquare, setAllowedMoves, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
-let selectedSquare: Coord | null = null;
-let allowedMoves: GameMove[] = []; // returned from API
-
-
-function isAllowedSquare(c: Coord): boolean {
-  // filter allowedMoves for MoveTo moves only
-  let allowedCoords = allowedMoves
-    .filter(m => isMoveTo(m))
-    .map(m => m.move_type.target);
-
-  return allowedCoords.some(ac => ac.file === c.file && ac.rank === c.rank);
-}
 
 
 // ---------------------------
@@ -97,11 +87,11 @@ async function handleSquareClick(rank: number, file: number) {
     return;
   }
 
-  selectedSquare = clicked;
+  setSelectedSquare(clicked);
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    allowedMoves = (await fetchMoves(fen, rank, file));
+    setAllowedMoves((await fetchMoves(fen, rank, file)));
 
     console.log("Legal moves:", allowedMoves);
 
@@ -109,59 +99,6 @@ async function handleSquareClick(rank: number, file: number) {
     renderSpecialActions(allowedMoves);
   } catch (err) {
     console.error("Error fetching moves:", err);
-  }
-}
-
-/// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
-async function fetchMoves(fen: string, rank: number, file: number): Promise<GameMove[]> {
-  const response = await fetch("http://localhost:8080/board/moves", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      board_fen: fen,
-      from: { file, rank }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.moves; // Vec<Coord> from Rust
-}
-
-type Coord = { file: number; rank: number };
-
-type MoveType =
-  | { kind: "MoveTo"; target: Coord }
-  | { kind: "PhaseShift" };
-
-
-type GameMove = { from: Coord; move_type: MoveType };
-
-function isMoveTo(m: GameMove): m is GameMove & { move_type: { kind: "MoveTo"; target: Coord } } {
-  return m.move_type.kind === "MoveTo";
-}
-
-function isSpecialMove(m: GameMove): boolean {
-  return m.move_type.kind !== "MoveTo";
-}
-
-
-/// Simple helper to highlight squares given a list of coordinates
-function highlightMoves(moves: GameMove[]) {
-  const squares = document.querySelectorAll(".square");
-  squares.forEach(sq => sq.classList.remove("highlight"));
-
-  // filter moves for MoveTo only
-  let moveCoords = moves
-    .filter(m => isMoveTo(m))
-    .map(m => m.move_type.target);
-
-  for (const m of moveCoords) {
-    const index = m.rank * 8 + m.file;
-    squares[index].classList.add("highlight");
   }
 }
 
@@ -196,6 +133,25 @@ function renderSpecialActions(moves: GameMove[]) {
   }
 }
 
+/// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
+async function fetchMoves(fen: string, rank: number, file: number): Promise<GameMove[]> {
+  const response = await fetch("http://localhost:8080/board/moves", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      board_fen: fen,
+      from: { file, rank }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.moves; // Vec<Coord> from Rust
+}
+
 async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
   const response = await fetch("http://localhost:8080/board/new_state", {
     method: "POST",
@@ -212,19 +168,6 @@ async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
   return data.new_board_fen;
 }
 
-
-
-/// Clears any selected square and highlighted moves
-function clearSelection() {
-  selectedSquare = null;
-  allowedMoves = [];
-
-  const squares = document.querySelectorAll(".square");
-  squares.forEach(s => s.classList.remove("selected", "highlight"));
-
-  const list = document.getElementById("special-actions")!;
-  list.innerHTML = "";
-}
 
 /// Attempts to make a move
 /// API call's at `POST /board/new_state` with body:
