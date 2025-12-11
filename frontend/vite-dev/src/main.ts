@@ -102,6 +102,7 @@ async function handleSquareClick(rank: number, file: number) {
     console.log("Legal moves:", allowedMoves);
 
     highlightMoves(allowedMoves);
+    renderSpecialActions(allowedMoves);
   } catch (err) {
     console.error("Error fetching moves:", err);
   }
@@ -139,6 +140,11 @@ function isMoveTo(m: GameMove): m is GameMove & { move_type: { kind: "MoveTo"; t
   return m.move_type.kind === "MoveTo";
 }
 
+function isSpecialMove(m: GameMove): boolean {
+  return m.move_type.kind !== "MoveTo";
+}
+
+
 /// Simple helper to highlight squares given a list of coordinates
 function highlightMoves(moves: GameMove[]) {
   const squares = document.querySelectorAll(".square");
@@ -155,6 +161,55 @@ function highlightMoves(moves: GameMove[]) {
   }
 }
 
+function renderSpecialActions(moves: GameMove[]) {
+  const list = document.getElementById("special-actions")!;
+  list.innerHTML = "";
+
+  const specials = moves.filter(isSpecialMove);
+
+  for (const m of specials) {
+    const li = document.createElement("li");
+
+    switch (m.move_type.kind) {
+      case "PhaseShift":
+        li.textContent = "Increase Brainrot Radius (PhaseShift)";
+        break;
+      default:
+        li.textContent = m.move_type.kind;
+        break;
+    }
+
+    li.onclick = async () => {
+      const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+
+      const newFen = await makeSpecialMove(fen, m);
+      (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
+      renderBoard(newFen);
+      clearSelection();
+    };
+
+    list.appendChild(li);
+  }
+}
+
+async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
+  const response = await fetch("http://localhost:8080/board/new_state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      board_fen: fen,
+      game_move: move
+    })
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const data = await response.json();
+  return data.new_board_fen;
+}
+
+
+
 /// Clears any selected square and highlighted moves
 function clearSelection() {
   selectedSquare = null;
@@ -162,6 +217,9 @@ function clearSelection() {
 
   const squares = document.querySelectorAll(".square");
   squares.forEach(s => s.classList.remove("selected", "highlight"));
+
+  const list = document.getElementById("special-actions")!;
+  list.innerHTML = "";
 }
 
 /// Attempts to make a move
