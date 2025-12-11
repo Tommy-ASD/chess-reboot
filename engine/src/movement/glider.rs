@@ -52,7 +52,7 @@ pub fn generate_glider_moves(
             let r = start_rank + dy * step as isize;
 
             // out of bounds
-            if f < 0 || r < 0 || f >= files || r >= ranks {
+            if !board.in_bounds(f, r) {
                 break;
             }
 

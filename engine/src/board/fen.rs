@@ -273,6 +273,7 @@ pub fn fen_to_square(fen: &str) -> Square {
                 }
                 "C" => match value {
                     "FROZEN" => conditions.push(SquareCondition::Frozen),
+                    "BRAINROT" => conditions.push(SquareCondition::Brainrot),
                     _ => println!("Unknown square condition {value}"),
                 },
                 _ => println!("Unknown field {field}"),

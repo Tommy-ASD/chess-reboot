@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     board::{
         fen::{board_to_fen, fen_to_board, fen_to_square, square_to_fen},
-        square::{Square, SquareType},
+        square::{Square, SquareCondition, SquareType},
     },
     pieces::piecetype::PieceType,
 };
 
+pub mod brainrot;
 pub mod fen;
 pub mod make_move;
 pub mod square;
@@ -98,6 +99,11 @@ impl Board {
     /// Get all possible moves for the piece at `from`.
     pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
         if let Some(square) = self.get_square_at(from) {
+            if square.conditions.contains(&SquareCondition::Brainrot)
+                || square.conditions.contains(&SquareCondition::Frozen)
+            {
+                return vec![];
+            }
             if let Some(piece) = &square.piece {
                 piece.get_moves(self, from)
             } else {
@@ -112,5 +118,33 @@ impl Board {
     pub fn is_valid_move(&self, game_move: &GameMove) -> bool {
         let possible_moves = self.get_moves(&game_move.from);
         possible_moves.iter().any(|m| m == game_move)
+    }
+
+    pub fn all_pieces(&self) -> Vec<(Coord, PieceType)> {
+        let mut out = Vec::new();
+
+        for (rank, row) in self.grid.iter().enumerate() {
+            for (file, square) in row.iter().enumerate() {
+                if let Some(piece) = &square.piece {
+                    out.push((
+                        Coord {
+                            file: file as u8,
+                            rank: rank as u8,
+                        },
+                        piece.clone(),
+                    ));
+                }
+            }
+        }
+
+        out
+    }
+
+    /// Returns true if (file, rank) is inside the board grid.
+    pub fn in_bounds(&self, file: isize, rank: isize) -> bool {
+        rank >= 0
+            && file >= 0
+            && (rank as usize) < self.grid.len()
+            && (file as usize) < self.grid[rank as usize].len()
     }
 }

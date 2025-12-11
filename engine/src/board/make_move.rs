@@ -99,6 +99,9 @@ impl Board {
                 piece.post_move_effects(before_state, self, &game_move);
             }
         }
+
+        self.recalc_brainrot();
+
         Ok(())
     }
 }

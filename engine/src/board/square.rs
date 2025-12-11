@@ -32,6 +32,7 @@ impl SquareType {
 #[derive(PartialEq, Debug, Clone)]
 pub enum SquareCondition {
     Frozen,
+    Brainrot,
     // adding more later on
 }
 
@@ -39,6 +40,7 @@ impl SquareCondition {
     pub fn as_str(&self) -> &'static str {
         match self {
             SquareCondition::Frozen => "FROZEN",
+            SquareCondition::Brainrot => "BRAINROT",
         }
     }
 }
