@@ -146,3 +146,7 @@ This has to be because we split by comma, disregarding depth
 Works after changing from split by comma to split_top_level
 Aaaaand now we can have things like `g(H=0-0,P=G(H=0-7,P=g(H=7-0,P=G(H=7-7,P=b))))` representing a single goblin
 This is so stupid what am I doing with my life
+
+sanity is optional
+this system allows for a piece to contain a full-on board, if i want it to
+i fear i'm going to get an idea which does this
