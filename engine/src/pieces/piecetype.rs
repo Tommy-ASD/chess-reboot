@@ -240,7 +240,9 @@ impl PieceType {
                     move_type: inner_move_type,
                 } => match inner_move_type.as_ref() {
                     crate::board::MoveType::MoveTo(coord) => coord,
+                    crate::board::MoveType::MoveIntoCarrier(coord) => coord,
                     _ => {
+                        println!("Unmatched type {inner_move_type:?}");
                         todo!();
                         return false;
                     }

@@ -154,7 +154,7 @@ function renderSpecialActions(moves: GameMove[]) {
         li.textContent = "Increase Brainrot Radius (PhaseShift)";
         break;
       default:
-        li.textContent = m.move_type.kind;
+        li.textContent = JSON.stringify(m.move_type);
         break;
     }
 

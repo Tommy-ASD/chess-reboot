@@ -105,7 +105,7 @@ impl Board {
                 move_type,
             } => {
                 match piece.clone() {
-                    PieceType::Bus(bus) => {
+                    PieceType::Bus(mut bus) => {
                         let piece_index_deref: u8 = *piece_index;
                         let piece_index_usize: usize = piece_index_deref.into();
                         let moving_out_piece: &PieceType =
@@ -117,12 +117,19 @@ impl Board {
                                     .ok_or_else(|| format!("No square at {:?}", target))?;
 
                                 // Whatever piece is there → captured automatically
-                                to_sq.piece = Some(piece);
+                                to_sq.piece = Some(moving_out_piece.clone());
+                                bus.pieces.remove(piece_index_usize);
 
                                 println!("Moved out of carrier: {:?} -> {:?}", from, target);
                             }
                             _ => todo!(),
                         }
+
+                        let from_sq = self
+                            .get_square_mut(from)
+                            .ok_or_else(|| format!("No square at {:?}", from))?;
+
+                        from_sq.piece = Some(PieceType::Bus(bus));
                     }
                     _ => todo!(),
                 }
