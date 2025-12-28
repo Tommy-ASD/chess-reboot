@@ -18,11 +18,20 @@ export const pieceToImage = (p: string): string | undefined => {
   // currently, skibidi and bus
   // currently let's just take letters before first paranthesis
   const base = p.split("(")[0];
+  // if first char is lowercase, turn entire base to lowercase
+  // likewise, if uppercase, turn entire base to uppercase
+  // this is so "Bus" and "BUS" both map to same image
+  // only the first letter matters for color
+  if (base[0] >= "a" && base[0] <= "z") {
+    base.toLowerCase();
+  } else if (base[0] >= "A" && base[0] <= "Z") {
+    base.toUpperCase();
+  }
   // map base to image filename
   const map: Record<string, string> = {
     "G": "/img/pieces/Goblin white.png",
     "g": "/img/pieces/Goblin black.png",
-    "Bus": "/img/pieces/Bus white.png",
+    "BUS": "/img/pieces/Bus white.png",
     "bus": "/img/pieces/Bus black.png",
   };
   console.log("pieceToImage:", p, "->", map[base]);
