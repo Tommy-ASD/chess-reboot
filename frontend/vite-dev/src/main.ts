@@ -151,6 +151,12 @@ function handleEditorClick(rank: number, file: number) {
 }
 
 
+// Okay we need to make a way to handle carrier moves
+// I'm thinking we can have a separate panel that shows up
+// when there are carrier moves available
+// and we can carried pieces in that panel
+// and clicking on them will then display the possible moves for that piece
+// and then clicking on one of those moves will execute the move
 function renderSpecialActions(moves: GameMove[]) {
   const list = document.getElementById("special-actions")!;
   list.innerHTML = "";
@@ -164,6 +170,12 @@ function renderSpecialActions(moves: GameMove[]) {
       case "PhaseShift":
         li.textContent = "Increase Brainrot Radius (PhaseShift)";
         break;
+
+      case "PieceInCarrier":
+        console.log("Rendering carrier move:", m);
+        li.textContent = `Deploy Piece number ${m.move_type.target.piece_index}`;
+        break;
+
       default:
         li.textContent = JSON.stringify(m.move_type);
         break;

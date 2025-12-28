@@ -14,9 +14,26 @@ export type Square = {
 
 export type Coord = { file: number; rank: number };
 
+/// PieceInCarrier
+/// Rendering carrier move: 
+/// Object { from: {…}, move_type: {…} }
+/// from: Object { file: 5, rank: 3 }
+/// move_type: Object { kind: "PieceInCarrier", target: {…} }
+/// kind: "PieceInCarrier"
+/// target: Object { piece_index: 0, move_type: {…} }
+/// move_type: Object { kind: "MoveTo", target: {…} }
+/// kind: "MoveTo"
+/// target: Object { file: 7, rank: 2 }
+/// piece_index: 0
+
+// Nested MoveType 
+/// { kind: "PieceInCarrier", target: { piece_index: number; move_type: MoveType } }
+
+
 export type MoveType =
     | { kind: "MoveTo"; target: Coord }
-    | { kind: "PhaseShift" };
+    | { kind: "PhaseShift" }
+    | { kind: "PieceInCarrier"; target: { piece_index: number; move_type: MoveType } };
 
 
 export type GameMove = { from: Coord; move_type: MoveType };
