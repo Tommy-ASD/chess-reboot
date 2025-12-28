@@ -13,6 +13,21 @@ export const pieceToSymbol = (p: string): string => {
   return map[p] ?? p;
 };
 
+export const pieceToImage = (p: string): string | undefined => {
+  // for custom pieces
+  // currently, skibidi and bus
+  // currently let's just take the first letter and ignore the rest
+  const base = p[0];
+  // map base to image filename
+  const map: Record<string, string> = {
+    "G": "/img/pieces/Goblin white.png",
+    "g": "/img/pieces/Goblin black.png",
+  };
+  console.log("pieceToImage:", p, "->", map[base]);
+  return map[base];
+}
+
+
 // ----------------------------------------------
 // Top-level split (nested parentheses-safe)
 // ----------------------------------------------

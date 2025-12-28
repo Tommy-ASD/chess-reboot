@@ -56,6 +56,17 @@ body {
       transparent 6px);
 }
 
+.piece-image {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+
+  /* prevent inline-image quirks */
+  display: block;
+  pointer-events: none;
+}
+
+
 /* okay great, we got diagonal stripes working */
 /* now for stacking multiple conditions */
 /* right now, it alternates, every other stripe being standard color, every other being blue */

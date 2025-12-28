@@ -5,7 +5,7 @@
 
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { buildPalettes, editorMode, selectedEditorCondition, selectedEditorPiece, selectedEditorType } from "./editor";
-import { parseFEN, pieceToSymbol, squaresToFEN } from "./fen";
+import { parseFEN, pieceToImage, pieceToSymbol, squaresToFEN } from "./fen";
 import { allowedMoves, currentBoard, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
@@ -35,7 +35,18 @@ function renderBoard(fen: string) {
       if (square_data) {
         console.log(square_data);
         if (square_data.piece) {
-          square.textContent = pieceToSymbol(square_data.piece);
+          // check if pieceToImage returns other than undefined
+          // and if it does, use an img element instead of textContent
+          const imgPath = pieceToImage(square_data.piece);
+          if (imgPath) {
+            const img = document.createElement("img");
+            img.src = imgPath;
+            img.alt = square_data.piece;
+            img.classList.add("piece-image");
+            square.appendChild(img);
+          } else {
+            square.textContent = pieceToSymbol(square_data.piece);
+          }
         }
         if (square_data.conditions.includes("FROZEN")) {
           square.classList.add("cond-frozen");
