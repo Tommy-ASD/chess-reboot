@@ -16,12 +16,14 @@ export const pieceToSymbol = (p: string): string => {
 export const pieceToImage = (p: string): string | undefined => {
   // for custom pieces
   // currently, skibidi and bus
-  // currently let's just take the first letter and ignore the rest
-  const base = p[0];
+  // currently let's just take letters before first paranthesis
+  const base = p.split("(")[0];
   // map base to image filename
   const map: Record<string, string> = {
     "G": "/img/pieces/Goblin white.png",
     "g": "/img/pieces/Goblin black.png",
+    "Bus": "/img/pieces/Bus white.png",
+    "bus": "/img/pieces/Bus black.png",
   };
   console.log("pieceToImage:", p, "->", map[base]);
   return map[base];
