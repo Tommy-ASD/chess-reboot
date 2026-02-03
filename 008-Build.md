@@ -83,3 +83,6 @@ cd ../..
 
 echo "Build completed successfully!"
 ```
+
+i need to get a fresh debian install
+maybe i build a vm to test this
