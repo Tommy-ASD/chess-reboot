@@ -429,4 +429,274 @@ mod tests {
             other => panic!("expected white Skibidi at (4,4), got {other:?}"),
         }
     }
+
+    /// With an opposing Skibidi present, the cap rises to 4.
+    #[test]
+    fn test_skibidi_phase_can_reach_four_with_opponent() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_piece(PieceType::Skibidi(Skibidi {
+            color: Color::White,
+            phase: 3,
+        }));
+        // Far enough away that no neutralization happens.
+        board.grid[7][7] = Square::new().set_piece(PieceType::Skibidi(Skibidi {
+            color: Color::Black,
+            phase: 1,
+        }));
+
+        let mv = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PhaseShift,
+        };
+        board.make_move(mv).expect("phase shift should be legal");
+
+        match &board.grid[0][0].piece {
+            Some(PieceType::Skibidi(sk)) => assert_eq!(sk.phase, 4),
+            other => panic!("expected white Skibidi at (0,0), got {other:?}"),
+        }
+    }
+
+    // ============================================================
+    // Pass 2 invariant / coverage tests
+    // ============================================================
+
+    // --- pawn ---
+
+    /// A white pawn on its starting rank (6) gets both single- and
+    /// double-push when the column is clear.
+    #[test]
+    fn test_pawn_double_push_from_start() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 6 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(targets.contains(&(3, 5)), "expected single push to (3,5)");
+        assert!(targets.contains(&(3, 4)), "expected double push to (3,4)");
+    }
+
+    /// Pawn cannot double-push if the intermediate square is occupied.
+    #[test]
+    fn test_pawn_no_double_push_when_blocked() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 6 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(!targets.contains(&(3, 5)), "blocker at (3,5) must prevent single push too");
+        assert!(!targets.contains(&(3, 4)), "blocker at (3,5) must prevent double push");
+    }
+
+    /// Pawn captures only into a diagonal square occupied by an enemy.
+    #[test]
+    fn test_pawn_diagonal_capture_only_when_enemy_present() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][2] = Square::new().set_piece(PieceType::new_pawn(Color::Black)); // SW = enemy
+        // (4,5) — SE diagonal — left empty
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 6 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(targets.contains(&(2, 5)), "should capture SW enemy");
+        assert!(!targets.contains(&(4, 5)), "should not diagonal-move to empty SE");
+    }
+
+    // --- knight ---
+
+    #[test]
+    fn test_knight_corner_has_two_moves() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        let moves = board.get_moves(&Coord { file: 0, rank: 0 });
+        assert_eq!(moves.len(), 2, "knight in corner has 2 L-moves, got {moves:?}");
+    }
+
+    // --- rook ---
+
+    /// Friendly piece blocks the rook one square short — but the blocker
+    /// square itself is not a legal target.
+    #[test]
+    fn test_rook_blocked_by_friendly_stops_short() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[3][6] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(targets.contains(&(4, 3)));
+        assert!(targets.contains(&(5, 3)));
+        assert!(!targets.contains(&(6, 3)), "friendly blocker is not a legal target");
+        assert!(!targets.contains(&(7, 3)), "cannot pass through blocker");
+    }
+
+    /// Rook may capture an enemy blocker (ray terminates at it).
+    #[test]
+    fn test_rook_captures_enemy_blocker() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[3][6] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(targets.contains(&(6, 3)), "rook should be able to capture enemy at (6,3)");
+        assert!(!targets.contains(&(7, 3)), "cannot pass through captured piece");
+    }
+
+    // --- king ---
+
+    #[test]
+    fn test_king_has_eight_adjacent_moves_from_center() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        let moves = board.get_moves(&Coord { file: 4, rank: 4 });
+        assert_eq!(moves.len(), 8, "king in center has 8 adjacent squares");
+    }
+
+    // --- board-level get_moves gating ---
+
+    #[test]
+    fn test_get_moves_empty_for_brainrot_square() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_knight(Color::White))
+            .add_square_condition(SquareCondition::Brainrot);
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        assert!(moves.is_empty(), "brainrotted piece must not move");
+    }
+
+    #[test]
+    fn test_get_moves_empty_for_frozen_square() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_knight(Color::White))
+            .add_square_condition(SquareCondition::Frozen);
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        assert!(moves.is_empty(), "frozen piece must not move");
+    }
+
+    // --- make_move invariants ---
+
+    #[test]
+    fn test_make_move_rejects_illegal() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        // Rooks don't move diagonally.
+        let illegal = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+        };
+        let result = board.make_move(illegal);
+        assert!(result.is_err(), "illegal rook diagonal must be rejected");
+        // Board untouched.
+        assert!(board.grid[0][0].piece.is_some(), "rook still at (0,0)");
+        assert!(board.grid[3][3].piece.is_none(), "diagonal target untouched");
+    }
+
+    #[test]
+    fn test_make_move_moves_piece_and_captures() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let mv = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 0 }),
+        };
+        board.make_move(mv).expect("capture should succeed");
+
+        assert!(board.grid[0][0].piece.is_none(), "source square cleared");
+        match &board.grid[0][4].piece {
+            Some(PieceType::Rook(_)) => {}
+            other => panic!("expected rook at (4,0), got {other:?}"),
+        }
+    }
+
+    // --- FEN round-trips for non-trivial fairy states ---
+
+    #[test]
+    fn test_fen_roundtrip_skibidi_phase_three() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new().set_piece(PieceType::Skibidi(Skibidi {
+            color: Color::White,
+            phase: 3,
+        }));
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+
+        // The brainrot conditions are derived state — recompute on both
+        // sides before comparing so we don't depend on whether either
+        // applied them.
+        let mut a = board.clone();
+        a.recalc_brainrot();
+        let mut b = board2.clone();
+        b.recalc_brainrot();
+        assert_eq!(a, b, "Skibidi phase-3 should round-trip via FEN");
+    }
+
+    #[test]
+    fn test_fen_roundtrip_bus_carrying_pieces() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![
+                PieceType::new_pawn(Color::White),
+                PieceType::new_knight(Color::Black),
+            ],
+        }));
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "Bus carrying pieces should round-trip");
+    }
+
+    #[test]
+    fn test_fen_roundtrip_goblin_kidnapping() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::Goblin(Goblin {
+            color: Color::White,
+            state: GoblinState::Kidnapping {
+                piece: std::rc::Rc::new(PieceType::new_knight(Color::Black)),
+            },
+            home_square: Coord { file: 0, rank: 0 },
+        }));
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "Goblin in Kidnapping state should round-trip");
+    }
 }
