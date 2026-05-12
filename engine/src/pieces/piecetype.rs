@@ -212,6 +212,14 @@ impl PieceType {
             if target_piece.can_carry_piece()
                 && target_piece.get_color() == self.get_color()
             {
+                // Capacity check — Bus holds at most 5 (per spec).
+                let at_capacity = match target_piece {
+                    PieceType::Bus(bus) => bus.pieces.len() >= 5,
+                    _ => false,
+                };
+                if at_capacity {
+                    return false;
+                }
                 // Landing on a friendly carrier: swap the *inner* move (or the
                 // top-level move) to MoveIntoCarrier, preserving any
                 // PieceInCarrier wrapper.

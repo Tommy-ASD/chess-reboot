@@ -160,7 +160,7 @@ impl Piece for Skibidi {
 
     fn post_move_effects(
         &mut self,
-        board_before: &Board,
+        _board_before: &Board,
         board_after: &mut Board,
         game_move: &GameMove,
     ) {
@@ -168,14 +168,11 @@ impl Piece for Skibidi {
             MoveType::PhaseShift => {}
             MoveType::MoveTo(target) => {
                 self.phase = 1;
-                board_after.set_piece_at(&target, PieceType::Skibidi(self.clone()));
+                board_after.set_piece_at(target, PieceType::Skibidi(self.clone()));
             }
-            MoveType::MoveIntoCarrier(target) => todo!(),
-            MoveType::PieceInCarrier {
-                piece_index,
-                move_type,
-            } => {
-                todo!()
+            MoveType::MoveIntoCarrier(_) => todo!("Skibidi entering a carrier"),
+            MoveType::PieceInCarrier { .. } => {
+                todo!("Skibidi inside a carrier")
             }
         }
     }

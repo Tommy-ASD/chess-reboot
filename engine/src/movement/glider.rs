@@ -1,10 +1,4 @@
-use std::collections::HashSet;
-
-use crate::board::{Board, Coord, Direction, File, GameMove, MoveType, Rank, Sq};
-use crate::board::{
-    fen::{fen_to_square, square_to_fen},
-    square::{Square, SquareType},
-};
+use crate::board::{Board, Coord, Direction, File, GameMove, MoveType, Rank};
 
 /// Directions for glider movement
 pub const STRAIGHT_DIRS: &[Direction] = &[(1, 0), (-1, 0), (0, 1), (0, -1)];
@@ -35,9 +29,6 @@ pub fn generate_glider_moves(
     directions: &[Direction],
     max_range: usize,
 ) -> Vec<GameMove> {
-    let files = board.grid[0].len() as isize;
-    let ranks = board.grid.len() as isize;
-
     let mut moves = Vec::new();
 
     let start_file = from.file as isize;

@@ -52,8 +52,6 @@ impl Bus {
         let end = find_matching_paren(symbol, start)?;
         let inside = &symbol[start + 1..end];
 
-        let mut home_square: Option<Coord> = None;
-
         let mut pieces = vec![];
 
         for field in split_top_level(inside) {
@@ -193,16 +191,5 @@ impl Piece for Bus {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-
-    fn post_move_effects(
-        &mut self,
-        board_before: &Board,
-        board_after: &mut Board,
-        game_move: &GameMove,
-    ) {
-        // match &game_move.move_type {
-        //     MoveType::PhaseShift => {}
-        //     MoveType::MoveTo(target) => {}
-        // }
-    }
+    // post_move_effects: default no-op from the trait
 }

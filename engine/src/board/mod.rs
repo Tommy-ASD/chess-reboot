@@ -1,12 +1,9 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    board::{
-        fen::{board_to_fen, fen_to_board, fen_to_square, square_to_fen},
-        square::{Square, SquareCondition, SquareType},
-    },
+    board::square::{Square, SquareCondition, SquareType},
     pieces::piecetype::PieceType,
 };
 
@@ -19,22 +16,11 @@ mod tests;
 pub type File = u8; // 0–7 for default boards
 pub type Rank = u8; // 0–7 for default boards
 
-/// We use this so there's no confusion with which index is
+/// We use this so there's no confusion with which index is which.
 #[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
 pub struct Coord {
     pub file: File,
     pub rank: Rank,
-}
-
-pub type Sq = u8; // 0..63 on a standard board
-fn coord_to_sq(c: Coord) -> Sq {
-    c.rank * 8 + c.file
-}
-fn sq_to_coord(sq: Sq) -> Coord {
-    Coord {
-        file: sq % 8,
-        rank: sq / 8,
-    }
 }
 
 #[derive(PartialEq, Debug, Serialize, Deserialize)]

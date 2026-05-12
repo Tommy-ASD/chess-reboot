@@ -47,7 +47,7 @@ impl Piece for Monkey {
         for (df, dr) in &directions {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+            if board.in_bounds(new_file, new_rank) {
                 let coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,
@@ -118,15 +118,7 @@ impl Monkey {
             let jump_file = adj_file + df;
             let jump_rank = adj_rank + dr;
 
-            if adj_file >= 0
-                && adj_file < 8
-                && adj_rank >= 0
-                && adj_rank < 8
-                && jump_file >= 0
-                && jump_file < 8
-                && jump_rank >= 0
-                && jump_rank < 8
-            {
+            if board.in_bounds(adj_file, adj_rank) && board.in_bounds(jump_file, jump_rank) {
                 let adj_coord = Coord {
                     file: adj_file as u8,
                     rank: adj_rank as u8,

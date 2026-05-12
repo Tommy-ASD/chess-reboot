@@ -684,6 +684,27 @@ mod tests {
         assert_eq!(board2, board, "Bus carrying pieces should round-trip");
     }
 
+    /// A full Bus (5 passengers) must not be a legal MoveIntoCarrier target.
+    #[test]
+    fn test_bus_at_capacity_blocks_entry() {
+        let mut board = empty_board();
+        let pawn = PieceType::new_pawn(Color::White);
+        let full_bus = PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![pawn.clone(), pawn.clone(), pawn.clone(), pawn.clone(), pawn.clone()],
+        });
+        board.grid[3][3] = Square::new().set_piece(full_bus);
+        // Knight at (1,2) can L-move to (3,3).
+        board.grid[2][1] = Square::new().set_piece(PieceType::new_knight(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 1, rank: 2 });
+        let entered_full_bus = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::MoveIntoCarrier(c) if c.file == 3 && c.rank == 3
+        ));
+        assert!(!entered_full_bus, "knight should not enter a full bus");
+    }
+
     #[test]
     fn test_fen_roundtrip_goblin_kidnapping() {
         let mut board = empty_board();

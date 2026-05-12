@@ -33,7 +33,7 @@ impl Piece for Knight {
         for (df, dr) in &knight_moves {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+            if board.in_bounds(new_file, new_rank) {
                 let coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,

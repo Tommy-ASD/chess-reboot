@@ -30,7 +30,7 @@ impl Piece for Pawn {
 
         // One square forward
         let new_rank = from.rank as isize + direction;
-        if new_rank >= 0 && new_rank < 8 {
+        if board.in_bounds(from.file as isize, new_rank) {
             trace!("one-square forward in bounds");
             let forward_coord = Coord {
                 file: from.file,
@@ -75,7 +75,7 @@ impl Piece for Pawn {
         // Captures
         for df in &[-1, 1] {
             let new_file = from.file as isize + df;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+            if board.in_bounds(new_file, new_rank) {
                 let capture_coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,

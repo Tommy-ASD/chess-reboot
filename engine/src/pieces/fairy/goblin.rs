@@ -73,7 +73,7 @@ impl Goblin {
         for (df, dr) in &directions {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+            if board.in_bounds(new_file, new_rank) {
                 let coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,
@@ -228,7 +228,7 @@ impl Piece for Goblin {
     }
 
     fn clone_box(&self) -> Box<dyn Piece> {
-        Box::new((self.clone()))
+        Box::new(self.clone())
     }
 
     fn post_move_effects(
@@ -241,20 +241,13 @@ impl Piece for Goblin {
             MoveType::MoveTo(target) => target.clone(),
             _ => panic!("Goblin post move effects, not move to"),
         };
-        let from = game_move.from.clone();
         match &self.state {
-            // handle kidnapping state change
-            // check if there was an enemy piece at the destination in the board before the move
             GoblinState::Free => {
                 if let Some(square) = board_before.get_square_at(&to) {
                     if let Some(captured_piece) = &square.piece {
                         if captured_piece.get_color() != self.color {
-                            // initiate kidnapping
-                            let home = match self.color {
-                                Color::White => Coord { file: 0, rank: 0 },
-                                Color::Black => Coord { file: 7, rank: 7 },
-                            };
-                            // update goblin state in the after board
+                            // initiate kidnapping — preserve the goblin's
+                            // existing home_square; only the state changes.
                             if let Some(goblin_square) = board_after.get_square_mut(&to) {
                                 if let Some(piece) = &mut goblin_square.piece {
                                     if let Some(goblin) =
@@ -270,17 +263,15 @@ impl Piece for Goblin {
                     }
                 }
             }
-            // handle the conversion of and dropping off of kidnapped piece
             GoblinState::Kidnapping { piece } => {
                 let mut p: PieceType = piece.clone().into();
                 p.set_color(self.color);
-                if &to == &self.home_square {
-                    // drop off the kidnapped piece
+                if to == self.home_square {
+                    // drop off the converted piece at home (the goblin is
+                    // overwritten on the same square — "goblin dies").
                     board_after.set_piece_at(&to, p);
-                    // goblin dies (maybe change later?)
                 }
             }
-            _ => {}
         }
     }
 

@@ -3,7 +3,7 @@ use core::panic;
 use tracing::debug;
 
 use crate::{
-    board::{Board, Coord, GameMove, MoveType},
+    board::{Board, GameMove, MoveType},
     pieces::piecetype::PieceType,
 };
 
@@ -176,11 +176,9 @@ impl Board {
                 };
                 piece.post_move_effects(before_state, self, &game_move);
             }
-            MoveType::MoveIntoCarrier(target) => {}
-            MoveType::PieceInCarrier {
-                piece_index,
-                move_type,
-            } => {}
+            // No piece-level post-move effect for these variants today.
+            MoveType::MoveIntoCarrier(_) => {}
+            MoveType::PieceInCarrier { .. } => {}
         }
 
         self.recalc_brainrot();
