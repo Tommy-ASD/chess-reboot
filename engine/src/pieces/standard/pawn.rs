@@ -1,7 +1,7 @@
 use tracing::trace;
 
 use crate::{
-    board::{Board, Coord, GameMove, MoveType},
+    board::{Board, Coord, GameMove, MoveType, PromotionTarget},
     pieces::{Color, Piece},
 };
 
@@ -9,6 +9,43 @@ use crate::{
 pub struct Pawn {
     pub color: Color,
 }
+
+impl Pawn {
+    fn promotion_rank(&self) -> u8 {
+        match self.color {
+            Color::White => 0,
+            Color::Black => 7,
+        }
+    }
+
+    /// Push either a `MoveTo` or the four `Promotion` variants — same target,
+    /// four piece choices — depending on whether the destination is the
+    /// promotion rank.
+    fn push_advance_or_promotion(&self, target: Coord, from: &Coord, out: &mut Vec<GameMove>) {
+        if target.rank == self.promotion_rank() {
+            for into in [
+                PromotionTarget::Queen,
+                PromotionTarget::Rook,
+                PromotionTarget::Bishop,
+                PromotionTarget::Knight,
+            ] {
+                out.push(GameMove {
+                    from: from.clone(),
+                    move_type: MoveType::Promotion {
+                        target: target.clone(),
+                        into,
+                    },
+                });
+            }
+        } else {
+            out.push(GameMove {
+                from: from.clone(),
+                move_type: MoveType::MoveTo(target),
+            });
+        }
+    }
+}
+
 impl Piece for Pawn {
     fn name(&self) -> &str {
         "Pawn"
@@ -40,13 +77,11 @@ impl Piece for Pawn {
                 trace!(?square, ?forward_coord, "forward square");
                 if square.piece.is_none() {
                     trace!("forward square empty, pushing move");
-                    let game_move = GameMove {
-                        from: from.clone(),
-                        move_type: MoveType::MoveTo(forward_coord.clone()),
-                    };
-                    moves.push(game_move);
+                    self.push_advance_or_promotion(forward_coord.clone(), from, &mut moves);
 
-                    // Two squares forward from starting position
+                    // Two squares forward from starting position. Double push
+                    // never coincides with a promotion rank, so no promotion
+                    // handling is needed here.
                     let starting_rank = match self.color {
                         Color::White => 6,
                         Color::Black => 1,
@@ -72,23 +107,43 @@ impl Piece for Pawn {
 
         trace!(?moves, "after forward push");
 
-        // Captures
+        // Captures (regular + en passant)
         for df in &[-1, 1] {
             let new_file = from.file as isize + df;
-            if board.in_bounds(new_file, new_rank) {
-                let capture_coord = Coord {
-                    file: new_file as u8,
-                    rank: new_rank as u8,
-                };
-                if let Some(square) = board.get_square_at(&capture_coord) {
-                    if let Some(piece) = &square.piece {
-                        if piece.get_color() != self.color {
-                            let game_move = GameMove {
-                                from: from.clone(),
-                                move_type: MoveType::MoveTo(capture_coord.clone()),
-                            };
-                            moves.push(game_move);
-                        }
+            if !board.in_bounds(new_file, new_rank) {
+                continue;
+            }
+            let capture_coord = Coord {
+                file: new_file as u8,
+                rank: new_rank as u8,
+            };
+            if let Some(square) = board.get_square_at(&capture_coord) {
+                // Ordinary diagonal capture: enemy piece sitting on the square.
+                if let Some(piece) = &square.piece {
+                    if piece.get_color() != self.color {
+                        self.push_advance_or_promotion(
+                            capture_coord.clone(),
+                            from,
+                            &mut moves,
+                        );
+                    }
+                } else if let Some(ep) = &board.flags.en_passant_target {
+                    // En passant: the destination matches the recorded ep
+                    // target. The captured pawn sits on (target.file,
+                    // from.rank) — same file as our diagonal target, same
+                    // rank as we currently are on.
+                    if ep == &capture_coord {
+                        let captured = Coord {
+                            file: capture_coord.file,
+                            rank: from.rank,
+                        };
+                        moves.push(GameMove {
+                            from: from.clone(),
+                            move_type: MoveType::EnPassant {
+                                target: capture_coord.clone(),
+                                captured,
+                            },
+                        });
                     }
                 }
             }
@@ -107,6 +162,55 @@ impl Piece for Pawn {
 
     fn clone_box(&self) -> Box<dyn Piece> {
         Box::new(self.clone())
+    }
+
+    /// A pawn attacks only its two forward diagonals — not the forward push.
+    /// The diagonals are threatened regardless of whether they're currently
+    /// occupied (king-safety needs the "hypothetical capture" view).
+    fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        let direction: isize = match self.color {
+            Color::White => -1,
+            Color::Black => 1,
+        };
+        let new_rank = from.rank as isize + direction;
+        let mut out = Vec::new();
+        for df in &[-1isize, 1] {
+            let nf = from.file as isize + df;
+            if board.in_bounds(nf, new_rank) {
+                out.push(Coord {
+                    file: nf as u8,
+                    rank: new_rank as u8,
+                });
+            }
+        }
+        out
+    }
+
+    fn post_move_effects(
+        &mut self,
+        _board_before: &Board,
+        board_after: &mut Board,
+        game_move: &GameMove,
+    ) {
+        match &game_move.move_type {
+            MoveType::MoveTo(target) => {
+                // Double push: set en-passant target to the square between
+                // from and target. handle_post_move_effects resets
+                // en_passant_target to None *before* calling this, so any
+                // non-double-push correctly leaves it cleared.
+                let rank_diff =
+                    (target.rank as i32 - game_move.from.rank as i32).abs();
+                if rank_diff == 2 {
+                    let ep_rank =
+                        (target.rank as u16 + game_move.from.rank as u16) / 2;
+                    board_after.flags.en_passant_target = Some(Coord {
+                        file: target.file,
+                        rank: ep_rank as u8,
+                    });
+                }
+            }
+            _ => {}
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

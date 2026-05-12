@@ -2,7 +2,8 @@
 mod tests {
     use crate::{
         board::{
-            Board, BoardFlags, Coord, GameMove, MoveType,
+            Board, BoardFlags, CastleSide, Coord, GameMove, GameStatus, MoveError, MoveType,
+            PromotionTarget,
             fen::{board_to_fen, fen_to_board},
             square::{Square, SquareCondition, SquareType},
         },
@@ -23,6 +24,7 @@ mod tests {
         Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -37,6 +39,7 @@ mod tests {
         let board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -46,7 +49,7 @@ mod tests {
         };
 
         let fen = board_to_fen(&board);
-        assert_eq!(fen, "8/8/8/8/8/8/8/8");
+        assert_eq!(fen, "8/8/8/8/8/8/8/8 w KQkq -");
 
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board);
@@ -57,6 +60,7 @@ mod tests {
         let mut board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -69,7 +73,7 @@ mod tests {
         board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
 
         let fen = board_to_fen(&board);
-        assert_eq!(fen, "R7/8/8/8/8/8/8/7k");
+        assert_eq!(fen, "R7/8/8/8/8/8/8/7k w KQkq -");
 
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board);
@@ -80,6 +84,7 @@ mod tests {
         let mut board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -94,7 +99,7 @@ mod tests {
             .set_square_type(SquareType::Vent);
 
         let fen = board_to_fen(&board);
-        assert_eq!(fen, "(P=R,T=VENT)7/8/8/8/8/8/8/8");
+        assert_eq!(fen, "(P=R,T=VENT)7/8/8/8/8/8/8/8 w KQkq -");
 
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board);
@@ -105,6 +110,7 @@ mod tests {
         let mut board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -118,7 +124,7 @@ mod tests {
             .add_square_condition(SquareCondition::Frozen);
 
         let fen = board_to_fen(&board);
-        assert_eq!(fen, "8/1(P=n,C=FROZEN)6/8/8/8/8/8/8");
+        assert_eq!(fen, "8/1(P=n,C=FROZEN)6/8/8/8/8/8/8 w KQkq -");
 
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board);
@@ -129,6 +135,7 @@ mod tests {
         let mut board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -143,7 +150,7 @@ mod tests {
             .set_square_type(SquareType::Vent);
 
         let fen = board_to_fen(&board);
-        assert_eq!(fen, "8/1(P=n,T=VENT,C=FROZEN)6/8/8/8/8/8/8");
+        assert_eq!(fen, "8/1(P=n,T=VENT,C=FROZEN)6/8/8/8/8/8/8 w KQkq -");
 
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board);
@@ -154,6 +161,7 @@ mod tests {
         let mut board = Board {
             grid: vec![vec![Square::new(); 8]; 8],
             flags: BoardFlags {
+                side_to_move: Color::White,
                 white_can_castle_kingside: true,
                 white_can_castle_queenside: true,
                 black_can_castle_kingside: true,
@@ -881,5 +889,765 @@ mod tests {
         let fen = board_to_fen(&board);
         let board2 = fen_to_board(&fen);
         assert_eq!(board2, board, "Goblin in Kidnapping state should round-trip");
+    }
+
+    // ============================================================
+    // Plan 01: Turn system
+    // ============================================================
+
+    #[test]
+    fn test_white_cannot_move_on_blacks_turn() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 3, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+        };
+        assert!(
+            board.make_move(mv).is_err(),
+            "white must not be able to move on black's turn"
+        );
+    }
+
+    #[test]
+    fn test_make_move_flips_turn() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 3, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+        };
+        board.make_move(mv).expect("legal pawn push");
+
+        assert_eq!(
+            board.flags.side_to_move,
+            Color::Black,
+            "side_to_move should flip after a legal move"
+        );
+    }
+
+    #[test]
+    fn test_fen_roundtrip_with_side_to_move() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        let fen = board_to_fen(&board);
+        assert!(
+            fen.contains(" b "),
+            "side-to-move 'b' should be present in FEN, got {fen:?}"
+        );
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2.flags.side_to_move, Color::Black);
+    }
+
+    #[test]
+    fn test_fen_roundtrip_with_no_castle_rights() {
+        let mut board = empty_board();
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+
+        let fen = board_to_fen(&board);
+        assert!(
+            fen.ends_with(" -"),
+            "no castle rights + no ep should end with ' -', got {fen:?}"
+        );
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2.flags, board.flags);
+    }
+
+    #[test]
+    fn test_fen_grid_only_backcompat() {
+        // Pre-plan-01 callers may still hand in a grid-only FEN. The
+        // parser must default sanely (white-to-move, all castle rights,
+        // no ep target) rather than misinterpret the missing fields.
+        let board = fen_to_board("8/8/8/8/8/8/8/8");
+        assert_eq!(board.flags.side_to_move, Color::White);
+        assert!(board.flags.white_can_castle_kingside);
+        assert!(board.flags.black_can_castle_queenside);
+        assert!(board.flags.en_passant_target.is_none());
+    }
+
+    // ============================================================
+    // Plan 02: King safety
+    // ============================================================
+
+    #[test]
+    fn test_king_cannot_move_into_check() {
+        let mut board = empty_board();
+        // White king at (3,4), black rook at (3,0) staring down file 3.
+        board.grid[4][3] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][3] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let from = Coord { file: 3, rank: 4 };
+        let legal = board.legal_moves(&from);
+        // The king must not be allowed to step further along file 3 (into
+        // (3,3) or (3,5)) — both are attacked by the rook.
+        let stays_on_file = legal.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::MoveTo(c) if c.file == 3
+        ));
+        assert!(
+            !stays_on_file,
+            "king must not be able to move along the attacked file, got moves={legal:?}"
+        );
+        // It can still step to file 2 or 4 on any rank (those aren't on the rook's ray).
+        let leaves_file = legal.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::MoveTo(c) if c.file != 3
+        ));
+        assert!(leaves_file, "king must be able to escape sideways");
+    }
+
+    #[test]
+    fn test_pinned_piece_cannot_move() {
+        let mut board = empty_board();
+        // White king at (3,7), white knight at (3,4), black rook at (3,0).
+        // Knight is absolutely pinned on file 3.
+        board.grid[7][3] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[4][3] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        board.grid[0][3] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let legal = board.legal_moves(&Coord { file: 3, rank: 4 });
+        assert!(
+            legal.is_empty(),
+            "pinned knight must have no legal moves, got {legal:?}"
+        );
+    }
+
+    #[test]
+    fn test_checkmate_detected() {
+        // Back-rank mate. White king on h1 boxed in by its own pawns on
+        // g2/h2; black rook on e1 sweeps the first rank.
+        let mut board = empty_board();
+        // h1: file 7, rank 7
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // g2 and h2: friendly pawns block king's escape forward.
+        board.grid[6][6] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[6][7] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        // e1: black rook delivering mate along rank 7 (algebraic rank 1).
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let status = board.status();
+        match status {
+            GameStatus::Checkmate { winner } => assert_eq!(winner, Color::Black),
+            other => panic!("expected Checkmate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_stalemate_detected() {
+        // Classic stalemate: black king h8, white king f7, white queen g6.
+        // It's black to move; not in check; no legal moves.
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        // h8 = file 7, rank 0
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        // f7 = file 5, rank 1
+        board.grid[1][5] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // g6 = file 6, rank 2
+        board.grid[2][6] = Square::new().set_piece(PieceType::new_queen(Color::White));
+
+        let status = board.status();
+        assert_eq!(status, GameStatus::Stalemate, "expected stalemate");
+    }
+
+    #[test]
+    fn test_no_king_means_not_in_check() {
+        // Existing tests build boards with no king and call make_move on them.
+        // is_in_check must not panic on a kingless board.
+        let board = empty_board();
+        assert!(!board.is_in_check(Color::White));
+        assert!(!board.is_in_check(Color::Black));
+    }
+
+    // ============================================================
+    // Plan 03: Promotion
+    // ============================================================
+
+    #[test]
+    fn test_pawn_promotion_generates_four_moves() {
+        let mut board = empty_board();
+        // White pawn one rank short of promotion: rank 1, advances to rank 0.
+        board.grid[1][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 1 });
+        let promotion_moves: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::Promotion { target, into } => {
+                    Some((target.clone(), into.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            promotion_moves.len(),
+            4,
+            "expected 4 promotion choices for a pawn one rank from promotion, got {promotion_moves:?}"
+        );
+        // All four target the same square.
+        for (target, _) in &promotion_moves {
+            assert_eq!(target.file, 3);
+            assert_eq!(target.rank, 0);
+        }
+    }
+
+    #[test]
+    fn test_promotion_replaces_pawn_with_queen() {
+        let mut board = empty_board();
+        board.grid[1][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 3, rank: 1 },
+            move_type: MoveType::Promotion {
+                target: Coord { file: 3, rank: 0 },
+                into: PromotionTarget::Queen,
+            },
+        };
+        board.make_move(mv).expect("promotion to queen should succeed");
+
+        match &board.grid[0][3].piece {
+            Some(PieceType::Queen(q)) => assert_eq!(q.color, Color::White),
+            other => panic!("expected white queen at (3,0), got {other:?}"),
+        }
+        assert!(board.grid[1][3].piece.is_none(), "source pawn cleared");
+    }
+
+    #[test]
+    fn test_capture_promotion_generated() {
+        let mut board = empty_board();
+        // White pawn at (3,1) with a black knight at (4,0) on its capture diagonal.
+        board.grid[1][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[0][4] = Square::new().set_piece(PieceType::new_knight(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 1 });
+        let capture_promotions: Vec<_> = moves
+            .iter()
+            .filter(|m| matches!(
+                &m.move_type,
+                MoveType::Promotion { target, .. }
+                if target.file == 4 && target.rank == 0
+            ))
+            .collect();
+        assert_eq!(
+            capture_promotions.len(),
+            4,
+            "capture-promotion should also generate 4 variants, got {capture_promotions:?}"
+        );
+    }
+
+    // ============================================================
+    // Plan 03: Castling
+    // ============================================================
+
+    /// Standard-setup castle: white king on e1 with both rooks, clear path,
+    /// no attacker — both castle moves should be generated.
+    #[test]
+    fn test_white_can_castle_both_sides_when_clear() {
+        let mut board = empty_board();
+        // e1 = file 4, rank 7
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // h1 = file 7, rank 7
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // a1 = file 0, rank 7
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let castle_sides: Vec<CastleSide> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::Castle { side } => Some(*side),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            castle_sides.contains(&CastleSide::Kingside),
+            "kingside castle should be generated"
+        );
+        assert!(
+            castle_sides.contains(&CastleSide::Queenside),
+            "queenside castle should be generated"
+        );
+    }
+
+    #[test]
+    fn test_castle_kingside_executes() {
+        let mut board = empty_board();
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 4, rank: 7 },
+            move_type: MoveType::Castle {
+                side: CastleSide::Kingside,
+            },
+        };
+        board.make_move(mv).expect("kingside castle should be legal");
+
+        // King at g1 (6,7), rook at f1 (5,7).
+        assert!(matches!(
+            &board.grid[7][6].piece,
+            Some(PieceType::King(k)) if k.color == Color::White
+        ));
+        assert!(matches!(
+            &board.grid[7][5].piece,
+            Some(PieceType::Rook(r)) if r.color == Color::White
+        ));
+        // Both castle flags cleared for white.
+        assert!(!board.flags.white_can_castle_kingside);
+        assert!(!board.flags.white_can_castle_queenside);
+    }
+
+    #[test]
+    fn test_castle_blocked_by_check() {
+        // White king on e1, white rook on h1 (for kingside). Black rook on e8
+        // gives check down the e-file — castling forbidden.
+        let mut board = empty_board();
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let has_castle = moves
+            .iter()
+            .any(|m| matches!(&m.move_type, MoveType::Castle { .. }));
+        assert!(!has_castle, "king in check must not be able to castle");
+    }
+
+    #[test]
+    fn test_castle_blocked_by_attacked_path() {
+        // White king on e1, white rook on h1. Black rook on f8 attacks f1.
+        let mut board = empty_board();
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][5] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let has_kingside_castle = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::Castle { side: CastleSide::Kingside }
+        ));
+        assert!(
+            !has_kingside_castle,
+            "kingside castle must be blocked when f1 is attacked"
+        );
+    }
+
+    #[test]
+    fn test_castle_blocked_by_piece_in_path() {
+        // White king e1, white rook h1, white knight on g1 blocking.
+        let mut board = empty_board();
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[7][6] = Square::new().set_piece(PieceType::new_knight(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let has_kingside_castle = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::Castle { side: CastleSide::Kingside }
+        ));
+        assert!(
+            !has_kingside_castle,
+            "kingside castle must be blocked when g1 is occupied"
+        );
+    }
+
+    #[test]
+    fn test_king_move_clears_castle_flags() {
+        let mut board = empty_board();
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+
+        // Move the king one square sideways (an ordinary king move).
+        let mv = GameMove {
+            from: Coord { file: 4, rank: 7 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 6 }),
+        };
+        board.make_move(mv).expect("king move should be legal");
+        assert!(!board.flags.white_can_castle_kingside);
+        assert!(!board.flags.white_can_castle_queenside);
+    }
+
+    #[test]
+    fn test_rook_move_clears_only_its_side() {
+        let mut board = empty_board();
+        // Just the white kingside rook on h1. Move it sideways.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 7, rank: 7 },
+            move_type: MoveType::MoveTo(Coord { file: 6, rank: 7 }),
+        };
+        board.make_move(mv).expect("rook move should be legal");
+        assert!(
+            !board.flags.white_can_castle_kingside,
+            "kingside flag should be cleared"
+        );
+        assert!(
+            board.flags.white_can_castle_queenside,
+            "queenside flag should remain (queenside rook hasn't moved)"
+        );
+    }
+
+    // ============================================================
+    // Plan 03: En passant
+    // ============================================================
+
+    #[test]
+    fn test_pawn_double_push_sets_en_passant_target() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let mv = GameMove {
+            from: Coord { file: 3, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 4 }),
+        };
+        board.make_move(mv).expect("double push should be legal");
+
+        // White went from rank 6 to rank 4. EP target = rank 5, same file.
+        assert_eq!(
+            board.flags.en_passant_target,
+            Some(Coord { file: 3, rank: 5 })
+        );
+    }
+
+    #[test]
+    fn test_en_passant_target_cleared_on_non_double_push() {
+        let mut board = empty_board();
+        board.flags.en_passant_target = Some(Coord { file: 0, rank: 5 });
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        // Single push, not a double — ep target must reset to None.
+        let mv = GameMove {
+            from: Coord { file: 3, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+        };
+        board.make_move(mv).expect("single push should be legal");
+        assert_eq!(board.flags.en_passant_target, None);
+    }
+
+    #[test]
+    fn test_en_passant_capture_executes() {
+        let mut board = empty_board();
+        // Black pawn at d4 (file 3, rank 4) just double-pushed; ep target is d3 (3,5).
+        // Wait — for a white pawn to en-passant-capture a black pawn, the black
+        // pawn must have just double-pushed *from* rank 1 *to* rank 3, putting the
+        // ep target at rank 2. The white capturing pawn sits at rank 3, file 4
+        // (next to the black pawn).
+        board.flags.side_to_move = Color::White;
+        // Black pawn at (3, 3) — having just double-pushed.
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        // White pawn at (4, 3).
+        board.grid[3][4] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        // EP target = (3, 2): the square the black pawn passed over.
+        board.flags.en_passant_target = Some(Coord { file: 3, rank: 2 });
+
+        let from = Coord { file: 4, rank: 3 };
+        let moves = board.get_moves(&from);
+        let ep_move = moves
+            .iter()
+            .find(|m| matches!(&m.move_type, MoveType::EnPassant { .. }))
+            .cloned()
+            .expect("an EnPassant move should be available");
+        board
+            .make_move(GameMove {
+                from: ep_move.from.clone(),
+                move_type: ep_move.move_type.clone(),
+            })
+            .expect("en passant capture should execute");
+
+        // White pawn at (3, 2), black pawn (was at (3,3)) gone.
+        match &board.grid[2][3].piece {
+            Some(PieceType::Pawn(p)) => assert_eq!(p.color, Color::White),
+            other => panic!("expected white pawn at (3,2), got {other:?}"),
+        }
+        assert!(board.grid[3][3].piece.is_none(), "captured pawn removed");
+        assert!(board.grid[3][4].piece.is_none(), "source square cleared");
+    }
+
+    #[test]
+    fn test_fen_roundtrip_with_en_passant() {
+        let mut board = empty_board();
+        board.flags.en_passant_target = Some(Coord { file: 3, rank: 5 });
+
+        let fen = board_to_fen(&board);
+        // d3 = file 3, rank 5 → algebraic d3.
+        assert!(
+            fen.ends_with(" d3"),
+            "expected FEN to end with ep target ' d3', got {fen:?}"
+        );
+        let board2 = fen_to_board(&fen);
+        assert_eq!(
+            board2.flags.en_passant_target,
+            Some(Coord { file: 3, rank: 5 })
+        );
+    }
+
+    // ============================================================
+    // Round-3 audit regression tests (post-fix coverage)
+    // ============================================================
+
+    /// Bug 1: a King passenger inside a Bus was invisible to `find_king`,
+    /// so `is_in_check` returned `false` even when the Bus's square was
+    /// attacked — making checkmate impossible to detect.
+    #[test]
+    fn test_find_king_locates_passenger_king() {
+        let mut board = empty_board();
+        let bus_with_king = PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::new_king(Color::White)],
+        });
+        board.grid[4][4] = Square::new().set_piece(bus_with_king);
+
+        assert_eq!(
+            board.find_king(Color::White),
+            Some(Coord { file: 4, rank: 4 }),
+            "passenger king should resolve to the Bus's square"
+        );
+    }
+
+    /// Bug 1 follow-up: a Bus carrying the king under attack registers as
+    /// in-check. Without the fix this returns false silently.
+    #[test]
+    fn test_is_in_check_when_passenger_king_under_attack() {
+        let mut board = empty_board();
+        let bus_with_king = PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::new_king(Color::White)],
+        });
+        board.grid[4][4] = Square::new().set_piece(bus_with_king);
+        // Black rook sweeping the Bus along rank 4.
+        board.grid[4][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        assert!(
+            board.is_in_check(Color::White),
+            "white king inside a Bus attacked by a rook must be in check"
+        );
+    }
+
+    /// Bug 2: default `Piece::attacks` extracted MoveTo from `initial_moves`
+    /// which includes Monkey's *empty* single-step squares. Spec says the
+    /// Monkey can't capture by single-step, so those aren't real threats —
+    /// over-reporting wrongly restricted king movement.
+    ///
+    /// With no ladder pieces around it, a lone Monkey threatens nothing.
+    #[test]
+    fn test_monkey_attacks_no_threats_without_ladder() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new()
+            .set_piece(PieceType::Monkey(Monkey { color: Color::White }));
+
+        // Adjacent empty squares must NOT be reported as attacked.
+        for &(df, dr) in &[
+            (1isize, 0isize), (-1, 0), (0, 1), (0, -1),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ] {
+            let f = (4 + df) as u8;
+            let r = (4 + dr) as u8;
+            assert!(
+                !board.is_attacked_by(&Coord { file: f, rank: r }, Color::White),
+                "empty adjacent ({f},{r}) must not be attacked by a Monkey with no ladder"
+            );
+        }
+    }
+
+    /// Bug 2 follow-up: Monkey *with* a ladder attacks the jump-landing
+    /// square — including when that landing square is empty (because if
+    /// the king walked there, the Monkey would capture).
+    #[test]
+    fn test_monkey_attacks_jump_landing() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new()
+            .set_piece(PieceType::Monkey(Monkey { color: Color::White }));
+        // Ladder piece at (4,3); jump-landing (4,2) is empty.
+        board.grid[3][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        assert!(
+            board.is_attacked_by(&Coord { file: 4, rank: 2 }, Color::White),
+            "Monkey jump-landing should be attacked even when empty"
+        );
+        // The ladder square itself is not a threat — Monkey can't capture
+        // it via single-step.
+        assert!(
+            !board.is_attacked_by(&Coord { file: 4, rank: 3 }, Color::White),
+            "Monkey doesn't threaten the ladder square (no single-step capture)"
+        );
+    }
+
+    /// `make_move` returning Err must NOT flip `side_to_move`.
+    #[test]
+    fn test_failed_make_move_preserves_side_to_move() {
+        let mut board = empty_board();
+        // Black rook with side_to_move=White → wrong-turn rejection.
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        let mv = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 0 }),
+        };
+        assert!(board.make_move(mv).is_err());
+        assert_eq!(
+            board.flags.side_to_move,
+            Color::White,
+            "side_to_move must not flip on a rejected move"
+        );
+    }
+
+    /// `validate_move` returns specific `MoveError` variants in the right
+    /// order (NoPieceAtSource → WrongTurn → PieceCannotMakeMove →
+    /// WouldLeaveKingInCheck).
+    #[test]
+    fn test_validate_move_returns_specific_variants() {
+        let mut board = empty_board();
+
+        // (a) NoPieceAtSource: empty source.
+        let err = board
+            .validate_move(&GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 1, rank: 0 }),
+            })
+            .unwrap_err();
+        assert!(matches!(err, MoveError::NoPieceAtSource { .. }));
+
+        // (b) WrongTurn: black piece while side_to_move=White.
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        let err = board
+            .validate_move(&GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 1, rank: 0 }),
+            })
+            .unwrap_err();
+        assert!(matches!(err, MoveError::WrongTurn { .. }));
+
+        // (c) PieceCannotMakeMove: white rook attempting a diagonal.
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        let err = board
+            .validate_move(&GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 1, rank: 1 }),
+            })
+            .unwrap_err();
+        match err {
+            MoveError::PieceCannotMakeMove {
+                candidate_alternatives,
+                ..
+            } => {
+                assert!(
+                    !candidate_alternatives.is_empty(),
+                    "rook should have non-empty candidate set"
+                );
+            }
+            other => panic!("expected PieceCannotMakeMove, got {other:?}"),
+        }
+
+        // (d) WouldLeaveKingInCheck: white king pinned by black rook.
+        let mut pinned_board = empty_board();
+        pinned_board.grid[7][3] = Square::new().set_piece(PieceType::new_king(Color::White));
+        pinned_board.grid[4][3] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        pinned_board.grid[0][3] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        // Pinned knight tries to L-move off the file.
+        let err = pinned_board
+            .validate_move(&GameMove {
+                from: Coord { file: 3, rank: 4 },
+                move_type: MoveType::MoveTo(Coord { file: 5, rank: 5 }),
+            })
+            .unwrap_err();
+        assert!(matches!(err, MoveError::WouldLeaveKingInCheck { .. }));
+    }
+
+    /// Capture-promotion onto an enemy rook on its starting square clears
+    /// that side's castle right.
+    #[test]
+    fn test_capture_promotion_clears_castle_flag() {
+        let mut board = empty_board();
+        // White pawn at b7 = (1, 1) capturing-promoting onto a8 = (0, 0).
+        board.grid[1][1] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        // Black rook at a8 (queenside corner).
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        // Sanity: black queenside flag starts true.
+        assert!(board.flags.black_can_castle_queenside);
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 1, rank: 1 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 0, rank: 0 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("capture-promotion should succeed");
+
+        assert!(
+            !board.flags.black_can_castle_queenside,
+            "capturing the black queenside rook on a8 must clear its castle right"
+        );
+    }
+
+    /// Any non-pawn move clears a previously-set `en_passant_target`.
+    /// (Only `Pawn::post_move_effects` may set it; the reset in
+    /// `handle_post_move_effects` runs before piece hooks.)
+    #[test]
+    fn test_non_pawn_move_clears_stale_en_passant_target() {
+        let mut board = empty_board();
+        board.flags.en_passant_target = Some(Coord { file: 4, rank: 5 });
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 0, rank: 4 }),
+            })
+            .expect("rook slide should be legal");
+
+        assert_eq!(
+            board.flags.en_passant_target, None,
+            "non-pawn move must reset ep target"
+        );
+    }
+
+    /// `GameStatus::Check` is produced when the side to move is in check
+    /// but has at least one legal move. Locks the variant into the spec.
+    #[test]
+    fn test_game_status_check_when_in_check_with_legal_moves() {
+        let mut board = empty_board();
+        // White king on (4,4) in check from a black rook on (4,0), with
+        // plenty of legal escape squares.
+        board.grid[4][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        match board.status() {
+            GameStatus::Check { side_to_move } => {
+                assert_eq!(side_to_move, Color::White);
+            }
+            other => panic!("expected Check, got {other:?}"),
+        }
+    }
+
+    /// The structured `MoveError::message()` uses `Display` formatters,
+    /// not `{:?}`, so it doesn't surface Rust syntax to UI callers.
+    #[test]
+    fn test_move_error_message_uses_display_not_debug() {
+        let board = empty_board();
+        let err = board
+            .validate_move(&GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 1, rank: 0 }),
+            })
+            .unwrap_err();
+        let msg = err.message();
+        assert!(
+            !msg.contains("Coord {"),
+            "message must not leak Debug formatting, got: {msg}"
+        );
+        assert!(
+            msg.contains("a8"),
+            "message should refer to source square in algebraic, got: {msg}"
+        );
     }
 }

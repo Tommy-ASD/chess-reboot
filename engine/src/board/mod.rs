@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     board::square::{Square, SquareCondition, SquareType},
-    pieces::piecetype::PieceType,
+    pieces::{Color, piecetype::PieceType},
 };
 
 pub mod brainrot;
@@ -23,7 +23,51 @@ pub struct Coord {
     pub rank: Rank,
 }
 
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
+impl std::fmt::Display for Coord {
+    /// Algebraic notation (`e4`, `a1`, `h8`). Assumes the default 8-rank
+    /// board; same assumption baked into `fen::coord_to_algebraic`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let file_letter = (b'a' + self.file) as char;
+        let algebraic_rank = 8u8.saturating_sub(self.rank);
+        write!(f, "{file_letter}{algebraic_rank}")
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+pub enum PromotionTarget {
+    Queen,
+    Rook,
+    Bishop,
+    Knight,
+}
+
+impl std::fmt::Display for PromotionTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PromotionTarget::Queen => "queen",
+            PromotionTarget::Rook => "rook",
+            PromotionTarget::Bishop => "bishop",
+            PromotionTarget::Knight => "knight",
+        })
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum CastleSide {
+    Kingside,
+    Queenside,
+}
+
+impl std::fmt::Display for CastleSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            CastleSide::Kingside => "kingside",
+            CastleSide::Queenside => "queenside",
+        })
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "target")]
 pub enum MoveType {
     MoveTo(Coord),
@@ -33,11 +77,43 @@ pub enum MoveType {
         move_type: Arc<MoveType>,
     },
     PhaseShift,
+    Promotion {
+        target: Coord,
+        into: PromotionTarget,
+    },
+    Castle {
+        side: CastleSide,
+    },
+    EnPassant {
+        target: Coord,
+        captured: Coord,
+    },
+}
+
+impl std::fmt::Display for MoveType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MoveType::MoveTo(c) => write!(f, "move to {c}"),
+            MoveType::MoveIntoCarrier(c) => write!(f, "board the carrier at {c}"),
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => write!(f, "passenger #{piece_index} → {move_type}"),
+            MoveType::PhaseShift => f.write_str("phase shift"),
+            MoveType::Promotion { target, into } => {
+                write!(f, "promote to {into} at {target}")
+            }
+            MoveType::Castle { side } => write!(f, "castle {side}"),
+            MoveType::EnPassant { target, captured } => {
+                write!(f, "en-passant to {target} (capturing {captured})")
+            }
+        }
+    }
 }
 
 /// Represents a move from one coordinate to another.
 /// Will likely be expanded later with more info.
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct GameMove {
     pub from: Coord,
     pub move_type: MoveType,
@@ -47,6 +123,7 @@ pub type Direction = (isize, isize);
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct BoardFlags {
+    pub side_to_move: Color,
     pub white_can_castle_kingside: bool,
     pub white_can_castle_queenside: bool,
     pub black_can_castle_kingside: bool,
@@ -54,6 +131,139 @@ pub struct BoardFlags {
     pub en_passant_target: Option<Coord>,
     // more fields we can figure out later
 }
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum GameStatus {
+    Ongoing,
+    Check { side_to_move: Color },
+    Checkmate { winner: Color },
+    Stalemate,
+}
+
+/// Helper used by `Board::find_king` and tests. Lives at module scope so
+/// the closure inside `find_king` doesn't need to capture anything.
+fn king_of_color(piece: &PieceType, color: Color) -> bool {
+    matches!(piece, PieceType::King(k) if k.color == color)
+}
+
+/// Structured failure reasons for `Board::make_move` /
+/// `Board::validate_move`. Surfaces enough context that an API consumer
+/// can render a useful error message without re-deriving state from the
+/// FEN. Plan 06 will likely flow these straight into HTTP error bodies.
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+pub enum MoveError {
+    /// `from` is outside the board grid.
+    NoSourceSquare { from: Coord },
+    /// `from` is in bounds but the square is empty.
+    NoPieceAtSource { from: Coord },
+    /// A piece is at `from` but it's the other side's turn.
+    WrongTurn {
+        from: Coord,
+        piece_symbol: String,
+        piece_color: Color,
+        side_to_move: Color,
+    },
+    /// The attempted move isn't in the piece's raw move set at all —
+    /// e.g. trying to move a rook diagonally, or trying to land on a
+    /// friendly piece. `candidate_alternatives` lists the move-shapes
+    /// the piece actually offers from `from`. These are the *raw*
+    /// candidates (pre-king-safety filter), so some may themselves be
+    /// illegal because they'd leave the mover's king in check. Treat
+    /// them as "did you mean…" hints, not as guaranteed-legal moves.
+    PieceCannotMakeMove {
+        from: Coord,
+        piece_symbol: String,
+        piece_color: Color,
+        attempted: MoveType,
+        candidate_alternatives: Vec<MoveType>,
+    },
+    /// The move is geometrically valid but applying it would leave the
+    /// mover's own king in check (illegal pin / discovered check / king
+    /// walking into attack).
+    WouldLeaveKingInCheck {
+        from: Coord,
+        piece_symbol: String,
+        piece_color: Color,
+        attempted: MoveType,
+    },
+    /// `make_move_unchecked` returned `Err` after `validate_move` already
+    /// accepted the move. In practice this is unreachable from a normal
+    /// `make_move` call — `validate_move` runs the same apply path on a
+    /// clone first, so any error would have surfaced there. The variant
+    /// exists for defence-in-depth and to keep the `Result` chain honest;
+    /// if you ever observe it in the wild, treat it as an engine bug and
+    /// include the `reason` field in the bug report.
+    ApplyFailed {
+        from: Coord,
+        attempted: MoveType,
+        reason: String,
+    },
+}
+
+impl MoveError {
+    /// Human-readable message — what the API used to return as a bare
+    /// string. Always derivable from the structured fields, so clients
+    /// that want richer rendering can ignore this and consume the enum
+    /// directly. Uses `Display` rather than `Debug` formatting so it's
+    /// safe to surface verbatim in a UI alert.
+    pub fn message(&self) -> String {
+        match self {
+            MoveError::NoSourceSquare { from } => format!(
+                "Source square {from} is out of bounds."
+            ),
+            MoveError::NoPieceAtSource { from } => format!(
+                "Source square {from} is empty — there is no piece to move."
+            ),
+            MoveError::WrongTurn {
+                from,
+                piece_symbol,
+                piece_color,
+                side_to_move,
+            } => format!(
+                "It is {side_to_move}'s turn, but the piece at {from} ('{piece_symbol}') is {piece_color}."
+            ),
+            MoveError::PieceCannotMakeMove {
+                from,
+                piece_symbol,
+                piece_color,
+                attempted,
+                candidate_alternatives,
+            } => {
+                let n = candidate_alternatives.len();
+                let noun = if n == 1 { "candidate" } else { "candidates" };
+                format!(
+                    "The {piece_color} '{piece_symbol}' at {from} cannot {attempted}. \
+                     {n} {noun} available from this square (some may leave the king in check)."
+                )
+            }
+            MoveError::WouldLeaveKingInCheck {
+                from,
+                piece_symbol,
+                piece_color,
+                attempted,
+            } => format!(
+                "{piece_color} '{piece_symbol}' at {from} cannot {attempted}: \
+                 that move would leave the {piece_color} king in check."
+            ),
+            MoveError::ApplyFailed {
+                from,
+                attempted,
+                reason,
+            } => format!(
+                "Internal error applying '{attempted}' from {from} after validation passed — {reason}"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for MoveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message())
+    }
+}
+
+impl std::error::Error for MoveError {}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Board {
@@ -108,9 +318,175 @@ impl Board {
     }
 
     /// Takes a from and to coordinate and returns true if the move is valid.
+    /// Thin wrapper over `validate_move` — use that directly when you need
+    /// to know *why* a move is invalid.
     pub fn is_valid_move(&self, game_move: &GameMove) -> bool {
-        let possible_moves = self.get_moves(&game_move.from);
-        possible_moves.iter().any(|m| m == game_move)
+        self.validate_move(game_move).is_ok()
+    }
+
+    /// Single-pass legality check that produces a structured `MoveError`
+    /// instead of a bool. The order of checks is deliberate so the most
+    /// specific reason wins:
+    ///
+    /// 1. Source square exists.
+    /// 2. Source has a piece.
+    /// 3. Piece is the side to move.
+    /// 4. Move is in the piece's raw move set (`get_moves`).
+    /// 5. Applying the move doesn't leave the mover's own king in check.
+    pub fn validate_move(&self, game_move: &GameMove) -> Result<(), MoveError> {
+        let Some(square) = self.get_square_at(&game_move.from) else {
+            return Err(MoveError::NoSourceSquare {
+                from: game_move.from.clone(),
+            });
+        };
+        let Some(piece) = square.piece.as_ref() else {
+            return Err(MoveError::NoPieceAtSource {
+                from: game_move.from.clone(),
+            });
+        };
+        let piece_color = piece.get_color();
+        let piece_symbol = piece.symbol();
+        let side_to_move = self.flags.side_to_move;
+        if piece_color != side_to_move {
+            return Err(MoveError::WrongTurn {
+                from: game_move.from.clone(),
+                piece_symbol,
+                piece_color,
+                side_to_move,
+            });
+        }
+
+        let raw_moves = self.get_moves(&game_move.from);
+        if !raw_moves.iter().any(|m| m == game_move) {
+            return Err(MoveError::PieceCannotMakeMove {
+                from: game_move.from.clone(),
+                piece_symbol,
+                piece_color,
+                attempted: game_move.move_type.clone(),
+                candidate_alternatives: raw_moves.into_iter().map(|m| m.move_type).collect(),
+            });
+        }
+
+        let mut hypothetical = self.clone();
+        match hypothetical.make_move_unchecked(game_move.clone()) {
+            Ok(()) => {
+                if hypothetical.is_in_check(piece_color) {
+                    return Err(MoveError::WouldLeaveKingInCheck {
+                        from: game_move.from.clone(),
+                        piece_symbol,
+                        piece_color,
+                        attempted: game_move.move_type.clone(),
+                    });
+                }
+                Ok(())
+            }
+            Err(reason) => Err(MoveError::ApplyFailed {
+                from: game_move.from.clone(),
+                attempted: game_move.move_type.clone(),
+                reason,
+            }),
+        }
+    }
+
+    /// Is `target` attacked by any piece of `attacker`? Used for check
+    /// detection (`target = king square`, `attacker = enemy color`) and
+    /// castle-path safety.
+    ///
+    /// Implementation is O(N·M) — for each piece of `attacker`, ask the
+    /// piece what squares it threatens, then look for `target` in the set.
+    /// At 8×8 this is fine; revisit if board sizes grow.
+    pub fn is_attacked_by(&self, target: &Coord, attacker: Color) -> bool {
+        for (coord, piece) in self.all_pieces() {
+            if piece.get_color() != attacker {
+                continue;
+            }
+            for c in piece.attacks(self, &coord) {
+                if &c == target {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Locate the king of `color`, if one exists on the board. Returns
+    /// `None` for setups where the king is missing (tests, partial boards) —
+    /// callers should treat the absence as "not in check" rather than panic.
+    ///
+    /// Descends into `Bus` passengers: a passenger king's effective square
+    /// is the Bus's square, since capturing the Bus also captures every
+    /// piece inside. Without this, `is_in_check(color)` silently returns
+    /// `false` for a king parked inside a Bus and the game can never end.
+    pub fn find_king(&self, color: Color) -> Option<Coord> {
+        for (coord, piece) in self.all_pieces() {
+            if king_of_color(&piece, color) {
+                return Some(coord);
+            }
+            if let PieceType::Bus(bus) = &piece {
+                if bus.pieces.iter().any(|p| king_of_color(p, color)) {
+                    return Some(coord);
+                }
+            }
+        }
+        None
+    }
+
+    /// Is the `color` king currently under attack? Defensively returns
+    /// `false` when no king of that colour exists on the board.
+    pub fn is_in_check(&self, color: Color) -> bool {
+        match self.find_king(color) {
+            Some(king_coord) => self.is_attacked_by(&king_coord, color.opposite()),
+            None => false,
+        }
+    }
+
+    /// Subset of `get_moves(from)` after dropping any move that would leave
+    /// the moving side's own king in check (or fail apply for any other
+    /// reason). Implements pin/discovered-check filtering by clone-and-try
+    /// per candidate move; correct but not fast — see plan 02's notes.
+    pub fn legal_moves(&self, from: &Coord) -> Vec<GameMove> {
+        let raw = self.get_moves(from);
+        let moving_color = match self.get_square_at(from).and_then(|s| s.piece.as_ref()) {
+            Some(p) => p.get_color(),
+            None => return Vec::new(),
+        };
+        raw.into_iter()
+            .filter(|m| {
+                let mut hypothetical = self.clone();
+                match hypothetical.make_move_unchecked(m.clone()) {
+                    Ok(()) => !hypothetical.is_in_check(moving_color),
+                    Err(_) => false,
+                }
+            })
+            .collect()
+    }
+
+    /// Overall status from the perspective of `side_to_move`. `BrainrotWin`
+    /// is intentionally absent — plan 04 will fold that in once the
+    /// distinguish-stalemate-from-brainrot heuristic lands.
+    pub fn status(&self) -> GameStatus {
+        let to_move = self.flags.side_to_move;
+        let any_legal = self
+            .all_pieces()
+            .iter()
+            .filter(|(_, p)| p.get_color() == to_move)
+            .any(|(coord, _)| !self.legal_moves(coord).is_empty());
+
+        if any_legal {
+            if self.is_in_check(to_move) {
+                return GameStatus::Check {
+                    side_to_move: to_move,
+                };
+            }
+            return GameStatus::Ongoing;
+        }
+        if self.is_in_check(to_move) {
+            GameStatus::Checkmate {
+                winner: to_move.opposite(),
+            }
+        } else {
+            GameStatus::Stalemate
+        }
     }
 
     pub fn all_pieces(&self) -> Vec<(Coord, PieceType)> {

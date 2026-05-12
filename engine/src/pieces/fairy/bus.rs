@@ -189,6 +189,17 @@ impl Piece for Bus {
     fn clone_box(&self) -> Box<dyn Piece> {
         Box::new(self.clone())
     }
+    /// The Bus itself cannot capture (spec), so a Bus on `from` contributes
+    /// nothing. Its passengers, however, can exit the Bus straight onto an
+    /// enemy square — those threats *do* matter for king safety. We compute
+    /// each passenger's attacks as if it were standing on the Bus's square.
+    fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        let mut out = Vec::new();
+        for passenger in &self.pieces {
+            out.extend(passenger.attacks(board, from));
+        }
+        out
+    }
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

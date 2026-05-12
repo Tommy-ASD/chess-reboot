@@ -1,3 +1,3 @@
 pub mod board;
 mod movement;
-mod pieces;
+pub mod pieces;

@@ -2,10 +2,10 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     board::{
-        Board, BoardFlags,
+        Board, BoardFlags, Coord,
         square::{Square, SquareCondition, SquareType},
     },
-    pieces::piecetype::PieceType,
+    pieces::{Color, piecetype::PieceType},
 };
 
 /// Finds the index of the closing parenthesis that matches the opening
@@ -179,26 +179,134 @@ pub fn board_to_fen(board: &Board) -> String {
         rows.push(fen_row);
     }
 
-    rows.join("/")
+    let grid = rows.join("/");
+    let stm = match board.flags.side_to_move {
+        Color::White => "w",
+        Color::Black => "b",
+    };
+    let castling = castle_rights_to_fen(&board.flags);
+    let ep = match &board.flags.en_passant_target {
+        Some(c) => coord_to_algebraic(c),
+        None => "-".to_string(),
+    };
+    format!("{grid} {stm} {castling} {ep}")
+}
+
+/// Algebraic ("e3") notation for an internal Coord.
+///
+/// File 0..=7 maps to a..=h; rank 0..=7 maps to algebraic 8..=1 (rank 0 is
+/// the FEN-top row, which is algebraic 8).
+fn coord_to_algebraic(c: &Coord) -> String {
+    let file_letter = (b'a' + c.file) as char;
+    let algebraic_rank = 8u8.saturating_sub(c.rank);
+    format!("{file_letter}{algebraic_rank}")
+}
+
+fn algebraic_to_coord(s: &str) -> Option<Coord> {
+    let bytes = s.as_bytes();
+    if bytes.len() != 2 {
+        return None;
+    }
+    let file = bytes[0].checked_sub(b'a')?;
+    if file > 7 {
+        return None;
+    }
+    let algebraic_rank = (bytes[1] as char).to_digit(10)? as u8;
+    if !(1..=8).contains(&algebraic_rank) {
+        return None;
+    }
+    Some(Coord {
+        file,
+        rank: 8 - algebraic_rank,
+    })
+}
+
+fn castle_rights_to_fen(flags: &BoardFlags) -> String {
+    let mut out = String::new();
+    if flags.white_can_castle_kingside {
+        out.push('K');
+    }
+    if flags.white_can_castle_queenside {
+        out.push('Q');
+    }
+    if flags.black_can_castle_kingside {
+        out.push('k');
+    }
+    if flags.black_can_castle_queenside {
+        out.push('q');
+    }
+    if out.is_empty() {
+        out.push('-');
+    }
+    out
+}
+
+fn parse_castle_rights(s: &str) -> (bool, bool, bool, bool) {
+    if s == "-" {
+        return (false, false, false, false);
+    }
+    let mut wk = false;
+    let mut wq = false;
+    let mut bk = false;
+    let mut bq = false;
+    for c in s.chars() {
+        match c {
+            'K' => wk = true,
+            'Q' => wq = true,
+            'k' => bk = true,
+            'q' => bq = true,
+            _ => warn!(?c, "unknown castle-rights char"),
+        }
+    }
+    (wk, wq, bk, bq)
 }
 
 pub fn fen_to_board(fen: &str) -> Board {
     debug!(%fen, "fen_to_board");
 
-    let rows: Vec<&str> = fen.split('/').collect();
+    // Split off optional flag fields: <grid> <stm> <castling> <ep> [...]
+    let mut parts = fen.split_whitespace();
+    let grid_part = parts.next().unwrap_or("");
+    let stm_part = parts.next();
+    let castle_part = parts.next();
+    let ep_part = parts.next();
+
+    let rows: Vec<&str> = grid_part.split('/').collect();
     let mut grid = vec![];
 
     for row in rows {
         grid.push(fen_row_to_squares(row));
     }
 
-    // Default flags for now
+    let side_to_move = match stm_part {
+        Some("w") | None => Color::White,
+        Some("b") => Color::Black,
+        Some(other) => {
+            warn!(other, "unknown side-to-move byte; defaulting to white");
+            Color::White
+        }
+    };
+
+    let (wk, wq, bk, bq) = match castle_part {
+        Some(s) => parse_castle_rights(s),
+        // No castling field provided — fall back to all rights set so that
+        // a bare grid keeps round-tripping. New games (sent with an explicit
+        // castling field) get exactly what the client says.
+        None => (true, true, true, true),
+    };
+
+    let en_passant_target = match ep_part {
+        None | Some("-") => None,
+        Some(s) => algebraic_to_coord(s),
+    };
+
     let flags = BoardFlags {
-        white_can_castle_kingside: true,
-        white_can_castle_queenside: true,
-        black_can_castle_kingside: true,
-        black_can_castle_queenside: true,
-        en_passant_target: None,
+        side_to_move,
+        white_can_castle_kingside: wk,
+        white_can_castle_queenside: wq,
+        black_can_castle_kingside: bk,
+        black_can_castle_queenside: bq,
+        en_passant_target,
     };
 
     Board { grid, flags }

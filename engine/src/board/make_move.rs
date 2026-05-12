@@ -1,24 +1,36 @@
 use tracing::debug;
 
 use crate::{
-    board::{Board, GameMove, MoveType},
-    pieces::piecetype::PieceType,
+    board::{Board, CastleSide, Coord, GameMove, MoveError, MoveType, PromotionTarget},
+    pieces::{Color, piecetype::PieceType},
 };
 
 impl Board {
     /// Attempts to execute a move on the board.
-    /// Returns Ok(()) if successful, Err(...) if illegal.
-    pub fn make_move(&mut self, game_move: GameMove) -> Result<(), String> {
-        // validate legality of the move
-        if !self.is_valid_move(&game_move) {
-            return Err(format!("Illegal move: {:?}", game_move));
-        }
+    /// Returns Ok(()) if successful, Err(MoveError) if illegal. The error
+    /// is structured (see `MoveError`) — match on the discriminant to
+    /// surface a useful message in your UI.
+    pub fn make_move(&mut self, game_move: GameMove) -> Result<(), MoveError> {
+        self.validate_move(&game_move)?;
+        let from = game_move.from.clone();
+        let attempted = game_move.move_type.clone();
+        self.make_move_unchecked(game_move).map_err(|reason| MoveError::ApplyFailed {
+            from,
+            attempted,
+            reason,
+        })
+    }
 
+    /// Apply a move without re-running legality checks. The caller (e.g.
+    /// `legal_moves`) is responsible for having generated the move from
+    /// `get_moves` first. Internal invariants (source square exists, piece
+    /// present, target shape matches variant) are still verified — they
+    /// become `Err` rather than `panic!`.
+    pub fn make_move_unchecked(&mut self, game_move: GameMove) -> Result<(), String> {
         let board_before = self.clone();
 
         let from = &game_move.from;
 
-        // validate existence of source square + piece
         let piece = {
             let square = self
                 .get_square_at(from)
@@ -32,28 +44,123 @@ impl Board {
 
         match &game_move.move_type {
             MoveType::MoveTo(target) => {
-                // mutate board: remove piece from original square
-                // this logic will change later on with new pieces
+                // Capture-side effects (clear castle right on rook capture).
+                if let Some(captured) =
+                    self.get_square_at(target).and_then(|s| s.piece.clone())
+                {
+                    self.maybe_clear_castle_on_rook_capture(target, &captured);
+                }
                 {
                     let from_sq = self
                         .get_square_mut(from)
                         .ok_or_else(|| format!("No square at {:?}", from))?;
-
                     from_sq.piece = None;
                 }
-
-                // handle capture or landing on new square
-                // again, logic will change with new pieces
                 {
                     let to_sq = self
                         .get_square_mut(target)
                         .ok_or_else(|| format!("No square at {:?}", target))?;
-
-                    // Whatever piece is there → captured automatically
                     to_sq.piece = Some(piece);
                 }
 
                 debug!(?from, ?target, "move executed");
+            }
+            MoveType::Promotion { target, into } => {
+                let pawn_color = match &piece {
+                    PieceType::Pawn(p) => p.color,
+                    other => {
+                        return Err(format!(
+                            "Promotion: source piece is not a pawn (got {:?})",
+                            other
+                        ));
+                    }
+                };
+
+                if let Some(captured) =
+                    self.get_square_at(target).and_then(|s| s.piece.clone())
+                {
+                    self.maybe_clear_castle_on_rook_capture(target, &captured);
+                }
+
+                let new_piece = match into {
+                    PromotionTarget::Queen => PieceType::new_queen(pawn_color),
+                    PromotionTarget::Rook => PieceType::new_rook(pawn_color),
+                    PromotionTarget::Bishop => PieceType::new_bishop(pawn_color),
+                    PromotionTarget::Knight => PieceType::new_knight(pawn_color),
+                };
+
+                {
+                    let from_sq = self
+                        .get_square_mut(from)
+                        .ok_or_else(|| format!("No square at {:?}", from))?;
+                    from_sq.piece = None;
+                }
+                {
+                    let to_sq = self
+                        .get_square_mut(target)
+                        .ok_or_else(|| format!("No square at {:?}", target))?;
+                    to_sq.piece = Some(new_piece);
+                }
+
+                debug!(?from, ?target, ?into, "promotion executed");
+            }
+            MoveType::Castle { side } => {
+                let back_rank = from.rank;
+                let (king_target_file, rook_source_file, rook_target_file) = match side {
+                    CastleSide::Kingside => (6u8, 7u8, 5u8),
+                    CastleSide::Queenside => (2u8, 0u8, 3u8),
+                };
+                let king_target = Coord {
+                    file: king_target_file,
+                    rank: back_rank,
+                };
+                let rook_source = Coord {
+                    file: rook_source_file,
+                    rank: back_rank,
+                };
+                let rook_target = Coord {
+                    file: rook_target_file,
+                    rank: back_rank,
+                };
+
+                let rook = self
+                    .get_square_at(&rook_source)
+                    .and_then(|s| s.piece.clone())
+                    .ok_or_else(|| format!("Castle: no piece at {:?}", rook_source))?;
+                if !matches!(rook, PieceType::Rook(_)) {
+                    return Err(format!(
+                        "Castle: piece at {:?} is not a rook (got {:?})",
+                        rook_source, rook
+                    ));
+                }
+
+                self.get_square_mut(from)
+                    .ok_or_else(|| format!("Castle: no square at {:?}", from))?
+                    .piece = None;
+                self.get_square_mut(&rook_source)
+                    .ok_or_else(|| format!("Castle: no square at {:?}", rook_source))?
+                    .piece = None;
+                self.get_square_mut(&king_target)
+                    .ok_or_else(|| format!("Castle: no square at {:?}", king_target))?
+                    .piece = Some(piece);
+                self.get_square_mut(&rook_target)
+                    .ok_or_else(|| format!("Castle: no square at {:?}", rook_target))?
+                    .piece = Some(rook);
+
+                debug!(?from, ?king_target, ?side, "castle executed");
+            }
+            MoveType::EnPassant { target, captured } => {
+                self.get_square_mut(from)
+                    .ok_or_else(|| format!("EnPassant: no square at {:?}", from))?
+                    .piece = None;
+                self.get_square_mut(captured)
+                    .ok_or_else(|| format!("EnPassant: no square at {:?}", captured))?
+                    .piece = None;
+                self.get_square_mut(target)
+                    .ok_or_else(|| format!("EnPassant: no square at {:?}", target))?
+                    .piece = Some(piece);
+
+                debug!(?from, ?target, ?captured, "en passant executed");
             }
             MoveType::PhaseShift => match piece {
                 PieceType::Skibidi(mut skib) => {
@@ -79,14 +186,12 @@ impl Board {
                 _ => return Err("Non-skibidi piece making phaseshift move".to_string()),
             },
             MoveType::MoveIntoCarrier(target) => {
-                // Remove piece from source.
                 {
                     let from_sq = self
                         .get_square_mut(from)
                         .ok_or_else(|| format!("No square at {:?}", from))?;
                     from_sq.piece = None;
                 }
-                // Push into the target carrier.
                 {
                     let to_sq = self
                         .get_square_mut(target)
@@ -134,7 +239,6 @@ impl Board {
                         debug!(?from, ?target, "moved out of carrier");
                     }
                     MoveType::MoveIntoCarrier(target) => {
-                        // Passenger exits straight into a different friendly carrier.
                         let to_sq = self
                             .get_square_mut(target)
                             .ok_or_else(|| format!("No square at {:?}", target))?;
@@ -170,7 +274,6 @@ impl Board {
                     }
                 }
 
-                // Put the (possibly-emptied) source carrier back.
                 let from_sq = self
                     .get_square_mut(from)
                     .ok_or_else(|| format!("No square at {:?}", from))?;
@@ -178,10 +281,44 @@ impl Board {
             }
         };
 
-        // 5. Special movement hooks (stub)
         self.handle_post_move_effects(&board_before, game_move)?;
 
         Ok(())
+    }
+
+    /// If `captured_piece` is a rook on its color's starting rook square,
+    /// drop the corresponding castle right. Mirrors the standard-chess rule
+    /// that capturing a rook on h1/a1/h8/a8 cancels future castling on
+    /// that side. Plan 03's `post_move_effects` covers rook *moves*; this
+    /// covers the case where the rook never moves but is captured in place.
+    fn maybe_clear_castle_on_rook_capture(
+        &mut self,
+        captured_square: &Coord,
+        captured_piece: &PieceType,
+    ) {
+        let PieceType::Rook(r) = captured_piece else {
+            return;
+        };
+        match r.color {
+            Color::White => {
+                if captured_square.rank == 7 {
+                    if captured_square.file == 0 {
+                        self.flags.white_can_castle_queenside = false;
+                    } else if captured_square.file == 7 {
+                        self.flags.white_can_castle_kingside = false;
+                    }
+                }
+            }
+            Color::Black => {
+                if captured_square.rank == 0 {
+                    if captured_square.file == 0 {
+                        self.flags.black_can_castle_queenside = false;
+                    } else if captured_square.file == 7 {
+                        self.flags.black_can_castle_kingside = false;
+                    }
+                }
+            }
+        }
     }
 
     fn handle_post_move_effects(
@@ -189,30 +326,51 @@ impl Board {
         before_state: &Board,
         game_move: GameMove,
     ) -> Result<(), String> {
-        // call post-move effect on the piece that moved
-        match &game_move.move_type {
-            MoveType::PhaseShift => {
-                // currently no post-move effects for PhaseShift
-            }
-            MoveType::MoveTo(target) => {
-                let mut piece = {
-                    let square = self
-                        .get_square_at(&target)
-                        .ok_or_else(|| format!("No square at {:?}", target))?;
+        // Reset en-passant target before piece-level hooks. Pawn's
+        // post_move_effects re-sets it if this move was a double push.
+        self.flags.en_passant_target = None;
 
-                    square
-                        .piece
-                        .clone()
-                        .ok_or_else(|| format!("No piece at {:?}", target))?
+        // The square at which the moving piece ends up (if any). For
+        // PhaseShift and Bus-internal moves we skip the post-effect dispatch
+        // entirely.
+        let piece_target: Option<Coord> = match &game_move.move_type {
+            MoveType::PhaseShift => None,
+            MoveType::MoveTo(target) => Some(target.clone()),
+            MoveType::Promotion { target, .. } => Some(target.clone()),
+            MoveType::EnPassant { target, .. } => Some(target.clone()),
+            MoveType::Castle { side } => {
+                let king_file = match side {
+                    CastleSide::Kingside => 6,
+                    CastleSide::Queenside => 2,
                 };
-                piece.post_move_effects(before_state, self, &game_move);
+                Some(Coord {
+                    file: king_file,
+                    rank: game_move.from.rank,
+                })
             }
-            // No piece-level post-move effect for these variants today.
-            MoveType::MoveIntoCarrier(_) => {}
-            MoveType::PieceInCarrier { .. } => {}
+            MoveType::MoveIntoCarrier(_) | MoveType::PieceInCarrier { .. } => None,
+        };
+
+        if let Some(target) = piece_target {
+            let mut piece = {
+                let square = self
+                    .get_square_at(&target)
+                    .ok_or_else(|| format!("No square at {:?}", target))?;
+
+                square
+                    .piece
+                    .clone()
+                    .ok_or_else(|| format!("No piece at {:?}", target))?
+            };
+            piece.post_move_effects(before_state, self, &game_move);
         }
 
         self.recalc_brainrot();
+
+        // Plan 01: flip turn at the very end so post-move hooks see the
+        // pre-flip state (matters if a hook ever wants to know whose move
+        // it was).
+        self.flags.side_to_move = self.flags.side_to_move.opposite();
 
         Ok(())
     }

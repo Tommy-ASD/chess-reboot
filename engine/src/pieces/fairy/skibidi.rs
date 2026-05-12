@@ -151,6 +151,15 @@ impl Piece for Skibidi {
     fn clone_box(&self) -> Box<dyn Piece> {
         Box::new(self.clone())
     }
+    /// Per spec a Skibidi can only capture other Skibidis. For king-safety
+    /// and castle-path-attacked queries — which is what `Board::attacks`
+    /// callers ever ask — a Skibidi cannot capture a king or empty path
+    /// square. So return nothing. Skibidi-vs-Skibidi captures are still
+    /// generated normally by `initial_moves`; this override only affects
+    /// the attacker-of-a-non-Skibidi-square question.
+    fn attacks(&self, _board: &Board, _from: &Coord) -> Vec<Coord> {
+        Vec::new()
+    }
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -165,16 +174,21 @@ impl Piece for Skibidi {
         game_move: &GameMove,
     ) {
         match &game_move.move_type {
-            MoveType::PhaseShift => {}
             MoveType::MoveTo(target) => {
                 self.phase = 1;
                 board_after.set_piece_at(target, PieceType::Skibidi(self.clone()));
             }
-            // make_move's handle_post_move_effects only invokes post-move
-            // for MoveTo, so these arms are unreachable through the engine
-            // flow today. Kept as explicit no-ops to avoid masking future
-            // changes to that invariant.
-            MoveType::MoveIntoCarrier(_) | MoveType::PieceInCarrier { .. } => {}
+            // PhaseShift handled by make_move directly; carrier variants are
+            // never dispatched to a passenger's post_move_effects today;
+            // Promotion/Castle/EnPassant are pawn/king-only — none apply to
+            // a Skibidi. Explicit no-ops keep this exhaustive without
+            // masking future variants.
+            MoveType::PhaseShift
+            | MoveType::MoveIntoCarrier(_)
+            | MoveType::PieceInCarrier { .. }
+            | MoveType::Promotion { .. }
+            | MoveType::Castle { .. }
+            | MoveType::EnPassant { .. } => {}
         }
     }
 }

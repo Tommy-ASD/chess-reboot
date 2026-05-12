@@ -177,14 +177,24 @@ impl PieceType {
             // The carrier_index is `Some(idx)` iff the outer move is a
             // PieceInCarrier whose inner is itself a MoveTo (the only case
             // that's meaningful to rewrite to MoveIntoCarrier).
-            let (target, carrier_index) = match &game_move.move_type {
-                MoveType::MoveTo(coord) => (coord.clone(), None),
+            //
+            // `is_promotion` short-circuits the carrier rewrite: a promoted
+            // pawn doesn't *enter* a friendly bus on the back rank, it
+            // promotes to the chosen piece on that square (or, if the
+            // square is enemy-occupied, captures).
+            let (target, carrier_index, is_promotion) = match &game_move.move_type {
+                MoveType::MoveTo(coord) => (coord.clone(), None, false),
+                MoveType::Promotion { target, .. } => (target.clone(), None, true),
                 MoveType::PieceInCarrier {
                     piece_index,
                     move_type: inner,
                 } => match inner.as_ref() {
-                    MoveType::MoveTo(coord) => (coord.clone(), Some(*piece_index)),
-                    MoveType::MoveIntoCarrier(coord) => (coord.clone(), Some(*piece_index)),
+                    MoveType::MoveTo(coord) => {
+                        (coord.clone(), Some(*piece_index), false)
+                    }
+                    MoveType::MoveIntoCarrier(coord) => {
+                        (coord.clone(), Some(*piece_index), false)
+                    }
                     // Passenger-level PhaseShift or nested PieceInCarrier
                     // aren't supported through the carrier today — drop the
                     // move rather than crash. The passenger can still take
@@ -192,6 +202,16 @@ impl PieceType {
                     _ => return false,
                 },
                 MoveType::PhaseShift => return true,
+                // Castle's preconditions are fully validated by
+                // King::castle_moves before we ever see the move here, so
+                // there is nothing for the generic filter to check.
+                MoveType::Castle { .. } => return true,
+                // EnPassant emits onto an empty square by construction
+                // (the ep target is the square the double-pushing pawn
+                // jumped over) — the filter's empty-target check would
+                // pass, but skipping it explicitly avoids any temptation
+                // to interpret the capture-coord as a target.
+                MoveType::EnPassant { .. } => return true,
                 MoveType::MoveIntoCarrier(_) => {
                     // No piece's `initial_moves` produces a top-level
                     // MoveIntoCarrier today — the filter is the sole
@@ -209,7 +229,8 @@ impl PieceType {
                 return true;
             };
 
-            if target_piece.can_carry_piece()
+            if !is_promotion
+                && target_piece.can_carry_piece()
                 && target_piece.get_color() == self.get_color()
             {
                 // Capacity check — Bus holds at most 5 (per spec).
@@ -266,5 +287,14 @@ impl PieceType {
         game_move: &GameMove,
     ) {
         dispatch!(self, p => p.post_move_effects(board_before, board_after, game_move))
+    }
+
+    /// See `Piece::attacks` for semantics.
+    pub fn attacks(
+        &self,
+        board: &crate::board::Board,
+        from: &crate::board::Coord,
+    ) -> Vec<crate::board::Coord> {
+        dispatch!(self, p => p.attacks(board, from))
     }
 }
