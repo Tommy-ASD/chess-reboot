@@ -1,14 +1,15 @@
 use axum::{
     Json, Router,
-    routing::{get, post},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
 };
 use http::Method;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 
 use engine::board::{
-    Board, Coord, GameMove,
+    Coord, GameMove,
     fen::{board_to_fen, fen_to_board},
 };
 
@@ -44,11 +45,13 @@ pub struct GetNewBoardStateResponse {
 #[axum::debug_handler]
 async fn get_new_board_state_handler(
     Json(req): Json<GetNewBoardStateRequest>,
-) -> Json<GetNewBoardStateResponse> {
+) -> Response {
     let mut board = fen_to_board(&req.board_fen);
-    board.make_move(req.game_move);
+    if let Err(err) = board.make_move(req.game_move) {
+        return (StatusCode::BAD_REQUEST, err).into_response();
+    }
     let new_board_fen = board_to_fen(&board);
-    Json(GetNewBoardStateResponse { new_board_fen })
+    Json(GetNewBoardStateResponse { new_board_fen }).into_response()
 }
 
 pub async fn serve_api() {

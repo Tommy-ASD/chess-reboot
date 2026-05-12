@@ -118,43 +118,50 @@ impl Monkey {
             let jump_file = adj_file + df;
             let jump_rank = adj_rank + dr;
 
-            if board.in_bounds(adj_file, adj_rank) && board.in_bounds(jump_file, jump_rank) {
-                let adj_coord = Coord {
-                    file: adj_file as u8,
-                    rank: adj_rank as u8,
-                };
-                let jump_coord = Coord {
-                    file: jump_file as u8,
-                    rank: jump_rank as u8,
-                };
+            if !board.in_bounds(adj_file, adj_rank) || !board.in_bounds(jump_file, jump_rank) {
+                continue;
+            }
+            let adj_coord = Coord {
+                file: adj_file as u8,
+                rank: adj_rank as u8,
+            };
+            let jump_coord = Coord {
+                file: jump_file as u8,
+                rank: jump_rank as u8,
+            };
 
-                if visited.contains(&jump_coord) {
-                    continue;
-                };
+            // Avoid revisiting a square within the current jump chain — this
+            // prevents cycles but `visited` must be restored after recursion
+            // so a sibling branch can still reach the same square via a
+            // different path.
+            if visited.contains(&jump_coord) {
+                continue;
+            }
 
-                if let Some(adj_square) = board.get_square_at(&adj_coord) {
-                    if adj_square.piece.is_some() {
-                        if let Some(jump_square) = board.get_square_at(&jump_coord) {
-                            if jump_square.piece.is_none() {
-                                let game_move = GameMove {
-                                    from: origin.clone(),
-                                    move_type: MoveType::MoveTo(jump_coord.clone()),
-                                };
-                                moves.push(game_move);
-                                visited.push(jump_coord.clone());
-                                self.find_jump_moves(board, origin, &jump_coord, visited, moves);
-                            }
-                            if jump_square.has_piece_of_color(self.color.opposite()) {
-                                let game_move = GameMove {
-                                    from: origin.clone(),
-                                    move_type: MoveType::MoveTo(jump_coord.clone()),
-                                };
-                                moves.push(game_move);
-                                visited.push(jump_coord.clone());
-                            }
-                        }
-                    }
-                }
+            let Some(adj_square) = board.get_square_at(&adj_coord) else {
+                continue;
+            };
+            if adj_square.piece.is_none() {
+                continue;
+            }
+            let Some(jump_square) = board.get_square_at(&jump_coord) else {
+                continue;
+            };
+
+            if jump_square.piece.is_none() {
+                moves.push(GameMove {
+                    from: origin.clone(),
+                    move_type: MoveType::MoveTo(jump_coord.clone()),
+                });
+                visited.push(jump_coord.clone());
+                self.find_jump_moves(board, origin, &jump_coord, visited, moves);
+                visited.pop();
+            } else if jump_square.has_piece_of_color(self.color.opposite()) {
+                moves.push(GameMove {
+                    from: origin.clone(),
+                    move_type: MoveType::MoveTo(jump_coord.clone()),
+                });
+                // Capture ends the chain — no recursion, no need to record visited.
             }
         }
     }

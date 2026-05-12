@@ -239,7 +239,9 @@ impl Piece for Goblin {
     ) {
         let to = match &game_move.move_type {
             MoveType::MoveTo(target) => target.clone(),
-            _ => panic!("Goblin post move effects, not move to"),
+            // make_move's handle_post_move_effects only invokes post-move
+            // for MoveTo today, so other variants are unreachable.
+            _ => return,
         };
         match &self.state {
             GoblinState::Free => {

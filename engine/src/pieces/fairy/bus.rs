@@ -62,10 +62,14 @@ impl Bus {
             trace!(field, key, val, "handling bus field");
 
             match key {
-                // is an array
+                // P=(piece, piece, ...) — array of passenger symbols
                 "P" => {
-                    let val = val.strip_prefix("(").unwrap().strip_suffix(")").unwrap();
-                    for piece_sym in split_top_level(val) {
+                    let Some(inner) = val.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+                    else {
+                        warn!(val, "malformed Bus P=... field; expected (...)");
+                        continue;
+                    };
+                    for piece_sym in split_top_level(inner) {
                         let opt_inner_piece = PieceType::symbol_to_piece(&piece_sym);
                         trace!(piece_sym, ?opt_inner_piece, "parsed inner piece");
                         if let Some(inner_piece) = opt_inner_piece {

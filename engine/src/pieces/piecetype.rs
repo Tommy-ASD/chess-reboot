@@ -1,7 +1,5 @@
 use std::rc::Rc;
 
-use tracing::error;
-
 use crate::{
     board::GameMove,
     pieces::{
@@ -187,16 +185,18 @@ impl PieceType {
                 } => match inner.as_ref() {
                     MoveType::MoveTo(coord) => (coord.clone(), Some(*piece_index)),
                     MoveType::MoveIntoCarrier(coord) => (coord.clone(), Some(*piece_index)),
-                    _ => {
-                        error!(?inner, "unmatched inner MoveType in get_moves filter");
-                        todo!();
-                    }
+                    // Passenger-level PhaseShift or nested PieceInCarrier
+                    // aren't supported through the carrier today — drop the
+                    // move rather than crash. The passenger can still take
+                    // such moves once it has exited the carrier.
+                    _ => return false,
                 },
                 MoveType::PhaseShift => return true,
                 MoveType::MoveIntoCarrier(_) => {
-                    // Pieces never produce a top-level MoveIntoCarrier from
-                    // `initial_moves`; the filter is the sole producer.
-                    todo!("top-level MoveIntoCarrier reached the filter");
+                    // No piece's `initial_moves` produces a top-level
+                    // MoveIntoCarrier today — the filter is the sole
+                    // producer. Drop defensively instead of panicking.
+                    return false;
                 }
             };
 
@@ -218,6 +218,25 @@ impl PieceType {
                     _ => false,
                 };
                 if at_capacity {
+                    return false;
+                }
+                // Forbid nested carriers — Bus inside Bus would let total
+                // transported pieces escape the capacity-5 spec, since the
+                // outer Bus only counts the inner Bus as a single entry.
+                // The entering piece is `self` (top-level) or
+                // `self.pieces[idx]` (passenger of a carrier).
+                let entering_is_carrier = match carrier_index {
+                    None => self.can_carry_piece(),
+                    Some(idx) => match self {
+                        PieceType::Bus(bus) => bus
+                            .pieces
+                            .get(idx as usize)
+                            .map(|p| p.can_carry_piece())
+                            .unwrap_or(false),
+                        _ => false,
+                    },
+                };
+                if entering_is_carrier {
                     return false;
                 }
                 // Landing on a friendly carrier: swap the *inner* move (or the

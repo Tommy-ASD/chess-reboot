@@ -170,10 +170,11 @@ impl Piece for Skibidi {
                 self.phase = 1;
                 board_after.set_piece_at(target, PieceType::Skibidi(self.clone()));
             }
-            MoveType::MoveIntoCarrier(_) => todo!("Skibidi entering a carrier"),
-            MoveType::PieceInCarrier { .. } => {
-                todo!("Skibidi inside a carrier")
-            }
+            // make_move's handle_post_move_effects only invokes post-move
+            // for MoveTo, so these arms are unreachable through the engine
+            // flow today. Kept as explicit no-ops to avoid masking future
+            // changes to that invariant.
+            MoveType::MoveIntoCarrier(_) | MoveType::PieceInCarrier { .. } => {}
         }
     }
 }

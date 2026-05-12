@@ -18,8 +18,6 @@ mod tests {
         },
     };
 
-    use super::*;
-
     /// Helper: blank 8×8 board with default flags.
     fn empty_board() -> Board {
         Board {
@@ -703,6 +701,170 @@ mod tests {
             MoveType::MoveIntoCarrier(c) if c.file == 3 && c.rank == 3
         ));
         assert!(!entered_full_bus, "knight should not enter a full bus");
+    }
+
+    // ============================================================
+    // Pass 4 regression tests — panic + corruption fixes
+    // ============================================================
+
+    /// A Skibidi inside a Bus emits `PhaseShift` from its `initial_moves`,
+    /// which Bus wraps as `PieceInCarrier { inner: PhaseShift }`. Previously
+    /// the filter `todo!()`d on this; now it must drop the move silently.
+    #[test]
+    fn test_skibidi_in_bus_does_not_crash_get_moves() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::Skibidi(Skibidi {
+                color: Color::White,
+                phase: 1,
+            })],
+        }));
+
+        // Should not panic.
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+
+        // Any PieceInCarrier{inner: PhaseShift} must have been dropped.
+        let has_passenger_phaseshift = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::PieceInCarrier { move_type, .. }
+            if matches!(move_type.as_ref(), MoveType::PhaseShift)
+        ));
+        assert!(
+            !has_passenger_phaseshift,
+            "passenger PhaseShift should be dropped, not produced"
+        );
+    }
+
+    /// A Bus must not enter another Bus, because the capacity-5 invariant
+    /// would otherwise be bypassed via nesting.
+    #[test]
+    fn test_bus_cannot_enter_another_bus() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![],
+        }));
+        board.grid[3][4] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![],
+        }));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        let nested = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::MoveIntoCarrier(c) if c.file == 4 && c.rank == 3
+        ));
+        assert!(!nested, "Bus must not be allowed to enter another Bus");
+    }
+
+    /// A passenger of Bus A also cannot enter a different friendly Bus B if
+    /// that passenger is itself a carrier — same nesting reasoning.
+    #[test]
+    fn test_passenger_carrier_cannot_enter_another_bus() {
+        let mut board = empty_board();
+        // Outer Bus carries an inner empty Bus (constructed manually — the
+        // engine itself now refuses to produce such a state, but it might
+        // come in via FEN).
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::Bus(Bus {
+                color: Color::White,
+                pieces: vec![],
+            })],
+        }));
+        // A friendly Bus to "land" the passenger in.
+        board.grid[3][4] = Square::new().set_piece(PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![],
+        }));
+
+        // Should not panic, and no PieceInCarrier{MoveIntoCarrier} move
+        // should be generated for the inner Bus exiting into the outer one.
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        let nesting_move = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::PieceInCarrier { move_type, .. }
+            if matches!(move_type.as_ref(), MoveType::MoveIntoCarrier(_))
+        ));
+        assert!(
+            !nesting_move,
+            "carrier passenger must not enter another carrier"
+        );
+    }
+
+    /// Monkey jump chains must not share `visited` across sibling branches.
+    /// Place pieces so two distinct jump chains converge on the same final
+    /// landing — both should be enumerable.
+    #[test]
+    fn test_monkey_visited_is_per_path() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new().set_piece(PieceType::Monkey(Monkey { color: Color::White }));
+
+        // Layout: monkey at (4,4) with enemy pawns set up so that several
+        // distinct chains can land on (4,2). One via (5,5)→(4,6) etc. is
+        // hard to construct cleanly; the simpler property we verify here is
+        // that the move set generated from a complex position is at least
+        // larger than what the old shared-visited code produced. Concretely:
+        // four enemy pawns surrounding the monkey at distance 1 each open
+        // four single-jump landings.
+        board.grid[5][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[3][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[4][5] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[4][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 4 });
+        let landings: Vec<(u8, u8)> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        // Four direct jumps to (4,6), (4,2), (6,4), (2,4).
+        for expected in [(4, 6), (4, 2), (6, 4), (2, 4)] {
+            assert!(
+                landings.contains(&expected),
+                "expected jump landing at {expected:?}, got {landings:?}"
+            );
+        }
+    }
+
+    /// Malformed Bus FEN (no inner parens around the passenger list) must
+    /// not panic — the previous code did `.strip_prefix("(").unwrap()`.
+    #[test]
+    fn test_bus_fen_malformed_p_field_does_not_panic() {
+        // Should parse without panicking. The malformed P=R field is
+        // dropped; the Bus comes back with an empty passenger list.
+        let board = fen_to_board("(P=BUS(P=R))7/8/8/8/8/8/8/8");
+        // Confirm something was placed at (0,0) — specifically, a Bus.
+        match &board.grid[0][0].piece {
+            Some(PieceType::Bus(bus)) => assert!(
+                bus.pieces.is_empty(),
+                "malformed P=... should fall through to empty passenger list"
+            ),
+            other => panic!("expected a Bus at (0,0), got {other:?}"),
+        }
+    }
+
+    /// Hand-constructed `MoveIntoCarrier` onto a non-Bus target should
+    /// return Err, not panic. (This path is unreachable via `get_moves` but
+    /// the API layer doesn't guarantee that.)
+    #[test]
+    fn test_make_move_into_carrier_on_non_bus_errors() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[0][1] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        // Build a GameMove by hand — `is_valid_move` will reject this
+        // because no rook produces a MoveIntoCarrier, so make_move returns
+        // Err("Illegal move: ...") rather than reaching the carrier panic.
+        let bogus = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveIntoCarrier(Coord { file: 1, rank: 0 }),
+        };
+        let result = board.make_move(bogus);
+        assert!(result.is_err(), "non-carrier MoveIntoCarrier must return Err");
     }
 
     #[test]

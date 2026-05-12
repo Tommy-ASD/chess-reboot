@@ -1,5 +1,3 @@
-use core::panic;
-
 use tracing::debug;
 
 use crate::{
@@ -81,69 +79,102 @@ impl Board {
                 _ => return Err("Non-skibidi piece making phaseshift move".to_string()),
             },
             MoveType::MoveIntoCarrier(target) => {
-                // mutate board: remove piece from original square
-                // this logic will change later on with new pieces
+                // Remove piece from source.
                 {
                     let from_sq = self
                         .get_square_mut(from)
                         .ok_or_else(|| format!("No square at {:?}", from))?;
-
                     from_sq.piece = None;
                 }
-
-                // handle capture or landing on new square
-                // again, logic will change with new pieces
+                // Push into the target carrier.
                 {
                     let to_sq = self
                         .get_square_mut(target)
                         .ok_or_else(|| format!("No square at {:?}", target))?;
-
-                    // Whatever piece is there → captured automatically
-                    if let Some(target_piece) = &mut to_sq.piece {
-                        match target_piece {
-                            PieceType::Bus(bus) => bus.pieces.push(piece),
-                            _ => panic!(),
+                    let target_piece = to_sq.piece.as_mut().ok_or_else(|| {
+                        format!("MoveIntoCarrier target {:?} is empty", target)
+                    })?;
+                    match target_piece {
+                        PieceType::Bus(bus) => bus.pieces.push(piece),
+                        _ => {
+                            return Err(format!(
+                                "MoveIntoCarrier target {:?} is not a carrier",
+                                target
+                            ));
                         }
-                    } else {
-                        todo!()
                     }
                 }
-
                 debug!(?from, ?target, "move into carrier executed");
             }
             MoveType::PieceInCarrier {
                 piece_index,
                 move_type,
             } => {
-                match piece.clone() {
-                    PieceType::Bus(mut bus) => {
-                        let piece_index_deref: u8 = *piece_index;
-                        let piece_index_usize: usize = piece_index_deref.into();
-                        let moving_out_piece: &PieceType =
-                            bus.pieces.get::<usize>(piece_index_usize).unwrap();
-                        match move_type.as_ref() {
-                            MoveType::MoveTo(target) => {
-                                let to_sq = self
-                                    .get_square_mut(target)
-                                    .ok_or_else(|| format!("No square at {:?}", target))?;
-
-                                // Whatever piece is there → captured automatically
-                                to_sq.piece = Some(moving_out_piece.clone());
-                                bus.pieces.remove(piece_index_usize);
-
-                                debug!(?from, ?target, "moved out of carrier");
-                            }
-                            _ => todo!(),
-                        }
-
-                        let from_sq = self
-                            .get_square_mut(from)
-                            .ok_or_else(|| format!("No square at {:?}", from))?;
-
-                        from_sq.piece = Some(PieceType::Bus(bus));
+                let mut bus = match piece.clone() {
+                    PieceType::Bus(bus) => bus,
+                    other => {
+                        return Err(format!(
+                            "PieceInCarrier source must be a carrier, got {:?}",
+                            other
+                        ));
                     }
-                    _ => todo!(),
+                };
+                let idx = *piece_index as usize;
+                let moving_out_piece = bus.pieces.get(idx).cloned().ok_or_else(|| {
+                    format!("PieceInCarrier index {} out of range", piece_index)
+                })?;
+
+                match move_type.as_ref() {
+                    MoveType::MoveTo(target) => {
+                        let to_sq = self
+                            .get_square_mut(target)
+                            .ok_or_else(|| format!("No square at {:?}", target))?;
+                        to_sq.piece = Some(moving_out_piece);
+                        bus.pieces.remove(idx);
+                        debug!(?from, ?target, "moved out of carrier");
+                    }
+                    MoveType::MoveIntoCarrier(target) => {
+                        // Passenger exits straight into a different friendly carrier.
+                        let to_sq = self
+                            .get_square_mut(target)
+                            .ok_or_else(|| format!("No square at {:?}", target))?;
+                        let target_piece = to_sq.piece.as_mut().ok_or_else(|| {
+                            format!(
+                                "PieceInCarrier->MoveIntoCarrier target {:?} is empty",
+                                target
+                            )
+                        })?;
+                        match target_piece {
+                            PieceType::Bus(target_bus) => {
+                                target_bus.pieces.push(moving_out_piece);
+                                bus.pieces.remove(idx);
+                                debug!(
+                                    ?from,
+                                    ?target,
+                                    "passenger moved between carriers"
+                                );
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "PieceInCarrier->MoveIntoCarrier target {:?} is not a carrier",
+                                    target
+                                ));
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(format!(
+                            "unsupported PieceInCarrier inner move type: {:?}",
+                            other
+                        ));
+                    }
                 }
+
+                // Put the (possibly-emptied) source carrier back.
+                let from_sq = self
+                    .get_square_mut(from)
+                    .ok_or_else(|| format!("No square at {:?}", from))?;
+                from_sq.piece = Some(PieceType::Bus(bus));
             }
         };
 
