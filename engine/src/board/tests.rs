@@ -389,7 +389,11 @@ mod tests {
     }
 
     /// Spec: any Skibidi entering another Skibidi's brainrot radius
-    /// neutralises the radiating Skibidi back to phase 1.
+    /// neutralises the radiating Skibidi back to phase 1. Verifies
+    /// both the phase reset *and* the down-stream effect — once the
+    /// radiator is at phase 1 it stops painting Brainrot squares,
+    /// so the entire previously-radiating disk should be clear after
+    /// `recalc_brainrot`.
     #[test]
     fn test_skibidi_neutralization() {
         let mut board = empty_board();
@@ -411,6 +415,20 @@ mod tests {
             ),
             other => panic!("expected white Skibidi at (4,4), got {other:?}"),
         }
+
+        // Down-stream check: with white reset to phase 1 (radius 0)
+        // and black already at phase 1, no square on the board should
+        // carry a Brainrot condition. This catches the "phase reset
+        // but aura still painted" bug class — the original tightening
+        // asserted "black phase stays 1" which was tautological since
+        // `recalc_brainrot` can only ever *reduce* a phase to 1.
+        let any_brainrot = board.grid.iter().flatten().any(|sq| {
+            sq.conditions.contains(&SquareCondition::Brainrot)
+        });
+        assert!(
+            !any_brainrot,
+            "no square should carry Brainrot after the only radiating Skibidi was neutralised"
+        );
     }
 
     /// Spec: "If there is no opposing Skibidi, the maximum phase your Skibidi
@@ -507,12 +525,15 @@ mod tests {
     }
 
     /// Pawn captures only into a diagonal square occupied by an enemy.
+    /// Specifically: NW empty → no move, SW enemy → capture, SE friendly
+    /// → no move (must not capture own piece even though the diagonal is
+    /// "occupied" in the wrong sense).
     #[test]
     fn test_pawn_diagonal_capture_only_when_enemy_present() {
         let mut board = empty_board();
         board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
         board.grid[5][2] = Square::new().set_piece(PieceType::new_pawn(Color::Black)); // SW = enemy
-        // (4,5) — SE diagonal — left empty
+        board.grid[5][4] = Square::new().set_piece(PieceType::new_pawn(Color::White)); // SE = friendly
 
         let moves = board.get_moves(&Coord { file: 3, rank: 6 });
         let targets: Vec<_> = moves
@@ -523,7 +544,10 @@ mod tests {
             })
             .collect();
         assert!(targets.contains(&(2, 5)), "should capture SW enemy");
-        assert!(!targets.contains(&(4, 5)), "should not diagonal-move to empty SE");
+        assert!(
+            !targets.contains(&(4, 5)),
+            "must not capture friendly piece on SE diagonal"
+        );
     }
 
     // --- knight ---
@@ -560,7 +584,10 @@ mod tests {
         assert!(!targets.contains(&(7, 3)), "cannot pass through blocker");
     }
 
-    /// Rook may capture an enemy blocker (ray terminates at it).
+    /// Rook may capture an enemy blocker (ray terminates at it). Also
+    /// confirms the rook offers every empty intermediate square as a
+    /// legal target so a "ray collapsed to just the capture" regression
+    /// would be caught.
     #[test]
     fn test_rook_captures_enemy_blocker() {
         let mut board = empty_board();
@@ -575,7 +602,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(targets.contains(&(6, 3)), "rook should be able to capture enemy at (6,3)");
+        assert!(targets.contains(&(4, 3)), "intermediate (4,3) must be reachable");
+        assert!(targets.contains(&(5, 3)), "intermediate (5,3) must be reachable");
+        assert!(targets.contains(&(6, 3)), "rook should capture enemy at (6,3)");
         assert!(!targets.contains(&(7, 3)), "cannot pass through captured piece");
     }
 
@@ -627,8 +656,13 @@ mod tests {
         };
         let result = board.make_move(illegal);
         assert!(result.is_err(), "illegal rook diagonal must be rejected");
-        // Board untouched.
-        assert!(board.grid[0][0].piece.is_some(), "rook still at (0,0)");
+        // Board untouched — assert the rook variant specifically so a
+        // regression that replaces the rook with some other piece
+        // wouldn't be masked by an "is_some()" check.
+        match &board.grid[0][0].piece {
+            Some(PieceType::Rook(r)) => assert_eq!(r.color, Color::White),
+            other => panic!("expected white rook still at (0,0), got {other:?}"),
+        }
         assert!(board.grid[3][3].piece.is_none(), "diagonal target untouched");
     }
 
@@ -690,7 +724,10 @@ mod tests {
         assert_eq!(board2, board, "Bus carrying pieces should round-trip");
     }
 
-    /// A full Bus (5 passengers) must not be a legal MoveIntoCarrier target.
+    /// A full Bus (5 passengers) must not be a legal MoveIntoCarrier
+    /// target — and rejection of that one target must NOT cause the
+    /// knight to lose its other L-moves. Regression guard against a
+    /// "filter accidentally drops everything when one target fails."
     #[test]
     fn test_bus_at_capacity_blocks_entry() {
         let mut board = empty_board();
@@ -700,7 +737,7 @@ mod tests {
             pieces: vec![pawn.clone(), pawn.clone(), pawn.clone(), pawn.clone(), pawn.clone()],
         });
         board.grid[3][3] = Square::new().set_piece(full_bus);
-        // Knight at (1,2) can L-move to (3,3).
+        // Knight at (1,2) can L-move to (3,3) — and to other squares.
         board.grid[2][1] = Square::new().set_piece(PieceType::new_knight(Color::White));
 
         let moves = board.get_moves(&Coord { file: 1, rank: 2 });
@@ -709,6 +746,24 @@ mod tests {
             MoveType::MoveIntoCarrier(c) if c.file == 3 && c.rank == 3
         ));
         assert!(!entered_full_bus, "knight should not enter a full bus");
+
+        // The knight's other L-moves from (1,2) must still be present.
+        // From (1,2): (0,0), (2,0), (3,1), (3,3) [blocked-bus],
+        // (2,4), (0,4) — six in-bounds squares total. We expect at
+        // least the non-(3,3) ones.
+        let targets: Vec<(u8, u8)> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        for expected in [(0, 0), (2, 0), (3, 1), (2, 4), (0, 4)] {
+            assert!(
+                targets.contains(&expected),
+                "knight should still reach {expected:?} despite full-bus rejection; got {targets:?}"
+            );
+        }
     }
 
     // ============================================================
@@ -801,20 +856,16 @@ mod tests {
         );
     }
 
-    /// Monkey jump chains must not share `visited` across sibling branches.
-    /// Place pieces so two distinct jump chains converge on the same final
-    /// landing — both should be enumerable.
+    /// With ladder pieces in each cardinal direction, the Monkey emits
+    /// one jump-landing per direction. Renamed from the historical
+    /// `test_monkey_visited_is_per_path` because the original was a
+    /// breadth check, not a per-path-visited check. The actual
+    /// per-path-visited property has its own dedicated test below.
     #[test]
-    fn test_monkey_visited_is_per_path() {
+    fn test_monkey_emits_one_landing_per_adjacent_ladder() {
         let mut board = empty_board();
         board.grid[4][4] = Square::new().set_piece(PieceType::Monkey(Monkey { color: Color::White }));
-
-        // Layout: monkey at (4,4) with enemy pawns set up so that several
-        // distinct chains can land on (4,2). One via (5,5)→(4,6) etc. is
-        // hard to construct cleanly; the simpler property we verify here is
-        // that the move set generated from a complex position is at least
-        // larger than what the old shared-visited code produced. Concretely:
-        // four enemy pawns surrounding the monkey at distance 1 each open
+        // Four enemy pawns surrounding the monkey at distance 1 each open
         // four single-jump landings.
         board.grid[5][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
         board.grid[3][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
@@ -836,6 +887,46 @@ mod tests {
                 "expected jump landing at {expected:?}, got {landings:?}"
             );
         }
+    }
+
+    /// The real per-path-visited test: two distinct jump chains from
+    /// the same Monkey converge on the same landing square. Under the
+    /// fixed per-path `visited` discipline (push before recurse, pop
+    /// after), both chains should be enumerated independently — the
+    /// converging landing therefore appears in the move list *twice*.
+    ///
+    /// Under the historic shared-visited bug, the second chain would
+    /// find the convergence square already in `visited` (left over
+    /// from the first chain) and skip it. So this test fails under
+    /// the bug and passes under the current code.
+    ///
+    /// Geometry (Monkey at (3,3)):
+    ///   - Path A: (3,3) → SE jump over (4,4) → (5,5)
+    ///   - Path B: (3,3) → S jump over (3,4) → (3,5)
+    ///                 → SE jump over (4,5) → (5,5)
+    #[test]
+    fn test_monkey_visited_does_not_leak_across_chains() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::Monkey(Monkey { color: Color::White }));
+        // Ladder pieces for the two converging paths.
+        board.grid[4][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[4][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[5][4] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        let landings_at_55 = moves
+            .iter()
+            .filter(|m| matches!(
+                &m.move_type,
+                MoveType::MoveTo(c) if c.file == 5 && c.rank == 5
+            ))
+            .count();
+
+        assert!(
+            landings_at_55 >= 2,
+            "expected (5,5) reachable via both paths (shared-visited bug would collapse to 1); got {landings_at_55} occurrences in {moves:?}"
+        );
     }
 
     /// Malformed Bus FEN (no inner parens around the passenger list) must
