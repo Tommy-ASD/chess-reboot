@@ -97,13 +97,18 @@ async function handleSquareClick(rank: number, file: number) {
       renderBoard(newFen);
       clearSelection();
     } catch (err) {
-      console.error("Error making move:", err);
+      showError(err);
     }
 
     return;
   }
 
   setSelectedSquare(clicked);
+
+  // Visually mark the selected square
+  const squareEls = document.querySelectorAll(".square");
+  squareEls.forEach(s => s.classList.remove("selected"));
+  squareEls[rank * 8 + file]?.classList.add("selected");
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
@@ -114,7 +119,7 @@ async function handleSquareClick(rank: number, file: number) {
     highlightMoves(allowedMoves);
     renderSpecialActions(allowedMoves);
   } catch (err) {
-    console.error("Error fetching moves:", err);
+    showError(err);
   }
 }
 
@@ -183,15 +188,58 @@ function renderSpecialActions(moves: GameMove[]) {
 
     li.onclick = async () => {
       const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-
-      const newFen = await makeSpecialMove(fen, m);
-      (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
-      renderBoard(newFen);
-      clearSelection();
+      try {
+        const newFen = await makeSpecialMove(fen, m);
+        (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
+        renderBoard(newFen);
+        clearSelection();
+      } catch (err) {
+        showError(err);
+      }
     };
 
     list.appendChild(li);
   }
+}
+
+/// Structured failure body the backend returns on 4xx responses to
+/// `/board/new_state`. Mirrors `MakeMoveErrorBody` in `api/src/main.rs`.
+type MakeMoveErrorBody = {
+  code: string;
+  message: string;
+  details: unknown;
+  side_to_move: "White" | "Black";
+  received: unknown;
+};
+
+/// Read a non-2xx response, prefer JSON for structured engine errors,
+/// fall back to plain text. Always logs the full body so a quick console
+/// glance shows the engine's diagnostic context.
+async function consumeError(response: Response, context: string): Promise<Error> {
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    return new Error(`${context}: HTTP ${response.status} (no body)`);
+  }
+  try {
+    const parsed = JSON.parse(text) as MakeMoveErrorBody;
+    console.error(`${context}: server returned ${response.status}`, parsed);
+    const msg = parsed.message ?? text;
+    const code = parsed.code ? ` [${parsed.code}]` : "";
+    return new Error(`${context}${code}: ${msg}`);
+  } catch {
+    console.error(`${context}: server returned ${response.status} with non-JSON body:`, text);
+    return new Error(`${context}: HTTP ${response.status} — ${text || "(empty body)"}`);
+  }
+}
+
+/// Show an error to the user. Currently a plain alert (cheap and
+/// impossible to miss); upgrade to an in-page toast once we have one.
+function showError(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("Surfaced to user:", msg);
+  alert(msg);
 }
 
 /// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
@@ -206,7 +254,7 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Game
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP error ${response.status}`);
+    throw await consumeError(response, "fetchMoves");
   }
 
   const data = await response.json();
@@ -223,7 +271,9 @@ async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
     })
   });
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    throw await consumeError(response, "makeSpecialMove");
+  }
 
   const data = await response.json();
   return data.new_board_fen;
@@ -239,7 +289,7 @@ async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
 /// }
 /// Returns the new FEN string on success
 async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
-  let body = {
+  const body = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -255,7 +305,7 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
   console.log("Response:", response);
 
   if (!response.ok) {
-    throw new Error(`HTTP error ${response.status}`);
+    throw await consumeError(response, "makeMove");
   }
 
   const data = await response.json();
@@ -316,3 +366,8 @@ function populateFENList() {
 
 populateFENList();
 buildPalettes();
+
+// Auto-load standard chess position so the board isn't empty on first paint
+const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+(document.getElementById("fen-input") as HTMLInputElement).value = DEFAULT_FEN;
+renderBoard(DEFAULT_FEN);

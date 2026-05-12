@@ -232,7 +232,11 @@ export function parseFENRow(row: string): Square[] {
 // ----------------------------------------------
 
 export function parseFEN(fen: string): Square[][] {
-  const rows = fen.split("/");
+  // Trim off the trailing `<stm> <castling> <ep>` flag fields the engine
+  // started appending — only the grid (everything before the first space)
+  // is meaningful to the rendering layer.
+  const grid = fen.split(/\s+/, 1)[0];
+  const rows = grid.split("/");
   if (rows.length !== 8) {
     throw new Error("Invalid FEN: must have exactly 8 rows");
   }

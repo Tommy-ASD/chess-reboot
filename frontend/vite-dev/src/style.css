@@ -1,48 +1,290 @@
 /* src/style.css */
 
-body {
-  font-family: sans-serif;
-  margin: 20px;
+@charset "UTF-8";
+
+:root {
+  --bg-1: #faf6ef;
+  --bg-2: #ece2d0;
+  --surface: #ffffff;
+  --surface-2: #f6f0e3;
+  --surface-3: #efe6d4;
+  --text: #2d2620;
+  --text-soft: #6b5e4f;
+  --text-muted: #998a76;
+  --primary: #b8864a;
+  --primary-hover: #a07239;
+  --primary-soft: #d4a574;
+  --primary-glow: rgba(184, 134, 74, 0.18);
+  --accent: #6b4423;
+  --accent-hover: #563618;
+  --light-square: #f1dfbf;
+  --dark-square: #b08465;
+  --board-frame: #3d2614;
+  --board-frame-edge: #5a3a20;
+  --highlight-dot: rgba(20, 20, 20, 0.28);
+  --highlight-ring: rgba(20, 20, 20, 0.34);
+  --selected-tint: rgba(255, 213, 79, 0.55);
+  --selected-ring: rgba(184, 134, 74, 0.95);
+  --border: rgba(60, 40, 20, 0.10);
+  --border-strong: rgba(60, 40, 20, 0.16);
+  --shadow-sm: 0 1px 2px rgba(40, 24, 8, 0.06);
+  --shadow: 0 6px 18px rgba(40, 24, 8, 0.07);
+  --shadow-lg: 0 18px 40px rgba(40, 24, 8, 0.18);
+  --radius: 14px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --t-fast: 120ms ease;
+  --t: 180ms ease;
 }
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(184, 134, 74, 0.14), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(107, 68, 35, 0.12), transparent 60%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-2));
+  background-attachment: fixed;
+  color: var(--text);
+  padding: 32px 36px 48px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 28px 0;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+h1::before {
+  content: "\265E";
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  font-size: 32px;
+  color: var(--primary);
+  text-shadow: 0 2px 4px rgba(184, 134, 74, 0.25);
+  line-height: 1;
+}
+
+h3 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 12px 0;
+}
+
+h4 {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 18px 0 10px 0;
+}
+
+/* -------------------------------------------------- */
+/* Layout                                              */
+/* -------------------------------------------------- */
+
+#layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+#left-panel,
+#actions-panel,
+#carrier-panel {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+#left-panel  { width: 280px; }
+#actions-panel  { width: 220px; padding-left: 20px; }
+#carrier-panel  { width: 220px; }
+
+/* -------------------------------------------------- */
+/* Inputs / Buttons                                    */
+/* -------------------------------------------------- */
+
+input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, Menlo, monospace;
+  color: var(--text);
+  margin-bottom: 10px;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+}
+
+input[type="text"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+input[type="text"]::placeholder {
+  color: var(--text-muted);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast), color var(--t-fast);
+}
+
+#load-btn {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--primary);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+#load-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(184, 134, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+#load-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* -------------------------------------------------- */
+/* FEN preset list                                     */
+/* -------------------------------------------------- */
+
+#fen-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#fen-list li {
+  cursor: pointer;
+  background: var(--surface-2);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+  border: 1px solid transparent;
+  color: var(--text-soft);
+}
+
+#fen-list li:hover {
+  background: var(--surface);
+  border-color: var(--primary-soft);
+  color: var(--text);
+  transform: translateX(2px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* -------------------------------------------------- */
+/* Board                                               */
+/* -------------------------------------------------- */
 
 #board {
   display: grid;
-  grid-template-columns: repeat(8, 50px);
-  grid-template-rows: repeat(8, 50px);
-  border: 2px solid #333;
+  grid-template-columns: repeat(8, 64px);
+  grid-template-rows: repeat(8, 64px);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px var(--board-frame-edge);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 10px solid var(--board-frame);
+  background: var(--board-frame);
   width: fit-content;
-  margin-top: 20px;
+  height: fit-content;
 }
 
 .square {
-  width: 50px;
-  height: 50px;
+  width: 64px;
+  height: 64px;
   display: flex;
   justify-content: center;
   align-items: center;
-
-  font-size: 30px;
-  font-weight: bold;
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  font-size: 38px;
+  line-height: 1;
   user-select: none;
+  cursor: pointer;
+  position: relative;
+  transition: filter var(--t-fast);
+}
+
+.square:hover {
+  filter: brightness(1.06);
 }
 
 .light {
-  background-color: #f0d9b5;
+  background-color: var(--light-square);
+  color: #4a2f1a;
 }
 
 .dark {
-  background-color: #b58863;
+  background-color: var(--dark-square);
+  color: #1f1109;
 }
 
-/* Additional styles for special square types and conditions */
+/* Pretty drop shadow on pieces */
+.piece-image {
+  max-width: 86%;
+  max-height: 86%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+  position: relative;
+  z-index: 2;
+}
 
+/* -------------------------------------------------- */
+/* Square conditions                                   */
+/* -------------------------------------------------- */
 
-/* Frozen: light blue diagonal stripe pattern */
 .square.cond-frozen {
   background-image:
     repeating-linear-gradient(45deg,
-      rgba(126, 178, 255, 0.6) 0px,
-      rgba(126, 178, 255, 0.6) 1px,
+      rgba(120, 178, 255, 0.6) 0px,
+      rgba(120, 178, 255, 0.6) 1px,
       transparent 6px,
       transparent 6px);
 }
@@ -56,79 +298,220 @@ body {
       transparent 6px);
 }
 
-.piece-image {
-  max-width: 90%;
-  max-height: 90%;
-  object-fit: contain;
+.square.type-vent {
+  box-shadow: inset 0 0 0 2px rgba(80, 80, 80, 0.4);
+}
 
-  /* prevent inline-image quirks */
-  display: block;
+.square.type-vent::after {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(60, 60, 60, 0.55) 0%, rgba(60, 60, 60, 0.18) 60%, transparent 75%);
   pointer-events: none;
+  z-index: 0;
 }
 
+/* -------------------------------------------------- */
+/* Move highlight: dot on empty squares, ring on occupied */
+/* -------------------------------------------------- */
 
-/* okay great, we got diagonal stripes working */
-/* now for stacking multiple conditions */
-/* right now, it alternates, every other stripe being standard color, every other being blue */
-/* if we add more conditions, we can go standard -> frozen -> optional third one -> optional fourth one -> etc */
-/* how to do this? */
-/* to define the problem more clearly; */
-/* when we have one condition, we want every other stripe to be the condition color */
-/* standard -> frozen -> standard -> frozen -> ... */
-/* when we have two conditions, we want every third stripe to be the first condition color, every third stripe to be the second condition color, and the rest standard */
-/* standard -> frozen -> cond2 -> standard -> frozen -> cond2 -> ... */
-/* etc */
-
-/* ugh this won't be necessary until way down the road */
-/* so we'll leave it for now */
-
-.highlight {
-  border: 3px solid yellow;
+.highlight::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  background: var(--highlight-dot);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-#layout {
+.highlight:not(:empty)::before {
+  width: 88%;
+  height: 88%;
+  background: transparent;
+  border: 4px solid var(--highlight-ring);
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: none;
+}
+
+/* -------------------------------------------------- */
+/* Selected square                                     */
+/* -------------------------------------------------- */
+
+.selected {
+  background-color: var(--selected-tint) !important;
+  background-image:
+    radial-gradient(circle at 30% 30%, rgba(255, 235, 130, 0.5) 0%, transparent 60%) !important;
+  box-shadow: inset 0 0 0 3px var(--selected-ring);
+}
+
+/* -------------------------------------------------- */
+/* Actions panel — special actions list                */
+/* -------------------------------------------------- */
+
+#special-actions {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-#left-panel {
-  width: 250px;
-}
-
-#fen-list {
-  list-style: none;
-  padding: 0;
-}
-
-#fen-list li {
-  cursor: pointer;
-  background: #eee;
-  padding: 6px;
-  margin-bottom: 6px;
-  border-radius: 4px;
-  user-select: none;
-}
-
-#fen-list li:hover {
-  background: #ddd;
-}
-
-#actions-panel {
-  width: 180px;
-  padding-left: 10px;
-}
-
+#special-actions li,
 #special-actions button {
+  list-style: none;
   display: block;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 8px;
-  background: #ccc;
-  border: 1px solid #888;
-  border-radius: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+#special-actions li:hover,
+#special-actions button:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+#special-actions:empty::before,
+#carrier-moves:empty::before {
+  content: "Select a piece to see options.";
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* -------------------------------------------------- */
+/* Editor panel                                        */
+/* -------------------------------------------------- */
+
+#editor-panel {
+  margin-top: 24px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 22px 24px 24px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  max-width: 1100px;
+}
+
+#editor-panel h3 {
+  margin-bottom: 14px;
+}
+
+#editor-panel > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-soft);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+#editor-panel > label:hover {
+  background: var(--surface);
+  border-color: var(--primary-soft);
+  color: var(--text);
+}
+
+#editor-panel input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
   cursor: pointer;
 }
 
-#special-actions button:hover {
-  background: #bbb;
+#piece-palette,
+#type-palette,
+#condition-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+#piece-palette button,
+#type-palette button,
+#condition-palette button {
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+#piece-palette button {
+  font-size: 22px;
+  min-width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  line-height: 1;
+}
+
+#piece-palette button:hover,
+#type-palette button:hover,
+#condition-palette button:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent);
+}
+
+#piece-palette button:active,
+#type-palette button:active,
+#condition-palette button:active {
+  transform: translateY(0);
+}
+
+#export-fen-btn {
+  margin-top: 18px;
+  padding: 10px 18px;
+  background: var(--accent);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(107, 68, 35, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+#export-fen-btn:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(107, 68, 35, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+#export-fen-btn:active {
+  transform: translateY(0);
 }
