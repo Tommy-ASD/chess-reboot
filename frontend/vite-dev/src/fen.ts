@@ -40,6 +40,44 @@ export const pieceToImage = (p: string): string | undefined => {
 
 
 // ----------------------------------------------
+// Bus passenger extraction
+// ----------------------------------------------
+
+/// Parse a Bus FEN piece string into its passenger symbols, in order.
+/// e.g. "BUS(P=(N,P,p))" -> ["N", "P", "p"]
+/// "BUS" or "bus" with no inner content -> []
+/// Mirrors the Rust parser in engine/src/pieces/fairy/bus.rs.
+export function getBusPassengers(busPiece: string): string[] {
+  const openIdx = busPiece.indexOf("(");
+  if (openIdx === -1) return [];
+
+  // Find matching close paren
+  let depth = 0;
+  let closeIdx = -1;
+  for (let i = openIdx; i < busPiece.length; i++) {
+    const ch = busPiece[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) { closeIdx = i; break; }
+    }
+  }
+  if (closeIdx === -1) return [];
+
+  const inner = busPiece.slice(openIdx + 1, closeIdx);
+  // Inner is e.g. "P=(N,P,p)". Find the P=... field.
+  for (const field of splitTopLevel(inner)) {
+    const [key, value] = splitKeyValue(field);
+    if (key !== "P") continue;
+    // value is "(N,P,p)" — strip the wrapping parens
+    if (!value.startsWith("(") || !value.endsWith(")")) return [];
+    return splitTopLevel(value.slice(1, -1));
+  }
+  return [];
+}
+
+
+// ----------------------------------------------
 // Top-level split (nested parentheses-safe)
 // ----------------------------------------------
 

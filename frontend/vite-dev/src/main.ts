@@ -5,8 +5,8 @@
 
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { buildPalettes, editorMode, selectedEditorCondition, selectedEditorPiece, selectedEditorType } from "./editor";
-import { parseFEN, pieceToImage, pieceToSymbol, squaresToFEN } from "./fen";
-import { allowedMoves, currentBoard, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedSquare, type Coord, type GameMove } from "./variables";
+import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol, squaresToFEN } from "./fen";
+import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
 
@@ -87,11 +87,19 @@ async function handleSquareClick(rank: number, file: number) {
 
   // if the user clicks an allowed square, make the move
   if (isAllowedSquare(clicked)) {
-    console.log("Move:", selectedSquare, "->", clicked);
+    console.log("Move:", selectedSquare, "->", clicked, "passenger:", selectedPassengerIndex);
+
+    const moveToExecute = findMoveForTarget(clicked, allowedMoves, selectedPassengerIndex);
+    if (!moveToExecute) {
+      console.error("isAllowedSquare matched but findMoveForTarget returned null");
+      return;
+    }
 
     try {
       const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-      const newFen = await makeMove(fen, selectedSquare!, clicked);
+      const newFen = moveToExecute.move_type.kind === "MoveTo"
+        ? await makeMove(fen, selectedSquare!, clicked)
+        : await makeSpecialMove(fen, moveToExecute);
       console.log("New FEN:", newFen);
       (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
       renderBoard(newFen);
@@ -104,6 +112,7 @@ async function handleSquareClick(rank: number, file: number) {
   }
 
   setSelectedSquare(clicked);
+  setSelectedPassengerIndex(null);
 
   // Visually mark the selected square
   const squareEls = document.querySelectorAll(".square");
@@ -118,9 +127,31 @@ async function handleSquareClick(rank: number, file: number) {
 
     highlightMoves(allowedMoves);
     renderSpecialActions(allowedMoves);
+    renderCarrierPanel(allowedMoves, rank, file);
   } catch (err) {
     showError(err);
   }
+}
+
+/// Given a clicked target square, find the corresponding GameMove from
+/// the allowed list, respecting whether we're showing the carrier's own
+/// moves or a specific passenger's deploys.
+function findMoveForTarget(clicked: Coord, moves: GameMove[], passengerIdx: number | null): GameMove | null {
+  const sameCoord = (a: Coord, b: Coord) => a.file === b.file && a.rank === b.rank;
+  for (const m of moves) {
+    if (passengerIdx === null) {
+      if (m.move_type.kind === "MoveTo" && sameCoord(m.move_type.target, clicked)) return m;
+      if (m.move_type.kind === "MoveIntoCarrier" && sameCoord(m.move_type.target, clicked)) return m;
+    } else {
+      if (m.move_type.kind === "PieceInCarrier"
+        && m.move_type.target.piece_index === passengerIdx
+        && m.move_type.target.move_type.kind === "MoveTo"
+        && sameCoord(m.move_type.target.move_type.target, clicked)) {
+        return m;
+      }
+    }
+  }
+  return null;
 }
 
 function handleEditorClick(rank: number, file: number) {
@@ -156,12 +187,10 @@ function handleEditorClick(rank: number, file: number) {
 }
 
 
-// Okay we need to make a way to handle carrier moves
-// I'm thinking we can have a separate panel that shows up
-// when there are carrier moves available
-// and we can carried pieces in that panel
-// and clicking on them will then display the possible moves for that piece
-// and then clicking on one of those moves will execute the move
+/// The side-actions panel: catch-all for moves that don't fit the
+/// "click a destination on the board" model — currently PhaseShift,
+/// future Promotion menu, etc. Carrier moves are NOT special; they
+/// flow through renderCarrierPanel + board highlights instead.
 function renderSpecialActions(moves: GameMove[]) {
   const list = document.getElementById("special-actions")!;
   list.innerHTML = "";
@@ -174,11 +203,6 @@ function renderSpecialActions(moves: GameMove[]) {
     switch (m.move_type.kind) {
       case "PhaseShift":
         li.textContent = "Increase Brainrot Radius (PhaseShift)";
-        break;
-
-      case "PieceInCarrier":
-        console.log("Rendering carrier move:", m);
-        li.textContent = `Deploy Piece number ${m.move_type.target.piece_index}`;
         break;
 
       default:
@@ -200,6 +224,85 @@ function renderSpecialActions(moves: GameMove[]) {
 
     list.appendChild(li);
   }
+}
+
+/// Two-step passenger picker. When the selected piece is a carrier with
+/// passengers, render one tile per passenger plus a "Drive" tile that
+/// flips back to the carrier's own moves. Clicking a tile switches the
+/// board highlights between drive-mode and deploy-mode for that passenger.
+function renderCarrierPanel(moves: GameMove[], rank: number, file: number) {
+  const panel = document.getElementById("carrier-moves")!;
+  panel.innerHTML = "";
+
+  // Only show the panel when there are passenger-deploy moves available.
+  const hasDeployMoves = moves.some(m => m.move_type.kind === "PieceInCarrier");
+  if (!hasDeployMoves) return;
+
+  const square = currentBoard[rank]?.[file];
+  if (!square || !square.piece) return;
+
+  const passengers = getBusPassengers(square.piece);
+  if (passengers.length === 0) return;
+
+  panel.appendChild(makePassengerTile({
+    glyph: "\u{1F68C}", // bus emoji as the "drive" icon
+    label: "Drive",
+    isActive: selectedPassengerIndex === null,
+    extraClass: "drive-tile",
+    onPick: () => {
+      setSelectedPassengerIndex(null);
+      highlightMoves(allowedMoves);
+      renderCarrierPanel(moves, rank, file);
+    },
+  }));
+
+  for (let i = 0; i < passengers.length; i++) {
+    const piece = passengers[i];
+    const idx = i;
+    panel.appendChild(makePassengerTile({
+      glyph: pieceToSymbol(piece),
+      glyphImage: pieceToImage(piece),
+      label: `#${idx}`,
+      isActive: selectedPassengerIndex === idx,
+      onPick: () => {
+        setSelectedPassengerIndex(idx);
+        highlightMoves(allowedMoves);
+        renderCarrierPanel(moves, rank, file);
+      },
+    }));
+  }
+}
+
+function makePassengerTile(opts: {
+  glyph: string;
+  glyphImage?: string;
+  label: string;
+  isActive: boolean;
+  extraClass?: string;
+  onPick: () => void;
+}): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.className = "passenger-tile" + (opts.isActive ? " active" : "") + (opts.extraClass ? " " + opts.extraClass : "");
+
+  if (opts.glyphImage) {
+    const img = document.createElement("img");
+    img.src = opts.glyphImage;
+    img.className = "passenger-glyph-img";
+    btn.appendChild(img);
+  } else {
+    const span = document.createElement("span");
+    span.className = "passenger-glyph";
+    span.textContent = opts.glyph;
+    btn.appendChild(span);
+  }
+
+  const label = document.createElement("span");
+  label.className = "passenger-label";
+  label.textContent = opts.label;
+  btn.appendChild(label);
+
+  btn.onclick = opts.onPick;
+  return btn;
 }
 
 /// Structured failure body the backend returns on 4xx responses to

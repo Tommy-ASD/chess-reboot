@@ -32,6 +32,7 @@ export type Coord = { file: number; rank: number };
 
 export type MoveType =
     | { kind: "MoveTo"; target: Coord }
+    | { kind: "MoveIntoCarrier"; target: Coord }
     | { kind: "PhaseShift" }
     | { kind: "PieceInCarrier"; target: { piece_index: number; move_type: MoveType } };
 
@@ -54,4 +55,14 @@ export let currentBoard: Square[][] = []; // the board in memory
 
 export function setCurrentBoard(board: Square[][]) {
     currentBoard = board
+}
+
+/// When a carrier (e.g. Bus) is selected, which passenger is the user
+/// currently "piloting" through deploy moves? `null` means we're showing
+/// the carrier's own moves (drive the bus). A number is an index into the
+/// carrier's passenger list, matching `piece_index` on PieceInCarrier moves.
+export let selectedPassengerIndex: number | null = null;
+
+export function setSelectedPassengerIndex(i: number | null) {
+    selectedPassengerIndex = i;
 }
