@@ -1,3 +1,5 @@
+use tracing::trace;
+
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
     pieces::{Color, Piece},
@@ -24,20 +26,20 @@ impl Piece for Pawn {
             Color::Black => 1,
         };
 
-        dbg!(&direction);
+        trace!(direction, "pawn move direction");
 
         // One square forward
         let new_rank = from.rank as isize + direction;
         if new_rank >= 0 && new_rank < 8 {
-            dbg!();
+            trace!("one-square forward in bounds");
             let forward_coord = Coord {
                 file: from.file,
                 rank: new_rank as u8,
             };
             if let Some(square) = board.get_square_at(&forward_coord) {
-                dbg!(&square, &forward_coord);
+                trace!(?square, ?forward_coord, "forward square");
                 if square.piece.is_none() {
-                    dbg!();
+                    trace!("forward square empty, pushing move");
                     let game_move = GameMove {
                         from: from.clone(),
                         move_type: MoveType::MoveTo(forward_coord.clone()),
@@ -68,7 +70,7 @@ impl Piece for Pawn {
             }
         }
 
-        dbg!(&moves);
+        trace!(?moves, "after forward push");
 
         // Captures
         for df in &[-1, 1] {
@@ -92,7 +94,7 @@ impl Piece for Pawn {
             }
         }
 
-        dbg!(&moves);
+        trace!(?moves, "after captures");
 
         moves
     }

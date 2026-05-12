@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use tracing::error;
+
 use crate::{
     board::GameMove,
     pieces::{
@@ -71,9 +73,6 @@ impl PieceType {
 
         // next, lower case to match both colors
         let sym_lower = sym.to_lowercase();
-
-        // println!("Parsing piece from symbol: {}", symbol);
-        // println!("  -> base symbol: {}", sym);
 
         // match symbol to create piece
         // give full symbol to piece constructors
@@ -178,9 +177,8 @@ impl PieceType {
                     crate::board::MoveType::MoveTo(coord) => coord,
                     crate::board::MoveType::MoveIntoCarrier(coord) => coord,
                     _ => {
-                        println!("Unmatched type {inner_move_type:?}");
+                        error!(?inner_move_type, "unmatched inner MoveType in get_moves filter");
                         todo!();
-                        return false;
                     }
                 },
                 crate::board::MoveType::PhaseShift => return true,

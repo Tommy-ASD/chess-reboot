@@ -13,6 +13,8 @@
 ///     If your Skibidi your enemy cannot make a move due to your Brainrot,
 ///         you win by Brainrot instead of stalemate being declared.
 ///     If your Skibidi is captured while your opponent's Skibidi is in phase 4, there is nothing you can do.
+use tracing::{trace, warn};
+
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
     pieces::{Color, Piece, piecetype::PieceType},
@@ -34,7 +36,7 @@ impl Skibidi {
     // the state only contains phase
     // we can keep it simple and forget the state in phase 1
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
-        println!("Got symbol {symbol}");
+        trace!(symbol, "parsing Skibidi");
 
         let color = if symbol.chars().next().unwrap().is_lowercase() {
             Color::Black
@@ -59,14 +61,14 @@ impl Skibidi {
 
             match key {
                 "PHASE" => {
-                    println!("Got phase {val}");
+                    trace!(val, "parsed Skibidi phase");
                     match val.parse::<u8>() {
                         Ok(ok) => phase = ok,
-                        Err(e) => println!("Got invalid phase for Skibidi: {val}"),
+                        Err(_) => warn!(val, "invalid phase for Skibidi"),
                     };
                 }
                 _ => {
-                    println!("Unknown Goblin attribute: {}", field);
+                    warn!(field, "unknown Skibidi attribute");
                 }
             }
         }

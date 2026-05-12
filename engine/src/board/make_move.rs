@@ -1,5 +1,7 @@
 use core::panic;
 
+use tracing::debug;
+
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
     pieces::piecetype::PieceType,
@@ -53,7 +55,7 @@ impl Board {
                     to_sq.piece = Some(piece);
                 }
 
-                println!("Move executed: {:?} -> {:?}", from, target);
+                debug!(?from, ?target, "move executed");
             }
             MoveType::PhaseShift => match piece {
                 PieceType::Skibidi(mut skib) => {
@@ -63,7 +65,7 @@ impl Board {
                         .get_square_mut(from)
                         .ok_or_else(|| format!("No square at {:?}", from))?;
 
-                    println!("Skibidi phase increase to {phase}", phase = skib.phase);
+                    debug!(phase = skib.phase, "skibidi phase increased");
 
                     from_sq.piece = Some(PieceType::Skibidi(skib));
                 }
@@ -98,7 +100,7 @@ impl Board {
                     }
                 }
 
-                println!("Move into executed: {:?} -> {:?}", from, target);
+                debug!(?from, ?target, "move into carrier executed");
             }
             MoveType::PieceInCarrier {
                 piece_index,
@@ -120,7 +122,7 @@ impl Board {
                                 to_sq.piece = Some(moving_out_piece.clone());
                                 bus.pieces.remove(piece_index_usize);
 
-                                println!("Moved out of carrier: {:?} -> {:?}", from, target);
+                                debug!(?from, ?target, "moved out of carrier");
                             }
                             _ => todo!(),
                         }

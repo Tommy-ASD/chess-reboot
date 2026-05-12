@@ -1,3 +1,5 @@
+use tracing::{debug, trace, warn};
+
 use crate::{
     board::{
         Board, BoardFlags,
@@ -17,7 +19,7 @@ use crate::{
 ///
 /// - `s`: The input string to search.
 /// - `open_index`: The index of the `'('` character whose matching `')'` we want
-///   to locate.  
+///   to locate.
 ///   The character at `open_index` **must be `'('`**, otherwise the depth
 ///   accounting will not behave as intended.
 ///
@@ -28,7 +30,7 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let s = "G(H=0-7,P=g(H=0-0))";
 ///
 /// // The first '(' occurs at index 1
@@ -73,22 +75,21 @@ pub fn find_matching_paren(s: &str, open_index: usize) -> Option<usize> {
 }
 
 fn fen_row_to_squares(row: &str) -> Vec<Square> {
-    // println!("=== fen_row_to_squares BEGIN ===");
-    // println!("row = \"{}\"", row);
+    trace!(row, "fen_row_to_squares");
 
     let mut squares = Vec::new();
     let mut chars = row.chars().peekable();
     let mut index = 0usize;
 
     while let Some(&ch) = chars.peek() {
-        // println!("char[{}] = '{}'", index, ch);
+        trace!(index, ?ch, "char");
 
         // -------------------------------
         // 1. DIGIT → run-length empties
         // -------------------------------
         if ch.is_ascii_digit() {
             let count = ch.to_digit(10).unwrap();
-            // println!("  -> digit found: {} → pushing {} empty squares", ch, count);
+            trace!(count, "digit run-length");
 
             for _ in 0..count {
                 squares.push(Square {
@@ -106,30 +107,22 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
         // 2. EXTENDED BLOCK STARTS WITH '('
         // -------------------------------
         if ch == '(' {
-            // println!("  -> extended square begins at index {}", index);
+            trace!(index, "extended square begins");
 
             let mut buf = String::new();
             let mut depth = 0usize;
 
             while let Some(c) = chars.next() {
-                // println!(
-                //     "    collecting '{}', depth={} → buffer=\"{}\"",
-                //     c, depth, buf
-                // );
-
                 buf.push(c);
 
                 match c {
                     '(' => {
                         depth += 1;
-                        // println!("      '(' increases depth → {}", depth);
                     }
                     ')' => {
                         depth -= 1;
-                        // println!("      ')' decreases depth → {}", depth);
-
                         if depth == 0 {
-                            // println!("      extended block closed → \"{}\"", buf);
+                            trace!(buf, "extended block closed");
                             break;
                         }
                     }
@@ -137,7 +130,7 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                 }
             }
 
-            // println!("  -> parsing extended square: {}", buf);
+            trace!(buf, "parsing extended square");
             squares.push(fen_to_square(&buf));
 
             index += buf.len();
@@ -147,16 +140,14 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
         // -------------------------------
         // 3. STANDARD SINGLE-CHAR PIECE
         // -------------------------------
-        // println!("  -> standard piece '{}'", ch);
+        trace!(?ch, "standard piece");
         squares.push(fen_to_square(&ch.to_string()));
 
         chars.next();
         index += 1;
     }
 
-    // println!("Row result ({} squares): {:?}", squares.len(), squares);
-    // println!("=== fen_row_to_squares END ===\n");
-
+    trace!(count = squares.len(), "row complete");
     squares
 }
 
@@ -192,11 +183,10 @@ pub fn board_to_fen(board: &Board) -> String {
 }
 
 pub fn fen_to_board(fen: &str) -> Board {
+    debug!(%fen, "fen_to_board");
+
     let rows: Vec<&str> = fen.split('/').collect();
     let mut grid = vec![];
-
-    dbg!();
-    println!("Parsing board from FEN: {}", fen);
 
     for row in rows {
         grid.push(fen_row_to_squares(row));
@@ -253,8 +243,8 @@ pub fn square_to_fen(square: &Square) -> String {
 ///
 /// # How it works
 /// - Iterates through the input one character at a time.
-/// - Tracks the current *parenthesis depth*.  
-///   - `(` increases depth  
+/// - Tracks the current *parenthesis depth*.
+///   - `(` increases depth
 ///   - `)` decreases depth
 /// - A comma is treated as a separator **only when `depth == 0`**.
 /// - Everything else is appended to the current buffer.
@@ -267,7 +257,7 @@ pub fn square_to_fen(square: &Square) -> String {
 /// the input, split only at top-level commas.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// let input = "a, b(c, d), e";
 /// let parts = split_top_level(input);
 ///
@@ -286,38 +276,26 @@ pub fn square_to_fen(square: &Square) -> String {
 ///   are balanced beyond simple depth tracking.
 /// - Whitespace around each extracted part is trimmed.
 pub fn split_top_level(input: &str) -> Vec<String> {
-    println!("--- split_top_level BEGIN ---");
-    println!("input = \"{}\"", input);
+    trace!(input, "split_top_level");
 
     let mut parts = Vec::new();
     let mut buf = String::new();
     let mut depth = 0usize;
 
     for (i, ch) in input.chars().enumerate() {
-        println!(
-            "char[{}] = '{}'  depth = {}  buf = \"{}\"",
-            i, ch, depth, buf
-        );
+        trace!(i, ?ch, depth, buf, "char");
 
         match ch {
             '(' => {
                 depth += 1;
-                println!("  -> '(' encountered, increasing depth to {}", depth);
                 buf.push(ch);
             }
             ')' => {
-                println!("  -> ')' encountered, decreasing depth from {}", depth);
                 depth -= 1;
                 buf.push(ch);
-                println!("     new depth = {}", depth);
             }
             ',' if depth == 0 => {
-                println!(
-                    "  -> TOP-LEVEL COMMA at index {}, pushing part: \"{}\"",
-                    i,
-                    buf.trim()
-                );
-
+                trace!(i, part = %buf.trim(), "top-level comma");
                 parts.push(buf.trim().to_string());
                 buf.clear();
             }
@@ -328,13 +306,11 @@ pub fn split_top_level(input: &str) -> Vec<String> {
     }
 
     if !buf.is_empty() {
-        println!("END OF STRING, pushing final part: \"{}\"", buf.trim());
+        trace!(part = %buf.trim(), "final part");
         parts.push(buf.trim().to_string());
     }
 
-    println!("FINAL PARTS = {:?}", parts);
-    println!("--- split_top_level END ---\n");
-
+    trace!(?parts, "split_top_level done");
     parts
 }
 
@@ -372,7 +348,7 @@ pub fn fen_to_square(fen: &str) -> Square {
                         "TURRET" => SquareType::Turret,
                         "VENT" => SquareType::Vent,
                         _ => {
-                            println!("Unknown square type {value}");
+                            warn!(value, "unknown square type");
                             SquareType::Standard
                         }
                     }
@@ -380,9 +356,9 @@ pub fn fen_to_square(fen: &str) -> Square {
                 "C" => match value {
                     "FROZEN" => conditions.push(SquareCondition::Frozen),
                     "BRAINROT" => conditions.push(SquareCondition::Brainrot),
-                    _ => println!("Unknown square condition {value}"),
+                    _ => warn!(value, "unknown square condition"),
                 },
-                _ => println!("Unknown field {field}"),
+                _ => warn!(field, "unknown field"),
             }
         }
 

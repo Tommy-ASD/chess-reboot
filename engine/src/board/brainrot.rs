@@ -1,3 +1,5 @@
+use tracing::trace;
+
 use crate::{
     board::{Board, Coord, square::SquareCondition},
     pieces::piecetype::PieceType,
@@ -48,7 +50,7 @@ impl Board {
                         )
                         .unwrap();
                     sq.conditions.push(SquareCondition::Brainrot);
-                    println!("{f}-{r} brainrotted")
+                    trace!(f, r, "brainrot applied");
                 }
             }
         }

@@ -7,6 +7,8 @@
 /// The Bus moves like a standard rook - horizontally or vertically until there is a piece blocking the path.
 /// The Bus cannot take pieces.
 /// To exit the Bus, a piece simply moves out of the square the Bus occupies, following its usual movement rules.
+use tracing::{trace, warn};
+
 use crate::{
     board::{
         Board, Coord, GameMove, MoveType,
@@ -30,8 +32,7 @@ impl Bus {
     }
 
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
-        dbg!();
-        println!("Parsing Bus from symbol: {}", symbol);
+        trace!(symbol, "parsing Bus");
 
         let first = symbol.chars().next()?;
         let color = match first {
@@ -40,9 +41,8 @@ impl Bus {
             _ => return None,
         };
 
-        dbg!();
         let Some(start) = symbol.find('(') else {
-            dbg!();
+            trace!("Bus with no bracketed contents");
             return Some(PieceType::Bus(Bus {
                 color,
                 pieces: vec![],
@@ -57,28 +57,26 @@ impl Bus {
         let mut pieces = vec![];
 
         for field in split_top_level(inside) {
-            dbg!();
             let mut kv = field.splitn(2, '=');
             let key = kv.next()?.trim();
             let val = kv.next()?.trim();
 
-            println!("Handling `{field}` (turned into `{key}={val}`)");
+            trace!(field, key, val, "handling bus field");
 
             match key {
                 // is an array
                 "P" => {
-                    dbg!();
                     let val = val.strip_prefix("(").unwrap().strip_suffix(")").unwrap();
                     for piece_sym in split_top_level(val) {
                         let opt_inner_piece = PieceType::symbol_to_piece(&piece_sym);
-                        println!("Piece symbol {piece_sym} turned into {opt_inner_piece:?}");
+                        trace!(piece_sym, ?opt_inner_piece, "parsed inner piece");
                         if let Some(inner_piece) = opt_inner_piece {
                             pieces.push(inner_piece);
                         }
                     }
                 }
                 _ => {
-                    println!("Unknown Goblin attribute: {}", field);
+                    warn!(field, "unknown Bus attribute");
                 }
             }
         }
@@ -101,7 +99,7 @@ impl Piece for Bus {
         true
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
-        dbg!();
+        trace!("bus initial_moves");
         let mut moves = Vec::new();
         let directions: [(isize, isize); 8] = [
             (1, 0),
@@ -162,7 +160,7 @@ impl Piece for Bus {
                 .map(|piece| piece.symbol())
                 .collect::<Vec<String>>()
                 .join(",");
-            println!("Pieces map: {pieces_map}");
+            trace!(pieces_map, "bus symbol pieces");
             sym.push_str("(P=(");
             sym.push_str(&pieces_map);
             sym.push_str("))");

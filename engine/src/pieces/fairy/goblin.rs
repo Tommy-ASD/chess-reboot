@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use tracing::{trace, warn};
+
 /// Goblin - Moves like a queen at first, but once it takes a piece,
 /// it "kidnaps" that piece and has to take it back to home base
 /// After taking a piece, the goblin moves like a king until it reaches it's home square.
@@ -50,12 +52,12 @@ impl Goblin {
     }
 
     pub fn generate_goblin_free_moves(&self, board: &Board, from: Coord) -> Vec<GameMove> {
-        dbg!();
+        trace!("goblin free moves");
         generate_glider_moves(board, &from, &OMNI_DIRS, usize::MAX)
     }
 
     pub fn generate_goblin_kidnapping_moves(&self, board: &Board, from: Coord) -> Vec<GameMove> {
-        dbg!();
+        trace!("goblin kidnapping moves");
         let mut moves = Vec::new();
         let directions: [(isize, isize); 8] = [
             (1, 0),
@@ -112,9 +114,7 @@ impl Goblin {
     // and inside the brackets, the symbol of the piece being carried
     // e.g. `G(H=0-0,P=n)` for white goblin carrying black knight
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
-        // debug print
-        dbg!();
-        println!("Parsing Goblin from symbol: {}", symbol);
+        trace!(symbol, "parsing Goblin");
 
         let first = symbol.chars().next()?;
         let color = match first {
@@ -144,23 +144,23 @@ impl Goblin {
             let key = kv.next()?.trim();
             let val = kv.next()?.trim();
 
-            println!("Handling `{field}` (turned into `{key}={val}`)");
+            trace!(field, key, val, "handling goblin field");
 
             match key {
                 "H" => {
                     home_square = Self::parse_coord(val);
                     if home_square.is_none() {
-                        println!("Invalid Goblin home square: {}", val);
+                        warn!(val, "invalid Goblin home square");
                     }
                 }
                 "P" => {
                     kidnapped_piece = PieceType::symbol_to_piece(val);
                     if kidnapped_piece.is_none() {
-                        println!("Unknown kidnapped piece symbol: {}", val);
+                        warn!(val, "unknown kidnapped piece symbol");
                     }
                 }
                 _ => {
-                    println!("Unknown Goblin attribute: {}", field);
+                    warn!(field, "unknown Goblin attribute");
                 }
             }
         }
@@ -195,7 +195,7 @@ impl Piece for Goblin {
     }
 
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
-        println!("Hello :3");
+        trace!("goblin initial_moves");
         self.generate_goblin_base_moves(board, from.clone())
     }
 
