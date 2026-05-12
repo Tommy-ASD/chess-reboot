@@ -59,7 +59,16 @@ impl Board {
             }
             MoveType::PhaseShift => match piece {
                 PieceType::Skibidi(mut skib) => {
-                    skib.phase += 1;
+                    // Spec: max phase 4, capped at 3 unless an opposing
+                    // Skibidi is on the board.
+                    let has_opponent = self.all_pieces().iter().any(|(_, p)| match p {
+                        PieceType::Skibidi(other) => other.color != skib.color,
+                        _ => false,
+                    });
+                    let max_phase = if has_opponent { 4 } else { 3 };
+                    if skib.phase < max_phase {
+                        skib.phase += 1;
+                    }
 
                     let from_sq = self
                         .get_square_mut(from)

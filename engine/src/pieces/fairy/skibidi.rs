@@ -103,24 +103,30 @@ impl Piece for Skibidi {
         for (df, dr) in &directions {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-                let coord = Coord {
-                    file: new_file as u8,
-                    rank: new_rank as u8,
-                };
-                if let Some(square) = board.get_square_at(&coord) {
-                    if square.piece.is_none()
-                        || square.piece.as_ref().map_or(false, |p| {
-                            p.symbol().to_lowercase() == self.symbol().to_lowercase()
-                        })
-                    {
-                        let game_move = GameMove {
-                            from: from.clone(),
-                            move_type: MoveType::MoveTo(coord.clone()),
-                        };
-                        moves.push(game_move);
-                    }
-                }
+            if !board.in_bounds(new_file, new_rank) {
+                continue;
+            }
+            let coord = Coord {
+                file: new_file as u8,
+                rank: new_rank as u8,
+            };
+            let Some(square) = board.get_square_at(&coord) else {
+                continue;
+            };
+            // Spec: cannot take other pieces, but can take other Skibidis.
+            // Empty squares are allowed; non-empty squares only if the
+            // occupant is an enemy Skibidi. The `PieceType::get_moves`
+            // filter handles the same-colour rejection.
+            let allowed = match &square.piece {
+                None => true,
+                Some(PieceType::Skibidi(_)) => true,
+                _ => false,
+            };
+            if allowed {
+                moves.push(GameMove {
+                    from: from.clone(),
+                    move_type: MoveType::MoveTo(coord),
+                });
             }
         }
 

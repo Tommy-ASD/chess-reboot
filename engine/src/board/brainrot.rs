@@ -5,9 +5,19 @@ use crate::{
     pieces::piecetype::PieceType,
 };
 
+/// Manhattan-disk radius for each Skibidi phase per the doc on `Skibidi`.
+fn phase_to_radius(phase: u8) -> isize {
+    match phase {
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        _ => 0, // phase 1 (and anything out of range) has no aura
+    }
+}
+
 impl Board {
     pub fn recalc_brainrot(&mut self) {
-        // Step 1: Remove all existing brainrot
+        // Step 1: clear all existing Brainrot conditions.
         for row in &mut self.grid {
             for sq in row {
                 sq.conditions
@@ -15,42 +25,87 @@ impl Board {
             }
         }
 
-        // Step 2: Reapply brainrot from ALL Skibidis on board
-        for (coord, piece) in self.all_pieces() {
-            if let PieceType::Skibidi(sk) = piece {
-                self.apply_skibidi_brainrot(&coord, sk.phase);
+        // Step 2: collect every Skibidi's coord + current phase.
+        let mut skibidis: Vec<(Coord, u8)> = self
+            .all_pieces()
+            .into_iter()
+            .filter_map(|(coord, piece)| match piece {
+                PieceType::Skibidi(sk) => Some((coord, sk.phase)),
+                _ => None,
+            })
+            .collect();
+
+        // Step 3: neutralization — any Skibidi sitting inside another
+        // Skibidi's aura resets that radiating Skibidi back to phase 1.
+        // (Same rule applies regardless of colour, per spec.)
+        let mut neutralized = vec![false; skibidis.len()];
+        for i in 0..skibidis.len() {
+            let radius = phase_to_radius(skibidis[i].1);
+            if radius == 0 {
+                continue;
             }
+            for j in 0..skibidis.len() {
+                if i == j {
+                    continue;
+                }
+                let dx = (skibidis[j].0.file as isize - skibidis[i].0.file as isize).abs();
+                let dy = (skibidis[j].0.rank as isize - skibidis[i].0.rank as isize).abs();
+                if dx + dy <= radius {
+                    neutralized[i] = true;
+                    break;
+                }
+            }
+        }
+
+        // Step 4: write the neutralized phase back to the board (and the
+        // local copy, so step 5 paints the correct auras).
+        for i in 0..skibidis.len() {
+            if neutralized[i] {
+                let coord = skibidis[i].0.clone();
+                if let Some(sq) = self.get_square_mut(&coord) {
+                    if let Some(PieceType::Skibidi(sk)) = &mut sq.piece {
+                        sk.phase = 1;
+                    }
+                }
+                skibidis[i].1 = 1;
+            }
+        }
+
+        // Step 5: re-apply brainrot from each Skibidi's (possibly updated) phase.
+        for (coord, phase) in skibidis.clone() {
+            self.apply_skibidi_brainrot(&coord, phase);
         }
     }
 
     fn apply_skibidi_brainrot(&mut self, center: &Coord, phase: u8) {
-        let radius = match phase {
-            1 => 0, // no effect
-            2 => 1, // orthogonals only
-            3 => 2,
-            4 => 3,
-            _ => return,
-        };
+        let radius = phase_to_radius(phase);
+        if radius == 0 {
+            return;
+        }
 
-        for dx in -(radius as isize)..=(radius as isize) {
-            for dy in -(radius as isize)..=(radius as isize) {
-                // don't brainrot the skibidi
+        for dx in -radius..=radius {
+            for dy in -radius..=radius {
                 if dx == 0 && dy == 0 {
                     continue;
-                };
+                }
+                // Manhattan disk: |dx| + |dy| <= radius
+                if dx.abs() + dy.abs() > radius {
+                    continue;
+                }
                 let f = center.file as isize + dx;
                 let r = center.rank as isize + dy;
-                if self.in_bounds(f, r) {
-                    let sq = self
-                        .get_square_mut(
-                            &(Coord {
-                                file: f as u8,
-                                rank: r as u8,
-                            }),
-                        )
-                        .unwrap();
-                    sq.conditions.push(SquareCondition::Brainrot);
-                    trace!(f, r, "brainrot applied");
+                if !self.in_bounds(f, r) {
+                    continue;
+                }
+                let coord = Coord {
+                    file: f as u8,
+                    rank: r as u8,
+                };
+                if let Some(sq) = self.get_square_mut(&coord) {
+                    if !sq.conditions.contains(&SquareCondition::Brainrot) {
+                        sq.conditions.push(SquareCondition::Brainrot);
+                        trace!(f, r, "brainrot applied");
+                    }
                 }
             }
         }

@@ -101,32 +101,48 @@ impl Piece for Bus {
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         trace!("bus initial_moves");
         let mut moves = Vec::new();
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
+        // Bus moves like a rook: orthogonal sliding, no captures. The filter
+        // in `PieceType::get_moves` rewrites landings on a friendly carrier to
+        // `MoveIntoCarrier`. We stop at the first blocking piece — friendly or
+        // enemy — and only emit the blocker's square if it's a friendly Bus
+        // (so the filter can swap it).
+        let directions: [(isize, isize); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
         for (df, dr) in &directions {
-            let new_file = from.file as isize + df;
-            let new_rank = from.rank as isize + dr;
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
+            let mut step: isize = 1;
+            loop {
+                let new_file = from.file as isize + df * step;
+                let new_rank = from.rank as isize + dr * step;
+                if !board.in_bounds(new_file, new_rank) {
+                    break;
+                }
                 let coord = Coord {
                     file: new_file as u8,
                     rank: new_rank as u8,
                 };
-                if board.square_is_empty(&coord) {
-                    let game_move = GameMove {
-                        from: from.clone(),
-                        move_type: MoveType::MoveTo(coord.clone()),
-                    };
-                    moves.push(game_move);
+                match board.get_square_at(&coord) {
+                    Some(sq) if sq.piece.is_none() => {
+                        moves.push(GameMove {
+                            from: from.clone(),
+                            move_type: MoveType::MoveTo(coord),
+                        });
+                    }
+                    Some(sq) => {
+                        // Blocker. Emit only if it's a friendly carrier; the
+                        // filter will rewrite this MoveTo to MoveIntoCarrier.
+                        if let Some(piece) = &sq.piece {
+                            if piece.get_color() == self.color && piece.can_carry_piece() {
+                                moves.push(GameMove {
+                                    from: from.clone(),
+                                    move_type: MoveType::MoveTo(coord),
+                                });
+                            }
+                        }
+                        break;
+                    }
+                    None => break,
                 }
+                step += 1;
             }
         }
 

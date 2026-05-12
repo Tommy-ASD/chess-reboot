@@ -63,7 +63,7 @@ impl Piece for Monkey {
         }
         // now, handle jump moves
         let mut visited = Vec::new();
-        self.find_jump_moves(board, from, &mut visited, &mut moves);
+        self.find_jump_moves(board, from, from, &mut visited, &mut moves);
         moves
     }
     fn symbol(&self) -> String {
@@ -87,13 +87,16 @@ impl Piece for Monkey {
 }
 
 impl Monkey {
-    /// Recursive function to find jump moves
-    /// `current_coord` is the current position of the monkey during the jump sequence
-    /// `visited` keeps track of coordinates already jumped to in this sequence
-    /// `moves` accumulates the valid jump moves
+    /// Recursive function to find jump moves.
+    /// `origin` is the Monkey's actual starting square — the `from` field every
+    /// emitted move should carry, no matter how deep the chain goes.
+    /// `current_coord` is the current position of the Monkey during the jump sequence.
+    /// `visited` keeps track of coordinates already jumped to in this sequence.
+    /// `moves` accumulates the valid jump moves.
     fn find_jump_moves(
         &self,
         board: &Board,
+        origin: &Coord,
         current_coord: &Coord,
         visited: &mut Vec<Coord>,
         moves: &mut Vec<GameMove>,
@@ -142,16 +145,16 @@ impl Monkey {
                         if let Some(jump_square) = board.get_square_at(&jump_coord) {
                             if jump_square.piece.is_none() {
                                 let game_move = GameMove {
-                                    from: current_coord.clone(),
+                                    from: origin.clone(),
                                     move_type: MoveType::MoveTo(jump_coord.clone()),
                                 };
                                 moves.push(game_move);
                                 visited.push(jump_coord.clone());
-                                self.find_jump_moves(board, &jump_coord, visited, moves);
+                                self.find_jump_moves(board, origin, &jump_coord, visited, moves);
                             }
                             if jump_square.has_piece_of_color(self.color.opposite()) {
                                 let game_move = GameMove {
-                                    from: current_coord.clone(),
+                                    from: origin.clone(),
                                     move_type: MoveType::MoveTo(jump_coord.clone()),
                                 };
                                 moves.push(game_move);

@@ -147,7 +147,7 @@ impl PieceType {
         true
     }
 
-    fn can_carry_piece(&self) -> bool {
+    pub fn can_carry_piece(&self) -> bool {
         dispatch!(self, p => p.can_carry_piece())
     }
 
@@ -166,43 +166,66 @@ impl PieceType {
     ) -> Vec<crate::board::GameMove> {
         let mut moves = dispatch!(self, p => p.initial_moves(board, from));
 
-        // if the square has a piece of the same color, filter it out
+        // Each candidate move is either a plain `MoveTo` or a `PieceInCarrier`
+        // wrapper around a `MoveTo` / `MoveIntoCarrier`. We extract the target
+        // coord, decide whether to keep the move based on the target's
+        // contents, and — if it lands on a friendly carrier — rewrite the
+        // *inner* `MoveTo` to `MoveIntoCarrier` while preserving the outer
+        // wrapper (so `piece_index` survives for the consumer).
+        use crate::board::MoveType;
+
         moves.retain_mut(|game_move| {
-            let target = match &game_move.move_type {
-                crate::board::MoveType::MoveTo(coord) => coord,
-                crate::board::MoveType::PieceInCarrier {
-                    piece_index: idx,
-                    move_type: inner_move_type,
-                } => match inner_move_type.as_ref() {
-                    crate::board::MoveType::MoveTo(coord) => coord,
-                    crate::board::MoveType::MoveIntoCarrier(coord) => coord,
+            // Extract target + remember whether we're inside a PieceInCarrier.
+            // The carrier_index is `Some(idx)` iff the outer move is a
+            // PieceInCarrier whose inner is itself a MoveTo (the only case
+            // that's meaningful to rewrite to MoveIntoCarrier).
+            let (target, carrier_index) = match &game_move.move_type {
+                MoveType::MoveTo(coord) => (coord.clone(), None),
+                MoveType::PieceInCarrier {
+                    piece_index,
+                    move_type: inner,
+                } => match inner.as_ref() {
+                    MoveType::MoveTo(coord) => (coord.clone(), Some(*piece_index)),
+                    MoveType::MoveIntoCarrier(coord) => (coord.clone(), Some(*piece_index)),
                     _ => {
-                        error!(?inner_move_type, "unmatched inner MoveType in get_moves filter");
+                        error!(?inner, "unmatched inner MoveType in get_moves filter");
                         todo!();
                     }
                 },
-                crate::board::MoveType::PhaseShift => return true,
-                _ => {
-                    todo!("Handle other move types in get_moves filtering");
+                MoveType::PhaseShift => return true,
+                MoveType::MoveIntoCarrier(_) => {
+                    // Pieces never produce a top-level MoveIntoCarrier from
+                    // `initial_moves`; the filter is the sole producer.
+                    todo!("top-level MoveIntoCarrier reached the filter");
                 }
             };
-            if let Some(target_square) = board.get_square_at(&target) {
-                if let Some(target_piece) = &target_square.piece {
-                    // if target piece is friendly carrying piece
-                    if target_piece.can_carry_piece()
-                        && target_piece.get_color() == self.get_color()
-                    {
-                        game_move.move_type =
-                            crate::board::MoveType::MoveIntoCarrier(target.clone());
-                        true
-                    } else {
-                        target_piece.get_color() != self.get_color()
-                    }
-                } else {
-                    true
-                }
+
+            let Some(target_square) = board.get_square_at(&target) else {
+                return false;
+            };
+
+            let Some(target_piece) = &target_square.piece else {
+                // empty target — keep as-is
+                return true;
+            };
+
+            if target_piece.can_carry_piece()
+                && target_piece.get_color() == self.get_color()
+            {
+                // Landing on a friendly carrier: swap the *inner* move (or the
+                // top-level move) to MoveIntoCarrier, preserving any
+                // PieceInCarrier wrapper.
+                let into = MoveType::MoveIntoCarrier(target);
+                game_move.move_type = match carrier_index {
+                    None => into,
+                    Some(idx) => MoveType::PieceInCarrier {
+                        piece_index: idx,
+                        move_type: std::sync::Arc::new(into),
+                    },
+                };
+                true
             } else {
-                false
+                target_piece.get_color() != self.get_color()
             }
         });
 
