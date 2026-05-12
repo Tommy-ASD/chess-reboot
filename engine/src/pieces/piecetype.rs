@@ -11,7 +11,27 @@ use crate::{
     },
 };
 
-// the rest
+/// Dispatches a method call to whichever piece variant is held.
+/// Every `PieceType` variant wraps something that implements `Piece`,
+/// so the body works uniformly across them.
+macro_rules! dispatch {
+    ($self:expr, $piece:ident => $body:expr) => {
+        match $self {
+            PieceType::Pawn($piece) => $body,
+            PieceType::Rook($piece) => $body,
+            PieceType::Knight($piece) => $body,
+            PieceType::Bishop($piece) => $body,
+            PieceType::Queen($piece) => $body,
+            PieceType::King($piece) => $body,
+            PieceType::Monkey($piece) => $body,
+            PieceType::Goblin($piece) => $body,
+            PieceType::Skibidi($piece) => $body,
+            PieceType::Bus($piece) => $body,
+            PieceType::Custom($piece) => $body,
+        }
+    };
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum PieceType {
     Pawn(Pawn),
@@ -37,39 +57,11 @@ impl From<Rc<PieceType>> for PieceType {
 
 impl PieceType {
     pub fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        match self {
-            PieceType::Pawn(piece) => piece.as_any_mut(),
-            PieceType::Rook(piece) => piece.as_any_mut(),
-            PieceType::Knight(piece) => piece.as_any_mut(),
-            PieceType::Bishop(piece) => piece.as_any_mut(),
-            PieceType::Queen(piece) => piece.as_any_mut(),
-            PieceType::King(piece) => piece.as_any_mut(),
-
-            PieceType::Monkey(piece) => piece.as_any_mut(),
-            PieceType::Goblin(piece) => piece.as_any_mut(),
-            PieceType::Skibidi(piece) => piece.as_any_mut(),
-            PieceType::Bus(piece) => piece.as_any_mut(),
-
-            PieceType::Custom(piece) => piece.as_any_mut(),
-        }
+        dispatch!(self, p => p.as_any_mut())
     }
 
     pub fn symbol(&self) -> String {
-        match self {
-            PieceType::Pawn(piece) => piece.symbol(),
-            PieceType::Rook(piece) => piece.symbol(),
-            PieceType::Knight(piece) => piece.symbol(),
-            PieceType::Bishop(piece) => piece.symbol(),
-            PieceType::Queen(piece) => piece.symbol(),
-            PieceType::King(piece) => piece.symbol(),
-
-            PieceType::Monkey(piece) => piece.symbol(),
-            PieceType::Goblin(piece) => piece.symbol(),
-            PieceType::Skibidi(piece) => piece.symbol(),
-            PieceType::Bus(piece) => piece.symbol(),
-
-            PieceType::Custom(piece) => piece.symbol(),
-        }
+        dispatch!(self, p => p.symbol())
     }
 
     pub fn symbol_to_piece(symbol: &str) -> Option<PieceType> {
@@ -157,57 +149,15 @@ impl PieceType {
     }
 
     fn can_carry_piece(&self) -> bool {
-        match self {
-            PieceType::Pawn(piece) => piece.can_carry_piece(),
-            PieceType::Rook(piece) => piece.can_carry_piece(),
-            PieceType::Knight(piece) => piece.can_carry_piece(),
-            PieceType::Bishop(piece) => piece.can_carry_piece(),
-            PieceType::Queen(piece) => piece.can_carry_piece(),
-            PieceType::King(piece) => piece.can_carry_piece(),
-
-            PieceType::Monkey(piece) => piece.can_carry_piece(),
-            PieceType::Goblin(piece) => piece.can_carry_piece(),
-            PieceType::Skibidi(piece) => piece.can_carry_piece(),
-            PieceType::Bus(piece) => piece.can_carry_piece(),
-
-            PieceType::Custom(piece) => piece.can_carry_piece(),
-        }
+        dispatch!(self, p => p.can_carry_piece())
     }
 
     pub fn get_color(&self) -> Color {
-        match self {
-            PieceType::Pawn(piece) => piece.color(),
-            PieceType::Rook(piece) => piece.color(),
-            PieceType::Knight(piece) => piece.color(),
-            PieceType::Bishop(piece) => piece.color(),
-            PieceType::Queen(piece) => piece.color(),
-            PieceType::King(piece) => piece.color(),
-
-            PieceType::Monkey(piece) => piece.color(),
-            PieceType::Goblin(piece) => piece.color(),
-            PieceType::Skibidi(piece) => piece.color(),
-            PieceType::Bus(piece) => piece.color(),
-
-            PieceType::Custom(piece) => piece.color(),
-        }
+        dispatch!(self, p => p.color())
     }
 
     pub fn set_color(&mut self, color: Color) {
-        match self {
-            PieceType::Pawn(piece) => piece.set_color(color),
-            PieceType::Rook(piece) => piece.set_color(color),
-            PieceType::Knight(piece) => piece.set_color(color),
-            PieceType::Bishop(piece) => piece.set_color(color),
-            PieceType::Queen(piece) => piece.set_color(color),
-            PieceType::King(piece) => piece.set_color(color),
-
-            PieceType::Monkey(piece) => piece.set_color(color),
-            PieceType::Goblin(piece) => piece.set_color(color),
-            PieceType::Skibidi(piece) => piece.set_color(color),
-            PieceType::Bus(piece) => piece.set_color(color),
-
-            PieceType::Custom(piece) => piece.set_color(color),
-        }
+        dispatch!(self, p => p.set_color(color))
     }
 
     pub fn get_moves(
@@ -215,21 +165,7 @@ impl PieceType {
         board: &crate::board::Board,
         from: &crate::board::Coord,
     ) -> Vec<crate::board::GameMove> {
-        let mut moves = match self {
-            PieceType::Pawn(piece) => piece.initial_moves(board, from),
-            PieceType::Rook(piece) => piece.initial_moves(board, from),
-            PieceType::Knight(piece) => piece.initial_moves(board, from),
-            PieceType::Bishop(piece) => piece.initial_moves(board, from),
-            PieceType::Queen(piece) => piece.initial_moves(board, from),
-            PieceType::King(piece) => piece.initial_moves(board, from),
-
-            PieceType::Monkey(piece) => piece.initial_moves(board, from),
-            PieceType::Goblin(piece) => piece.initial_moves(board, from),
-            PieceType::Skibidi(piece) => piece.initial_moves(board, from),
-            PieceType::Bus(piece) => piece.initial_moves(board, from),
-
-            PieceType::Custom(piece) => piece.initial_moves(board, from),
-        };
+        let mut moves = dispatch!(self, p => p.initial_moves(board, from));
 
         // if the square has a piece of the same color, filter it out
         moves.retain_mut(|game_move| {
@@ -281,34 +217,6 @@ impl PieceType {
         board_after: &mut crate::board::Board,
         game_move: &GameMove,
     ) {
-        match self {
-            PieceType::Pawn(piece) => piece.post_move_effects(board_before, board_after, game_move),
-            PieceType::Rook(piece) => piece.post_move_effects(board_before, board_after, game_move),
-            PieceType::Knight(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::Bishop(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::Queen(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::King(piece) => piece.post_move_effects(board_before, board_after, game_move),
-
-            PieceType::Monkey(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::Goblin(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::Skibidi(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-            PieceType::Bus(piece) => piece.post_move_effects(board_before, board_after, game_move),
-
-            PieceType::Custom(piece) => {
-                piece.post_move_effects(board_before, board_after, game_move)
-            }
-        }
+        dispatch!(self, p => p.post_move_effects(board_before, board_after, game_move))
     }
 }
