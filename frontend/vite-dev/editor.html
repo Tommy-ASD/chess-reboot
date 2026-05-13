@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Board Editor</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+
+<body class="editor-page">
+  <header id="page-header">
+    <h1>Board Editor</h1>
+    <nav id="page-nav">
+      <a href="/">&larr; Play</a>
+    </nav>
+  </header>
+
+  <section id="fen-row">
+    <label for="fen-input" class="fen-label">FEN</label>
+    <input id="fen-input" type="text" spellcheck="false" placeholder="Paste or edit FEN here" />
+    <button id="copy-fen" class="ghost-btn" title="Copy FEN to clipboard">Copy</button>
+    <button id="paste-fen" class="ghost-btn" title="Paste FEN from clipboard">Paste</button>
+  </section>
+
+  <div id="editor-main">
+    <aside id="brush-panel">
+      <div class="brush-section">
+        <h3>Active brush</h3>
+        <div id="active-brush" class="active-brush-display">No brush selected</div>
+      </div>
+
+      <div class="brush-section">
+        <h4>White pieces</h4>
+        <div id="palette-white" class="palette"></div>
+      </div>
+
+      <div class="brush-section">
+        <h4>Black pieces</h4>
+        <div id="palette-black" class="palette"></div>
+      </div>
+
+      <div class="brush-section">
+        <h4>Custom pieces</h4>
+        <div id="palette-custom" class="palette"></div>
+      </div>
+
+      <div class="brush-section">
+        <h4>Square type</h4>
+        <div id="palette-types" class="palette"></div>
+      </div>
+
+      <div class="brush-section">
+        <h4>Conditions</h4>
+        <div id="palette-conditions" class="palette"></div>
+      </div>
+
+      <div class="brush-section">
+        <h4>Erase</h4>
+        <div id="palette-erase" class="palette"></div>
+      </div>
+    </aside>
+
+    <div id="board-column">
+      <div id="board"></div>
+      <p class="board-hint">Click a square to apply the active brush.</p>
+    </div>
+
+    <aside id="state-panel">
+      <div class="state-section">
+        <h3>Side to move</h3>
+        <div id="stm-toggle" class="segmented">
+          <button data-color="w" class="active">White</button>
+          <button data-color="b">Black</button>
+        </div>
+      </div>
+
+      <div class="state-section">
+        <h3>Castling rights</h3>
+        <div class="check-grid">
+          <label><input type="checkbox" id="castle-K" checked /> White O-O</label>
+          <label><input type="checkbox" id="castle-Q" checked /> White O-O-O</label>
+          <label><input type="checkbox" id="castle-k" checked /> Black O-O</label>
+          <label><input type="checkbox" id="castle-q" checked /> Black O-O-O</label>
+        </div>
+      </div>
+
+      <div class="state-section">
+        <h3>En passant target</h3>
+        <input id="ep-target" type="text" maxlength="2" placeholder="-" spellcheck="false" />
+      </div>
+
+      <div class="state-section">
+        <h3>Board dimensions</h3>
+        <div class="dim-control">
+          <label>Width
+            <input id="board-cols" type="number" min="1" step="1" value="8" />
+          </label>
+          <label>Height
+            <input id="board-rows" type="number" min="1" step="1" value="8" />
+          </label>
+        </div>
+        <p class="board-size-hint">Resizing preserves pieces in the overlap.</p>
+      </div>
+
+      <div class="state-section">
+        <h3>Board size</h3>
+        <div class="board-size-control">
+          <input id="board-size-slider" type="range" />
+          <span id="board-size-value" class="board-size-value">532px</span>
+        </div>
+        <p class="board-size-hint">Or drag the bottom-right corner of the board.</p>
+      </div>
+
+      <div class="state-section">
+        <h3>Templates</h3>
+        <ul id="presets"></ul>
+      </div>
+
+      <div class="state-section">
+        <button id="reset-standard" class="primary-btn">Standard chess</button>
+        <button id="clear-board" class="ghost-btn">Empty board</button>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="/src/editor_page.ts"></script>
+</body>
+
+</html>

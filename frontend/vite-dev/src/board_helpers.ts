@@ -64,9 +64,17 @@ export function highlightMoves(moves: GameMove[]) {
     const squares = document.querySelectorAll(".square");
     squares.forEach(sq => sq.classList.remove("highlight", "highlight-board", "highlight-deploy"));
 
+    // The squares NodeList is in row-major order — same as the rendered
+    // grid. Read the column count off the `--cols` CSS variable so this
+    // works for any board width, not just 8.
+    const colsRaw = getComputedStyle(document.documentElement)
+        .getPropertyValue("--cols")
+        .trim();
+    const cols = Number(colsRaw) || 8;
+
     const targets = visibleMoveTargets(moves, selectedPassengerIndex);
     for (const t of targets) {
-        const idx = t.target.rank * 8 + t.target.file;
+        const idx = t.target.rank * cols + t.target.file;
         const sq = squares[idx];
         if (!sq) continue;
         sq.classList.add("highlight");

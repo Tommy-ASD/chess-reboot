@@ -2,6 +2,79 @@
 
 import type { Square, SquareType } from "./variables";
 
+// ----------------------------------------------
+// Full-FEN flag fields (used by the dedicated editor)
+// ----------------------------------------------
+
+export type Side = "w" | "b";
+
+export type CastlingRights = {
+  K: boolean; // white kingside
+  Q: boolean; // white queenside
+  k: boolean; // black kingside
+  q: boolean; // black queenside
+};
+
+export type BoardFlags = {
+  sideToMove: Side;
+  castling: CastlingRights;
+  /** Algebraic square ("e3") or null when no en-passant target. */
+  enPassant: string | null;
+};
+
+export const DEFAULT_FLAGS: BoardFlags = {
+  sideToMove: "w",
+  castling: { K: true, Q: true, k: true, q: true },
+  enPassant: null,
+};
+
+/// Split a full FEN ("<grid> <stm> <castling> <ep>") into its grid +
+/// flags. Missing trailing fields default to white-to-move with all
+/// castle rights and no en-passant target — matching `fen_to_board`'s
+/// fallback in the engine, so a bare grid round-trips identically.
+export function parseFENFlags(fen: string): BoardFlags {
+  const parts = fen.trim().split(/\s+/);
+  // parts[0] is the grid; the rest are flag fields.
+  const stm = parts[1];
+  const castle = parts[2];
+  const ep = parts[3];
+
+  const sideToMove: Side = stm === "b" ? "b" : "w";
+
+  const castling: CastlingRights = castle === undefined
+    ? { K: true, Q: true, k: true, q: true }
+    : castle === "-"
+      ? { K: false, Q: false, k: false, q: false }
+      : {
+        K: castle.includes("K"),
+        Q: castle.includes("Q"),
+        k: castle.includes("k"),
+        q: castle.includes("q"),
+      };
+
+  const enPassant = ep === undefined || ep === "-" ? null : ep;
+
+  return { sideToMove, castling, enPassant };
+}
+
+function castlingToFEN(c: CastlingRights): string {
+  let s = "";
+  if (c.K) s += "K";
+  if (c.Q) s += "Q";
+  if (c.k) s += "k";
+  if (c.q) s += "q";
+  return s.length === 0 ? "-" : s;
+}
+
+/// Build a full FEN string from a board grid + flags.
+export function serializeFullFEN(board: Square[][], flags: BoardFlags): string {
+  const grid = squaresToFEN(board);
+  const stm = flags.sideToMove;
+  const castling = castlingToFEN(flags.castling);
+  const ep = flags.enPassant ?? "-";
+  return `${grid} ${stm} ${castling} ${ep}`;
+}
+
 // For pretty optional rendering
 export const pieceToSymbol = (p: string): string => {
   const map: Record<string, string> = {
@@ -208,9 +281,14 @@ export function squareToFEN(square: Square): string {
 }
 
 // ----------------------------------------------
-// Parse a FEN row (8 squares)
+// Parse a FEN row (arbitrary width)
 // ----------------------------------------------
 
+/// Parse a single FEN row into squares. Width is whatever the row encodes
+/// — `pppppppp` is 8 wide, `pppppppppp` is 10. Multi-digit run-length
+/// empties (`10`, `15`) are supported for boards wider than 9 columns.
+/// The whole-board parser (`parseFEN`) enforces that every row in a
+/// given FEN has the same width.
 export function parseFENRow(row: string): Square[] {
   const squares: Square[] = [];
   let i = 0;
@@ -218,9 +296,12 @@ export function parseFENRow(row: string): Square[] {
   while (i < row.length) {
     const ch = row[i];
 
-    // Digit → N empty squares
+    // Digits → N empty squares. Consume the whole digit run greedily so
+    // "10" reads as ten empty squares, not "1" then "0".
     if (/\d/.test(ch)) {
-      const count = Number(ch);
+      let j = i;
+      while (j < row.length && /\d/.test(row[j])) j++;
+      const count = Number(row.slice(i, j));
       for (let k = 0; k < count; k++) {
         squares.push({
           piece: null,
@@ -228,7 +309,7 @@ export function parseFENRow(row: string): Square[] {
           conditions: [],
         });
       }
-      i++;
+      i = j;
       continue;
     }
 
@@ -258,10 +339,6 @@ export function parseFENRow(row: string): Square[] {
     i++;
   }
 
-  if (squares.length !== 8) {
-    throw new Error("Invalid FEN row: " + row);
-  }
-
   return squares;
 }
 
@@ -269,16 +346,27 @@ export function parseFENRow(row: string): Square[] {
 // Parse whole board
 // ----------------------------------------------
 
+/// Parse a FEN grid into a 2D array of squares. Trailing flag fields
+/// (`<stm> <castling> <ep>`) are ignored — they're handled separately by
+/// `parseFENFlags`. Width and height are inferred from the input: a 1×1
+/// "K" is valid, so is a 16×12 grid. All rows in a given FEN must have
+/// the same width or the parse rejects.
 export function parseFEN(fen: string): Square[][] {
-  // Trim off the trailing `<stm> <castling> <ep>` flag fields the engine
-  // started appending — only the grid (everything before the first space)
-  // is meaningful to the rendering layer.
   const grid = fen.split(/\s+/, 1)[0];
   const rows = grid.split("/");
-  if (rows.length !== 8) {
-    throw new Error("Invalid FEN: must have exactly 8 rows");
+  if (rows.length === 0) {
+    throw new Error("Invalid FEN: empty grid");
   }
-  return rows.map(parseFENRow);
+  const parsed = rows.map(parseFENRow);
+  const width = parsed[0].length;
+  for (let r = 1; r < parsed.length; r++) {
+    if (parsed[r].length !== width) {
+      throw new Error(
+        `Invalid FEN: row ${r} has ${parsed[r].length} squares but row 0 has ${width}`,
+      );
+    }
+  }
+  return parsed;
 }
 
 // ----------------------------------------------

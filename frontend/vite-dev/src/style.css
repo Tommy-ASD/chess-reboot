@@ -35,6 +35,15 @@
   --radius-xs: 6px;
   --t-fast: 120ms ease;
   --t: 180ms ease;
+  /* Board sizing — `--board-size` drives the board element's border-box
+     width; cells are 1fr so they share the space equally, and pieces /
+     highlights use cqw units so they reflow with the board. `--cols` and
+     `--rows` track the current FEN's grid shape (set by setBoardDimensions
+     on every render); the board's aspect-ratio is derived from them so
+     a 10x6 board renders as a wide rectangle, 6x10 as a tall one. */
+  --board-size: 532px;
+  --cols: 8;
+  --rows: 8;
 }
 
 * {
@@ -222,8 +231,8 @@ button {
 
 #board {
   display: grid;
-  grid-template-columns: repeat(8, 64px);
-  grid-template-rows: repeat(8, 64px);
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
   box-shadow:
     var(--shadow-lg),
     0 0 0 1px var(--board-frame-edge);
@@ -231,18 +240,26 @@ button {
   overflow: hidden;
   border: 10px solid var(--board-frame);
   background: var(--board-frame);
-  width: fit-content;
-  height: fit-content;
+  /* Drag-resize handle (bottom-right corner). aspect-ratio tracks the
+     current grid shape so cells stay square regardless of cols/rows.
+     container-type lets descendants size against the board's
+     inline-size via cqw units. */
+  width: var(--board-size);
+  aspect-ratio: var(--cols) / var(--rows);
+  resize: horizontal;
+  min-width: 276px;
+  max-width: 980px;
+  container-type: inline-size;
 }
 
 .square {
-  width: 64px;
-  height: 64px;
   display: flex;
   justify-content: center;
   align-items: center;
   font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
-  font-size: 38px;
+  /* Font scales with column width: 1cqw = 1% of the board's content-box
+     width, so one cell is 100cqw / --cols. Glyph fills ~60% of a cell. */
+  font-size: calc(60cqw / var(--cols));
   line-height: 1;
   user-select: none;
   cursor: pointer;
@@ -323,8 +340,9 @@ button {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 22px;
-  height: 22px;
+  /* Highlight dot is ~34% of one cell. Cell width is 100cqw / --cols. */
+  width: calc(34cqw / var(--cols));
+  height: calc(34cqw / var(--cols));
   background: var(--highlight-dot);
   border-radius: 50%;
   pointer-events: none;
@@ -498,88 +516,280 @@ button {
 }
 
 /* -------------------------------------------------- */
-/* Editor panel                                        */
+/* Board size control (slider + value, both pages)     */
 /* -------------------------------------------------- */
 
-#editor-panel {
-  margin-top: 24px;
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 22px 24px 24px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
-  max-width: 1100px;
+.board-size-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
 }
 
-#editor-panel h3 {
-  margin-bottom: 14px;
-}
-
-#editor-panel > label {
-  display: inline-flex;
+.board-size-control label {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.board-size-value {
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-soft);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.board-size-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.board-size-hint {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.dim-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
-  padding: 8px 14px;
+}
+
+.dim-control label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dim-control input[type="number"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
   background: var(--surface-2);
   border-radius: var(--radius-sm);
   font-size: 13px;
-  font-weight: 500;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, Menlo, monospace;
+  color: var(--text);
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+
+.dim-control input[type="number"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* In the editor's state panel the slider sits above the label rather
+   than below — different layout, same control. */
+#state-panel .board-size-control {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0;
+}
+
+#state-panel .board-size-control input[type="range"] {
+  flex: 1;
+}
+
+/* -------------------------------------------------- */
+/* Page header (used by both pages)                    */
+/* -------------------------------------------------- */
+
+#page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+#page-header h1 {
+  margin: 0;
+}
+
+#page-nav a {
   color: var(--text-soft);
-  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 8px 14px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  user-select: none;
+  border-radius: var(--radius-sm);
   transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
 
-#editor-panel > label:hover {
-  background: var(--surface);
-  border-color: var(--primary-soft);
-  color: var(--text);
+#page-nav a:hover {
+  background: var(--primary-glow);
+  border-color: var(--primary);
+  color: var(--accent);
 }
 
-#editor-panel input[type="checkbox"] {
+/* -------------------------------------------------- */
+/* Editor page layout                                  */
+/* -------------------------------------------------- */
+
+#fen-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 18px;
+}
+
+#fen-row .fen-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+#fen-row #fen-input {
+  flex: 1;
   margin: 0;
-  accent-color: var(--primary);
-  width: 15px;
-  height: 15px;
+}
+
+.ghost-btn,
+.primary-btn {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
 
-#piece-palette,
-#type-palette,
-#condition-palette {
+.ghost-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+.ghost-btn:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+  color: var(--accent);
+}
+
+.primary-btn {
+  background: var(--primary);
+  color: white;
+  border: 1px solid transparent;
+  width: 100%;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+.primary-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(184, 134, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.state-section .ghost-btn {
+  width: 100%;
+}
+
+#editor-main {
+  display: grid;
+  grid-template-columns: 280px auto 260px;
+  gap: 20px;
+  align-items: start;
+}
+
+#brush-panel,
+#state-panel {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 18px 18px 22px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.brush-section,
+.state-section {
+  margin-bottom: 16px;
+}
+
+.brush-section:last-child,
+.state-section:last-child {
+  margin-bottom: 0;
+}
+
+.brush-section h4,
+.state-section h4 {
+  margin: 14px 0 8px 0;
+}
+
+.brush-section h3,
+.state-section h3 {
+  margin-bottom: 10px;
+}
+
+.active-brush-display {
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: center;
+}
+
+/* -------------------------------------------------- */
+/* Brush palettes                                      */
+/* -------------------------------------------------- */
+
+.palette {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 4px;
 }
 
-#piece-palette button,
-#type-palette button,
-#condition-palette button {
-  padding: 8px 12px;
+.brush-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 56px;
+  min-height: 64px;
+  padding: 6px 4px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
   color: var(--text);
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast), color var(--t-fast);
 }
 
-#piece-palette button {
-  font-size: 22px;
-  min-width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-  line-height: 1;
-}
-
-#piece-palette button:hover,
-#type-palette button:hover,
-#condition-palette button:hover {
+.brush-btn:hover {
   background: var(--surface);
   border-color: var(--primary);
   transform: translateY(-1px);
@@ -587,30 +797,182 @@ button {
   color: var(--accent);
 }
 
-#piece-palette button:active,
-#type-palette button:active,
-#condition-palette button:active {
-  transform: translateY(0);
+.brush-btn.active {
+  background: var(--primary-glow);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 2px var(--primary);
+  color: var(--accent);
 }
 
-#export-fen-btn {
-  margin-top: 18px;
-  padding: 10px 18px;
+.brush-glyph {
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.brush-img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
+.brush-caption {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.brush-btn.active .brush-caption {
+  color: var(--accent);
+}
+
+/* -------------------------------------------------- */
+/* Editor board column                                 */
+/* -------------------------------------------------- */
+
+#board-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+#board-column #board {
+  margin: 0 auto;
+}
+
+.board-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  text-align: center;
+}
+
+/* -------------------------------------------------- */
+/* State panel — flag controls                         */
+/* -------------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segmented button {
+  background: var(--surface-2);
+  border: none;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.segmented button:not(:last-child) {
+  border-right: 1px solid var(--border-strong);
+}
+
+.segmented button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.segmented button.active {
+  background: var(--primary);
+  color: white;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.check-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.check-grid input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+#ep-target {
+  width: 80px;
+  text-transform: lowercase;
+}
+
+#presets {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#presets li {
+  cursor: pointer;
+  background: var(--surface-2);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  user-select: none;
+  border: 1px solid transparent;
+  color: var(--text-soft);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+
+#presets li:hover {
+  background: var(--surface);
+  border-color: var(--primary-soft);
+  color: var(--text);
+  transform: translateX(2px);
+}
+
+/* -------------------------------------------------- */
+/* Play page — link to editor                          */
+/* -------------------------------------------------- */
+
+#open-editor-link {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 9px 14px;
   background: var(--accent);
   color: white;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  text-decoration: none;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(107, 68, 35, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
 }
 
-#export-fen-btn:hover {
+#open-editor-link:hover {
   background: var(--accent-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(107, 68, 35, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-#export-fen-btn:active {
-  transform: translateY(0);
+@media (max-width: 1100px) {
+  #editor-main {
+    grid-template-columns: 1fr;
+  }
 }

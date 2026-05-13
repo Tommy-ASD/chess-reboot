@@ -3,9 +3,9 @@
 /// Builds with: npx tsc
 /// Runs with: npx serve
 
+import { initBoardResize, setBoardDimensions } from "./board_size";
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
-import { buildPalettes, editorMode, selectedEditorCondition, selectedEditorPiece, selectedEditorType } from "./editor";
-import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol, squaresToFEN } from "./fen";
+import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
 import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
@@ -19,10 +19,12 @@ function renderBoard(fen: string) {
   boardEl.innerHTML = ""; // clear previous board
 
   setCurrentBoard(parseFEN(fen));
+  const rows = currentBoard.length;
+  const cols = currentBoard[0]?.length ?? 0;
+  setBoardDimensions(cols, rows);
 
-  // Loop rank 8 → 1 (FEN order)
-  for (let rank = 0; rank < 8; rank++) {
-    for (let file = 0; file < 8; file++) {
+  for (let rank = 0; rank < rows; rank++) {
+    for (let file = 0; file < cols; file++) {
       const square_data = currentBoard[rank][file];
 
       const square = document.createElement("div");
@@ -60,13 +62,7 @@ function renderBoard(fen: string) {
 
       }
 
-      square.onclick = () => {
-        if (editorMode) {
-          handleEditorClick(rank, file);
-        } else {
-          handleSquareClick(rank, file);
-        }
-      }
+      square.onclick = () => handleSquareClick(rank, file);
 
       boardEl.appendChild(square);
     }
@@ -153,39 +149,6 @@ function findMoveForTarget(clicked: Coord, moves: GameMove[], passengerIdx: numb
   }
   return null;
 }
-
-function handleEditorClick(rank: number, file: number) {
-  console.log("Handling editor click with ", rank, file);
-  console.log("Current board", currentBoard);
-
-  const sq = currentBoard[rank][file];
-
-  // 1. Place/remove piece
-  if (selectedEditorPiece !== undefined) {
-    if (selectedEditorPiece === "") sq.piece = null;
-    else sq.piece = selectedEditorPiece;
-  }
-
-  // 2. Change square type
-  if (selectedEditorType !== null) {
-    sq.squareType = selectedEditorType;
-  }
-
-  // 3. Toggle conditions
-  if (selectedEditorCondition !== null) {
-    if (sq.conditions.includes(selectedEditorCondition)) {
-      sq.conditions = sq.conditions.filter(c => c !== selectedEditorCondition);
-    } else {
-      sq.conditions.push(selectedEditorCondition);
-    }
-  }
-
-  // Update rendered board
-  const newFEN = squaresToFEN(currentBoard);
-  (document.getElementById("fen-input") as HTMLInputElement).value = newFEN;
-  renderBoard(newFEN);
-}
-
 
 /// The side-actions panel: catch-all for moves that don't fit the
 /// "click a destination on the board" model — currently PhaseShift,
@@ -468,7 +431,21 @@ function populateFENList() {
 }
 
 populateFENList();
-buildPalettes();
+initBoardResize({
+  sliderSelector: "#board-size-slider",
+  valueLabelSelector: "#board-size-value",
+});
+
+// Make the "Edit this position" link forward the current FEN to the editor.
+const editorLink = document.getElementById("open-editor-link") as HTMLAnchorElement | null;
+if (editorLink) {
+  editorLink.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+    const url = `/editor.html?fen=${encodeURIComponent(fen)}`;
+    window.location.href = url;
+  });
+}
 
 // Auto-load standard chess position so the board isn't empty on first paint
 const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
