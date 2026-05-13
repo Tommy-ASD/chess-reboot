@@ -45,12 +45,25 @@ In rough priority order:
 7. **Test strategy** — 37 tests is a good start; missing perft,
    property tests, and integration coverage of full game scenarios.
    → [07-testing-strategy.md](07-testing-strategy.md)
+8. **Signal substrate** — generic event/wiring layer for switches,
+   junctions, gates, pressure plates. Underpins trains and a lot of
+   potential future composability features. Independent of the
+   bug-fixing plans above.
+   → [08-signal-substrate.md](08-signal-substrate.md)
+9. **Trains** — buildable closed-loop tracks that auto-move neutral
+   trains carrying pieces. Carts are invincible; their occupants are
+   not. Depends on plans 01, 02, and 08.
+   → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
 Plans **01 → 02 → 03** are the natural chain — each blocks the next.
 Plan **04** unblocks once **01** lands. Plans **05**, **06**, **07** can
 proceed in parallel with the engine work.
+
+Plans **08 → 09** are a feature track rather than a bug-fix track —
+they add new mechanics on top of a working baseline. **08** can land
+any time after **01**; **09** needs **01**, **02**, and **08**.
 
 If picking one thing to do next: **plan 01**. Everything that relates to
 "whose turn is it" or "can this player move here" depends on it.
