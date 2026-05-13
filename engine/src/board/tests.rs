@@ -1744,4 +1744,237 @@ mod tests {
             "message should refer to source square in (file, rank) form, got: {msg}"
         );
     }
+
+    // ============================================================
+    // Variable-dimension board coverage
+    // ============================================================
+    //
+    // The frontend can resize boards to non-8×8 sizes (see commit
+    // "frontend: dedicated board editor + variable board dimensions").
+    // The engine's rank/file logic has to follow — these tests exercise
+    // the paths that used to hardcode 8.
+
+    /// Build a blank board of arbitrary dimensions. `width` files,
+    /// `height` ranks, all castling flags off (a non-standard board
+    /// shouldn't claim default castle rights).
+    fn empty_board_sized(width: usize, height: usize) -> Board {
+        Board {
+            grid: vec![vec![Square::new(); width]; height],
+            flags: BoardFlags {
+                side_to_move: Color::White,
+                white_can_castle_kingside: false,
+                white_can_castle_queenside: false,
+                black_can_castle_kingside: false,
+                black_can_castle_queenside: false,
+                en_passant_target: None,
+            },
+        }
+    }
+
+    /// `Board::height` / `width` should reflect the underlying grid
+    /// shape; `format_coord` uses height to invert the rank into chess
+    /// algebraic.
+    #[test]
+    fn test_board_dimensions_and_format_coord() {
+        let b = empty_board_sized(10, 12);
+        assert_eq!(b.width(), 10);
+        assert_eq!(b.height(), 12);
+        // Bottom-left corner is (0, 11) → "a1" on a 12-tall board.
+        assert_eq!(b.format_coord(&Coord { file: 0, rank: 11 }), "a1");
+        // Top-right corner is (9, 0) → "j12".
+        assert_eq!(b.format_coord(&Coord { file: 9, rank: 0 }), "j12");
+    }
+
+    /// FEN run-length parsing must accept multi-digit counts so wider
+    /// boards (10+ wide) can encode rows of empty squares. Previously
+    /// `"10"` would parse as "one empty square then a 0" and produce
+    /// junk.
+    #[test]
+    fn test_fen_multi_digit_run_length_roundtrip() {
+        let board = empty_board_sized(10, 10);
+        let fen = board_to_fen(&board);
+        assert_eq!(fen, "10/10/10/10/10/10/10/10/10/10 w - -");
+        let parsed = fen_to_board(&fen);
+        assert_eq!(parsed.width(), 10);
+        assert_eq!(parsed.height(), 10);
+        assert_eq!(parsed, board);
+    }
+
+    /// FEN serializes en passant target through `Board::format_coord`,
+    /// so the algebraic rank inverts off the board's actual height —
+    /// not the old hardcoded 8.
+    #[test]
+    fn test_fen_en_passant_uses_board_height() {
+        let mut board = empty_board_sized(8, 12);
+        // Internal rank 10 on a 12-tall board → algebraic rank "2".
+        board.flags.en_passant_target = Some(Coord { file: 4, rank: 10 });
+        let fen = board_to_fen(&board);
+        assert!(
+            fen.ends_with(" e2"),
+            "expected en-passant 'e2' on 12-tall board, got: {fen}"
+        );
+        let parsed = fen_to_board(&fen);
+        assert_eq!(
+            parsed.flags.en_passant_target,
+            Some(Coord { file: 4, rank: 10 }),
+            "en-passant target must round-trip"
+        );
+    }
+
+    /// White pawn near the top of a shorter board promotes when it
+    /// reaches rank 0, regardless of overall height. Verifies
+    /// `Pawn::promotion_rank` is height-aware (the rank is 0 for
+    /// white on any height).
+    #[test]
+    fn test_pawn_promotion_white_on_short_board() {
+        let mut board = empty_board_sized(8, 5);
+        // White pawn at rank 1 of a 5-tall board, one square from promotion.
+        board.grid[1][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 1 });
+        // Forward push to rank 0 should produce four Promotion variants.
+        let promotions: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::Promotion { target, into } if target.rank == 0 => Some(into.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            promotions.len(),
+            4,
+            "expected 4 promotion choices on rank 0, got moves: {moves:?}"
+        );
+    }
+
+    /// Black pawn promotes when it reaches `height - 1` rather than the
+    /// hardcoded rank 7. A 10-tall board promotes black at rank 9.
+    #[test]
+    fn test_pawn_promotion_black_on_tall_board() {
+        let mut board = empty_board_sized(8, 10);
+        board.flags.side_to_move = Color::Black;
+        // Black pawn at rank 8 (one square from the bottom).
+        board.grid[8][0] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 8 });
+        let promotions: Vec<_> = moves
+            .iter()
+            .filter(|m| matches!(
+                &m.move_type,
+                MoveType::Promotion { target, .. } if target.rank == 9
+            ))
+            .collect();
+        assert_eq!(
+            promotions.len(),
+            4,
+            "black pawn should promote at rank 9 on 10-tall board, got: {moves:?}"
+        );
+    }
+
+    /// White pawn's double-push starting rank is `height - 2`, not the
+    /// hardcoded rank 6. On a 10-tall board white pawns start at rank 8.
+    #[test]
+    fn test_pawn_double_push_starting_rank_on_tall_board() {
+        let mut board = empty_board_sized(8, 10);
+        board.grid[8][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 8 });
+        // White moves up (rank decreasing). Double push should reach rank 6.
+        let double_push = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::MoveTo(c) if c.file == 0 && c.rank == 6
+        ));
+        assert!(
+            double_push,
+            "white pawn at starting rank 8 (height-2 of 10) should offer double push to rank 6, got: {moves:?}"
+        );
+    }
+
+    /// On a board narrower than 8 there is no room for the standard
+    /// kingside-castle geometry, so castling moves are not generated
+    /// even when the flag is set.
+    #[test]
+    fn test_castle_not_offered_on_narrow_board() {
+        let mut board = empty_board_sized(6, 8);
+        board.flags.white_can_castle_kingside = true;
+        // King at file 4, rank 7 (white back rank); rook at file 5 — the
+        // only candidate kingside rook on a 6-wide board.
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][5] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        assert!(
+            !moves.iter().any(|m| matches!(m.move_type, MoveType::Castle { .. })),
+            "no castle move should be generated on a 6-wide board, got: {moves:?}"
+        );
+    }
+
+    /// On a 10-wide board the kingside rook sits at file 9 (`width - 1`),
+    /// not file 7. King-side castling should still work as long as the
+    /// path is empty and unattacked.
+    #[test]
+    fn test_castle_kingside_on_wide_board() {
+        let mut board = empty_board_sized(10, 8);
+        board.flags.white_can_castle_kingside = true;
+        // White king on its start file (4), white kingside rook at file 9.
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][9] = Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let has_kingside_castle = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::Castle { side: CastleSide::Kingside }
+        ));
+        assert!(
+            has_kingside_castle,
+            "kingside castle should be generated when rook sits at width-1 on a 10-wide board, got: {moves:?}"
+        );
+
+        // Apply it; king should end at file 6, rook at file 5 (per the
+        // standard target geometry — the rook *source* was file 9).
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 7 },
+                move_type: MoveType::Castle { side: CastleSide::Kingside },
+            })
+            .expect("kingside castle on wide board should succeed");
+        assert!(matches!(
+            &board.grid[7][6].piece,
+            Some(PieceType::King(k)) if k.color == Color::White
+        ));
+        assert!(matches!(
+            &board.grid[7][5].piece,
+            Some(PieceType::Rook(r)) if r.color == Color::White
+        ));
+        assert!(board.grid[7][9].piece.is_none(), "rook source file 9 should now be empty");
+    }
+
+    /// Capturing the kingside rook on a wider board (at `width - 1`)
+    /// must clear the relevant castle right, just like h1/h8 does on
+    /// an 8-wide board.
+    #[test]
+    fn test_capturing_rook_at_width_minus_one_clears_castle_right() {
+        let mut board = empty_board_sized(10, 8);
+        board.flags.white_can_castle_kingside = true;
+        // White kingside rook at (9, 7); black rook ready to capture it
+        // along the file.
+        board.grid[7][9] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][9] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        // White king somewhere safe so the move is legal (not in check).
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.flags.side_to_move = Color::Black;
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 9, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 9, rank: 7 }),
+            })
+            .expect("black rook capture of white kingside rook should be legal");
+
+        assert!(
+            !board.flags.white_can_castle_kingside,
+            "white kingside castle right should clear when the (width-1, height-1) rook is captured"
+        );
+    }
 }
