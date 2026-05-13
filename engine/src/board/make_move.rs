@@ -1,7 +1,10 @@
 use tracing::debug;
 
 use crate::{
-    board::{Board, CastleSide, Coord, GameMove, MoveError, MoveType, PromotionTarget},
+    board::{
+        Board, CastleSide, Coord, GameMove, MoveError, MoveType, PromotionTarget,
+        square::SquareType,
+    },
     pieces::{Color, piecetype::PieceType},
 };
 
@@ -27,6 +30,25 @@ impl Board {
     /// present, target shape matches variant) are still verified — they
     /// become `Err` rather than `panic!`.
     pub fn make_move_unchecked(&mut self, game_move: GameMove) -> Result<(), String> {
+        // Plan 08 safety net: any move that lands a piece on a non-walkable
+        // square (closed Gate, Turret, Vent) is rejected here, even if a
+        // piece-level generator forgot to filter. Catches new pieces and
+        // hand-crafted moves alike. ThrowSwitch is not piece-relocating, so
+        // it bypasses this check; carrier-internal moves are validated at
+        // their own arms.
+        if let Some(landing) = piece_landing_square(&game_move) {
+            let walkable = self
+                .get_square_at(landing)
+                .map(|s| s.square_type.is_walkable())
+                .unwrap_or(false);
+            if !walkable {
+                return Err(format!(
+                    "destination {landing:?} is not walkable for {:?}",
+                    game_move.move_type
+                ));
+            }
+        }
+
         let board_before = self.clone();
 
         let from = &game_move.from;
@@ -215,6 +237,27 @@ impl Board {
                 }
                 debug!(?from, ?target, "move into carrier executed");
             }
+            MoveType::ThrowSwitch { switch } => {
+                // Validate the source is a Switch and clone the target list
+                // before mutating the grid — the activation loop in
+                // `fire_signal` borrows the grid mutably and can't share
+                // with the immutable read.
+                let targets = {
+                    let sq = self
+                        .get_square_at(switch)
+                        .ok_or_else(|| format!("ThrowSwitch: no square at {switch:?}"))?;
+                    match &sq.square_type {
+                        SquareType::Switch { targets } => targets.clone(),
+                        other => {
+                            return Err(format!(
+                                "ThrowSwitch target {switch:?} is not a Switch tile (got {other:?})"
+                            ));
+                        }
+                    }
+                };
+                self.fire_signal(&targets);
+                debug!(?switch, ?targets, "switch thrown");
+            }
             MoveType::PieceInCarrier {
                 piece_index,
                 move_type,
@@ -356,7 +399,11 @@ impl Board {
                     rank: game_move.from.rank,
                 })
             }
-            MoveType::MoveIntoCarrier(_) | MoveType::PieceInCarrier { .. } => None,
+            // ThrowSwitch doesn't relocate a piece, so there's no
+            // post-move dispatch on the (non-existent) destination.
+            MoveType::MoveIntoCarrier(_)
+            | MoveType::PieceInCarrier { .. }
+            | MoveType::ThrowSwitch { .. } => None,
         };
 
         if let Some(target) = piece_target {
@@ -373,6 +420,15 @@ impl Board {
             piece.post_move_effects(before_state, self, &game_move);
         }
 
+        // Plan 08 step 4: PressurePlate scan. For every square the move
+        // settled a piece on, fire that square's plate if it has one. The
+        // landing-set varies by move shape — see `collect_landings` for the
+        // mapping. A Castle settles two pieces (king + rook); a passenger
+        // exiting a carrier settles one passenger piece on the target tile.
+        for landing in collect_landings(&game_move) {
+            self.maybe_fire_pressure_plate(&landing);
+        }
+
         self.recalc_brainrot();
 
         // Plan 01: flip turn at the very end so post-move hooks see the
@@ -381,5 +437,77 @@ impl Board {
         self.flags.side_to_move = self.flags.side_to_move.opposite();
 
         Ok(())
+    }
+}
+
+/// Plan 08 step 4 helper: every board-square where a piece settled as a
+/// result of this move. Used by the PressurePlate scan in
+/// `handle_post_move_effects` to fire plates for any of the landings.
+///
+/// - `MoveTo` / `Promotion` / `EnPassant`: one landing (the target).
+/// - `Castle`: two landings — king's destination and rook's destination.
+/// - `PieceInCarrier { MoveTo }`: passenger exits onto a tile; that's a
+///   landing for the passenger. Other inner shapes don't surface a tile-
+///   level landing.
+/// - `MoveIntoCarrier`, `PhaseShift`, `ThrowSwitch`: no new piece on a
+///   tile (the carrier was already there / no piece relocated).
+fn collect_landings(game_move: &GameMove) -> Vec<Coord> {
+    match &game_move.move_type {
+        MoveType::MoveTo(c) => vec![c.clone()],
+        MoveType::Promotion { target, .. } => vec![target.clone()],
+        MoveType::EnPassant { target, .. } => vec![target.clone()],
+        MoveType::Castle { side } => {
+            let r = game_move.from.rank;
+            let (king_file, rook_file) = match side {
+                CastleSide::Kingside => (6u8, 5u8),
+                CastleSide::Queenside => (2u8, 3u8),
+            };
+            vec![
+                Coord {
+                    file: king_file,
+                    rank: r,
+                },
+                Coord {
+                    file: rook_file,
+                    rank: r,
+                },
+            ]
+        }
+        MoveType::PieceInCarrier { move_type, .. } => match move_type.as_ref() {
+            MoveType::MoveTo(c) => vec![c.clone()],
+            _ => vec![],
+        },
+        MoveType::MoveIntoCarrier(_)
+        | MoveType::PhaseShift
+        | MoveType::ThrowSwitch { .. } => vec![],
+    }
+}
+
+/// Plan 08 safety net helper: where does the piece end up after this move?
+/// Returns `None` for moves that don't relocate a piece onto a board square
+/// (ThrowSwitch, MoveIntoCarrier into the carrier's own square, passenger-
+/// internal PieceInCarrier moves). The walkability check in
+/// `make_move_unchecked` uses this to short-circuit non-relocating moves.
+fn piece_landing_square(game_move: &GameMove) -> Option<&Coord> {
+    match &game_move.move_type {
+        MoveType::MoveTo(c) => Some(c),
+        MoveType::Promotion { target, .. } => Some(target),
+        MoveType::EnPassant { target, .. } => Some(target),
+        // Boarding a carrier: the boarder's square is the carrier's tile,
+        // so the carrier's tile must be walkable. (A Bus parked on a
+        // closed Gate is unreachable.)
+        MoveType::MoveIntoCarrier(c) => Some(c),
+        // Castle moves multiple pieces. King::castle_moves already
+        // requires every square on the king's path to be empty *and*
+        // walkable (per the updated `empty()` closure), so the safety
+        // net is redundant here. Skip rather than re-derive king/rook
+        // target files for both castle sides.
+        MoveType::Castle { .. } => None,
+        // Passenger-internal moves and PhaseShift don't relocate a
+        // piece onto an outer-board square in a way the safety net can
+        // helpfully validate. ThrowSwitch doesn't move the piece at all.
+        MoveType::PieceInCarrier { .. }
+        | MoveType::PhaseShift
+        | MoveType::ThrowSwitch { .. } => None,
     }
 }

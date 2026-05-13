@@ -182,6 +182,1085 @@ mod tests {
         assert_eq!(board2, board);
     }
 
+    /// Plan 08: each new payload-carrying square variant must round-trip
+    /// through FEN with its full payload intact (targets, ids, branches,
+    /// open/fires fields).
+    #[test]
+    fn test_signal_squares_fen_roundtrip() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Switch {
+            targets: vec![3, 7],
+        });
+        board.grid[1][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 3,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+        board.grid[2][0] = Square::new().set_square_type(SquareType::Gate {
+            id: 7,
+            open: false,
+        });
+        board.grid[3][0] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![3],
+            fires_for: PressureTrigger::OnlyColor(Color::Black),
+        });
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "fen was: {fen}");
+    }
+
+    /// Switch with empty targets list still has to round-trip — the editor
+    /// can paint a Switch before wiring it.
+    #[test]
+    fn test_signal_switch_empty_targets_roundtrip() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Switch { targets: vec![] });
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "fen was: {fen}");
+    }
+
+    /// Square-driven variants are walkable; closed Gate blocks; Turret/Vent
+    /// keep the prior "not walkable" semantic.
+    #[test]
+    fn test_square_type_is_walkable() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        assert!(SquareType::Standard.is_walkable());
+        assert!(!SquareType::Turret.is_walkable());
+        assert!(!SquareType::Vent.is_walkable());
+        assert!(SquareType::Switch { targets: vec![] }.is_walkable());
+        assert!(
+            SquareType::Junction {
+                id: 0,
+                state: 0,
+                branches: vec![TrackDir::N],
+            }
+            .is_walkable()
+        );
+        assert!(SquareType::Gate { id: 0, open: true }.is_walkable());
+        assert!(!SquareType::Gate { id: 0, open: false }.is_walkable());
+        assert!(
+            SquareType::PressurePlate {
+                targets: vec![],
+                fires_for: PressureTrigger::AnyPiece,
+            }
+            .is_walkable()
+        );
+    }
+
+    /// A piece landing on a Switch tile must be allowed (Switch is walkable).
+    /// Regression guard against `square_is_empty` regressing to the old
+    /// `SquareType::Standard`-only check.
+    #[test]
+    fn test_square_is_empty_treats_switch_as_walkable() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Switch { targets: vec![] });
+
+        let target = Coord { file: 3, rank: 3 };
+        assert!(
+            board.square_is_empty(&target),
+            "an empty Switch tile must count as walkable",
+        );
+    }
+
+    /// The FEN parser uses a two-pass field accumulator, so the order in
+    /// which fields appear inside an extended-square block must not matter.
+    /// Editors / hand-edits / future format changes get the same parse.
+    #[test]
+    fn test_signal_fen_field_order_independent() {
+        // Canonical order vs. shuffled order — both must parse to the same
+        // Square. Gate is the cheapest variant for this check (two fields).
+        let canonical = fen_to_board("(T=GATE,ID=7,OPEN=0)7/8/8/8/8/8/8/8 w KQkq -");
+        let shuffled = fen_to_board("(T=GATE,OPEN=0,ID=7)7/8/8/8/8/8/8/8 w KQkq -");
+        assert_eq!(canonical, shuffled);
+
+        // Junction with all three payload fields shuffled.
+        let canonical_j = fen_to_board(
+            "(T=JUNCTION,ID=3,STATE=1,BRANCHES=(N,E))7/8/8/8/8/8/8/8 w KQkq -",
+        );
+        let shuffled_j = fen_to_board(
+            "(T=JUNCTION,BRANCHES=(N,E),STATE=1,ID=3)7/8/8/8/8/8/8/8 w KQkq -",
+        );
+        assert_eq!(canonical_j, shuffled_j);
+    }
+
+    /// A Junction encoded with no `BRANCHES` field round-trips with an
+    /// empty branches vec — and crucially does not panic. A future
+    /// signal-fire dispatcher will need to handle the empty case (modulo
+    /// by zero is on plan 08 step 3's plate, not this one), but the parser
+    /// must remain robust today.
+    #[test]
+    fn test_signal_junction_empty_branches_roundtrip() {
+        use crate::board::square::TrackDir;
+
+        // Explicit empty branches list.
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 3,
+            state: 0,
+            branches: vec![],
+        });
+        let fen = board_to_fen(&board);
+        let parsed = fen_to_board(&fen);
+        assert_eq!(parsed, board, "fen was: {fen}");
+
+        // Missing BRANCHES field entirely should also degrade gracefully —
+        // not panic, default to empty.
+        let bare = fen_to_board("(T=JUNCTION,ID=3,STATE=0)7/8/8/8/8/8/8/8 w KQkq -");
+        let first = &bare.grid[0][0].square_type;
+        match first {
+            SquareType::Junction {
+                id,
+                state,
+                branches,
+            } => {
+                assert_eq!(*id, 3);
+                assert_eq!(*state, 0);
+                assert!(branches.is_empty());
+                // Sanity: TrackDir is now Eq+Hash; consume to make sure
+                // the derive isn't accidentally bounded by `branches`.
+                let _: std::collections::HashSet<TrackDir> = branches.iter().copied().collect();
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// Wiring-integrity round-trip: when multiple emitters share receiver
+    /// IDs, one emitter targets multiple IDs, and the same numeric ID is
+    /// used by both a Junction and a Gate (plan 08 allows this — different
+    /// receiver kinds disambiguate), the entire signal graph must survive
+    /// a FEN round-trip with every link intact.
+    #[test]
+    fn test_signal_wiring_graph_roundtrip() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        // Two switches: one hits three receivers, one shares an id with it.
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Switch {
+            targets: vec![3, 7, 42],
+        });
+        board.grid[1][0] = Square::new().set_square_type(SquareType::Switch {
+            targets: vec![7],
+        });
+        // A plate that also fires two of the same receivers.
+        board.grid[2][0] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![3, 42],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        // Receivers: Junction@id=3, Gate@id=7, Junction@id=42, Gate@id=3.
+        // Junction and Gate with the same numeric ID coexist legitimately
+        // because they're different receiver kinds.
+        board.grid[3][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 3,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E, TrackDir::S, TrackDir::W],
+        });
+        board.grid[4][0] = Square::new().set_square_type(SquareType::Gate {
+            id: 7,
+            open: false,
+        });
+        board.grid[5][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 42,
+            state: 2,
+            branches: vec![TrackDir::W, TrackDir::S],
+        });
+        board.grid[6][0] = Square::new().set_square_type(SquareType::Gate {
+            id: 3,
+            open: true,
+        });
+
+        let fen = board_to_fen(&board);
+        let parsed = fen_to_board(&fen);
+        assert_eq!(parsed, board, "fen was: {fen}");
+
+        // Sanity-check the link integrity explicitly — not just structural
+        // equality. Switch@(0,0) must still target [3, 7, 42] in order.
+        match &parsed.grid[0][0].square_type {
+            SquareType::Switch { targets } => assert_eq!(targets, &[3u32, 7, 42]),
+            other => panic!("expected Switch at (0,0), got {other:?}"),
+        }
+        // The Junction@id=3 and Gate@id=3 must both survive with id=3.
+        match (
+            &parsed.grid[3][0].square_type,
+            &parsed.grid[6][0].square_type,
+        ) {
+            (
+                SquareType::Junction { id: jid, .. },
+                SquareType::Gate { id: gid, open },
+            ) => {
+                assert_eq!(*jid, 3);
+                assert_eq!(*gid, 3);
+                assert!(*open, "Gate@(6,0) was open in the source board");
+            }
+            (a, b) => panic!("expected Junction + Gate sharing id=3, got {a:?} and {b:?}"),
+        }
+    }
+
+    // ============================================================
+    // Plan 08 step 2 — ThrowSwitch move shape (no dispatcher yet)
+    // ============================================================
+
+    /// A piece sitting on a Switch tile must have a `ThrowSwitch` entry in
+    /// its legal-move list. This is the central verification for step 2:
+    /// the move is *expressable*, but applying it doesn't fire receivers
+    /// yet (step 3 wires that in).
+    #[test]
+    fn test_switch_appears_in_legal_moves() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_pawn(Color::White))
+            .set_square_type(SquareType::Switch {
+                targets: vec![1, 2, 3],
+            });
+
+        let from = Coord { file: 3, rank: 3 };
+        let legal = board.legal_moves(&from);
+
+        let throw = legal.iter().find(|m| matches!(&m.move_type, MoveType::ThrowSwitch { .. }));
+        let throw = throw.expect("Pawn on Switch should have a ThrowSwitch move");
+        match &throw.move_type {
+            MoveType::ThrowSwitch { switch } => {
+                assert_eq!(switch, &from, "ThrowSwitch must point at the piece's own square");
+            }
+            other => panic!("expected ThrowSwitch, got {other:?}"),
+        }
+    }
+
+    /// A piece on a plain Standard tile must NOT have a ThrowSwitch move —
+    /// the move is only emitted from Switch tiles.
+    #[test]
+    fn test_no_throw_switch_on_standard_tile() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        let from = Coord { file: 3, rank: 3 };
+        let any_throw = board
+            .legal_moves(&from)
+            .iter()
+            .any(|m| matches!(&m.move_type, MoveType::ThrowSwitch { .. }));
+        assert!(!any_throw, "ThrowSwitch must not appear off a Switch tile");
+    }
+
+    /// Throwing a switch consumes the turn — the next move must be from the
+    /// other side. Even though step 2 doesn't fire signals yet, the
+    /// turn-flip semantics are settled here.
+    #[test]
+    fn test_throw_switch_consumes_turn() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_pawn(Color::White))
+            .set_square_type(SquareType::Switch { targets: vec![] });
+
+        let from = Coord { file: 3, rank: 3 };
+        assert_eq!(board.flags.side_to_move, Color::White);
+
+        let throw = GameMove {
+            from: from.clone(),
+            move_type: MoveType::ThrowSwitch {
+                switch: from.clone(),
+            },
+        };
+        board.make_move(throw).expect("legal throw");
+        assert_eq!(board.flags.side_to_move, Color::Black);
+
+        // Piece is still on the Switch tile — throwing doesn't move it.
+        assert!(board.get_square_at(&from).and_then(|s| s.piece.as_ref()).is_some());
+
+        // White can't move now — it's Black's turn.
+        let try_again = GameMove {
+            from: from.clone(),
+            move_type: MoveType::ThrowSwitch {
+                switch: from.clone(),
+            },
+        };
+        let err = board
+            .make_move(try_again)
+            .expect_err("white throwing on black's turn must error");
+        assert!(matches!(err, MoveError::WrongTurn { .. }), "got {err:?}");
+    }
+
+    /// A Skibidi sitting on a Switch tile gets BOTH a `PhaseShift`
+    /// (piece-driven) and a `ThrowSwitch` (square-driven) in its legal
+    /// moves. Verifies the square-driven addition coexists with custom
+    /// piece-driven specials, doesn't clobber them.
+    #[test]
+    fn test_skibidi_on_switch_gets_both_phaseshift_and_throwswitch() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::Skibidi(Skibidi {
+                color: Color::White,
+                phase: 1,
+            }))
+            .set_square_type(SquareType::Switch { targets: vec![5] });
+
+        let from = Coord { file: 3, rank: 3 };
+        let legal = board.legal_moves(&from);
+
+        let has_phase_shift = legal
+            .iter()
+            .any(|m| matches!(m.move_type, MoveType::PhaseShift));
+        let has_throw = legal
+            .iter()
+            .any(|m| matches!(m.move_type, MoveType::ThrowSwitch { .. }));
+
+        assert!(
+            has_phase_shift,
+            "Skibidi must still offer PhaseShift on a Switch tile; legal = {legal:?}",
+        );
+        assert!(
+            has_throw,
+            "Skibidi on a Switch must also offer ThrowSwitch; legal = {legal:?}",
+        );
+    }
+
+    /// A Bus parked on a Switch tile can throw the switch (the Bus IS the
+    /// piece on the square). Its passengers, on the other hand, do not
+    /// independently surface a `PieceInCarrier(ThrowSwitch)` — the
+    /// square-driven addition in `Board::get_moves` runs against the
+    /// top-level piece (the Bus), and the Bus's passenger-move generator
+    /// is responsible for its own outputs. Passengers throwing via their
+    /// carrier isn't a v1 mechanic.
+    #[test]
+    fn test_bus_on_switch_throws_but_passengers_dont() {
+        let mut board = empty_board();
+        let bus_with_pawn = PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::new_pawn(Color::White)],
+        });
+        board.grid[3][3] = Square::new()
+            .set_piece(bus_with_pawn)
+            .set_square_type(SquareType::Switch { targets: vec![1] });
+
+        let from = Coord { file: 3, rank: 3 };
+        let legal = board.legal_moves(&from);
+
+        // The Bus itself can throw the switch.
+        let bus_throws = legal.iter().any(|m| {
+            matches!(&m.move_type, MoveType::ThrowSwitch { switch } if switch == &from)
+        });
+        assert!(bus_throws, "Bus on Switch must offer ThrowSwitch");
+
+        // No move surfaces as `PieceInCarrier { move_type: ThrowSwitch }`
+        // — passengers don't throw through the carrier.
+        let passenger_throws = legal.iter().any(|m| {
+            matches!(
+                &m.move_type,
+                MoveType::PieceInCarrier { move_type, .. }
+                    if matches!(move_type.as_ref(), MoveType::ThrowSwitch { .. })
+            )
+        });
+        assert!(
+            !passenger_throws,
+            "passengers must not get a PieceInCarrier(ThrowSwitch); legal = {legal:?}",
+        );
+    }
+
+    /// Building a `ThrowSwitch` move from a non-Switch source square must
+    /// fail validation. The piece simply doesn't generate that move (it's
+    /// gated by `square.square_type` in `Board::get_moves`), so the
+    /// candidate-set check at `validate_move` is what catches it.
+    #[test]
+    fn test_throw_switch_rejected_on_non_switch_tile() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+
+        let from = Coord { file: 3, rank: 3 };
+        let bogus = GameMove {
+            from: from.clone(),
+            move_type: MoveType::ThrowSwitch { switch: from },
+        };
+        let err = board.make_move(bogus).expect_err("must reject");
+        assert!(
+            matches!(err, MoveError::PieceCannotMakeMove { .. }),
+            "expected PieceCannotMakeMove, got {err:?}"
+        );
+    }
+
+    // ============================================================
+    // Plan 08 step 3 — signal dispatch (fire_signal + receivers)
+    // ============================================================
+
+    /// Plan 08 step 3 anchor: throwing a switch must advance the wired
+    /// junction's state. Demonstrates the full chain — get_moves emits
+    /// the ThrowSwitch, make_move applies it, fire_signal activates the
+    /// receiver.
+    #[test]
+    fn test_switch_fires_junction() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_pawn(Color::White))
+            .set_square_type(SquareType::Switch { targets: vec![1] });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        let from = Coord { file: 3, rank: 3 };
+        board
+            .make_move(GameMove {
+                from: from.clone(),
+                move_type: MoveType::ThrowSwitch { switch: from },
+            })
+            .expect("legal throw");
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => assert_eq!(*state, 1),
+            other => panic!("junction was overwritten, got {other:?}"),
+        }
+    }
+
+    /// One switch wired to multiple receivers: all of them advance from a
+    /// single throw.
+    #[test]
+    fn test_switch_fires_multiple_targets() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_pawn(Color::White))
+            .set_square_type(SquareType::Switch {
+                targets: vec![1, 2],
+            });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+        board.grid[5][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 2,
+            state: 0,
+            branches: vec![TrackDir::S, TrackDir::W],
+        });
+
+        let from = Coord { file: 3, rank: 3 };
+        board
+            .make_move(GameMove {
+                from: from.clone(),
+                move_type: MoveType::ThrowSwitch { switch: from },
+            })
+            .expect("legal throw");
+
+        for (rank, expected_id) in [(4, 1), (5, 2)] {
+            match &board.grid[rank][3].square_type {
+                SquareType::Junction { id, state, .. } => {
+                    assert_eq!(*id, expected_id);
+                    assert_eq!(*state, 1, "junction id={id} did not advance");
+                }
+                other => panic!("expected Junction at rank={rank}, got {other:?}"),
+            }
+        }
+    }
+
+    /// State cycles modulo branches.len(). Two-branch junction fired three
+    /// times by hand: 0 → 1 → 0 → 1. Driven via `fire_signal` directly
+    /// because alternating throw-via-game-flow needs two pawns; the
+    /// dispatcher cycle is purely the receiver's concern.
+    #[test]
+    fn test_junction_cycles_modulo() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        let states_observed = (0..3)
+            .map(|_| {
+                board.fire_signal(&[1]);
+                match &board.grid[0][0].square_type {
+                    SquareType::Junction { state, .. } => *state,
+                    _ => unreachable!(),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(states_observed, vec![1, 0, 1]);
+    }
+
+    /// Gate flips open/closed each time it's targeted. Verifies the
+    /// gate-receiver arm in `activate_receiver`.
+    #[test]
+    fn test_gate_toggles_on_signal() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_pawn(Color::White))
+            .set_square_type(SquareType::Switch { targets: vec![7] });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 7,
+            open: false,
+        });
+
+        let from = Coord { file: 3, rank: 3 };
+        board
+            .make_move(GameMove {
+                from: from.clone(),
+                move_type: MoveType::ThrowSwitch { switch: from },
+            })
+            .expect("legal throw");
+
+        match &board.grid[4][3].square_type {
+            SquareType::Gate { open, .. } => assert!(*open, "gate should be open"),
+            other => panic!("expected Gate, got {other:?}"),
+        }
+    }
+
+    /// Dangling targets — IDs that no receiver claims — are silently
+    /// ignored. The editor warns at design time; runtime is inert.
+    /// Important: this must not panic, and must not corrupt any
+    /// receiver state.
+    #[test]
+    fn test_dangling_target_silently_ignored() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        // A receiver at id=1 that should remain untouched.
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board.fire_signal(&[99]);
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { id, state, .. } => {
+                assert_eq!(*id, 1);
+                assert_eq!(*state, 0, "untargeted junction must not budge");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// Plan 08 says the same numeric ID may legitimately be shared by a
+    /// Junction and a Gate (different receiver kinds disambiguate). A
+    /// single signal pulse must activate both.
+    #[test]
+    fn test_signal_fires_across_receiver_kinds_on_shared_id() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 3,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+        board.grid[5][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 3,
+            open: false,
+        });
+
+        board.fire_signal(&[3]);
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 1, "shared-ID junction did not fire");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+        match &board.grid[5][3].square_type {
+            SquareType::Gate { open, .. } => {
+                assert!(*open, "shared-ID gate did not fire");
+            }
+            other => panic!("expected Gate, got {other:?}"),
+        }
+    }
+
+    // ============================================================
+    // Plan 08 — walkability gate-blocks-pieces regression suite
+    //
+    // Latent step-1 bug: most piece generators checked `piece.is_none()`
+    // directly rather than going through `square_is_empty` (which uses
+    // `is_walkable`). Closed Gates were visual decoration. These tests
+    // lock in that closed Gates actually block.
+    // ============================================================
+
+    /// A white pawn cannot push onto a closed Gate directly in front of it.
+    #[test]
+    fn test_pawn_blocked_by_closed_gate_on_push() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 0,
+            open: false,
+        });
+
+        let from = Coord { file: 3, rank: 6 };
+        let moves = board.get_moves(&from);
+        let pushes_onto_gate = moves.iter().any(|m| {
+            matches!(&m.move_type, MoveType::MoveTo(c) if c.file == 3 && c.rank == 5)
+        });
+        assert!(!pushes_onto_gate, "pawn should not push onto a closed Gate; moves = {moves:?}");
+    }
+
+    /// A closed Gate breaks a pawn's double-push: the single-push target
+    /// is the blocker, so the double-push isn't reachable.
+    #[test]
+    fn test_pawn_double_push_blocked_by_closed_gate_in_between() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 0,
+            open: false,
+        });
+
+        let from = Coord { file: 3, rank: 6 };
+        let moves = board.get_moves(&from);
+        // Neither single-push (rank 5) nor double-push (rank 4) should appear.
+        let any_forward = moves.iter().any(|m| {
+            matches!(&m.move_type, MoveType::MoveTo(c) if c.file == 3 && (c.rank == 5 || c.rank == 4))
+        });
+        assert!(!any_forward, "closed Gate must block both single and double push; moves = {moves:?}");
+    }
+
+    /// A Rook stops at a closed Gate — doesn't slide through it and doesn't
+    /// emit a move onto it. Covers all glider-driven pieces (Bishop / Queen
+    /// / Goblin-free / King-1-move) by virtue of sharing the same code path.
+    #[test]
+    fn test_rook_slide_stops_at_closed_gate() {
+        let mut board = empty_board();
+        board.grid[3][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 0,
+            open: false,
+        });
+
+        let from = Coord { file: 0, rank: 3 };
+        let moves = board.get_moves(&from);
+
+        let reaches = |file: u8| {
+            moves.iter().any(|m| {
+                matches!(&m.move_type, MoveType::MoveTo(c) if c.file == file && c.rank == 3)
+            })
+        };
+
+        // Squares before the gate are still reachable.
+        assert!(reaches(1));
+        assert!(reaches(2));
+        // The gate itself and anything past it must NOT appear.
+        for blocked in 3..=7u8 {
+            assert!(
+                !reaches(blocked),
+                "rook should not reach file={blocked} past a closed Gate; moves = {moves:?}",
+            );
+        }
+    }
+
+    /// A Knight cannot leap onto a closed Gate. Direct check — knights
+    /// don't go through the glider.
+    #[test]
+    fn test_knight_blocked_by_closed_gate_landing() {
+        let mut board = empty_board();
+        board.grid[4][4] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        // One of the knight's L-targets at (6,5) is a closed Gate.
+        board.grid[5][6] = Square::new().set_square_type(SquareType::Gate {
+            id: 0,
+            open: false,
+        });
+
+        let from = Coord { file: 4, rank: 4 };
+        let moves = board.get_moves(&from);
+        let lands_on_gate = moves.iter().any(|m| {
+            matches!(&m.move_type, MoveType::MoveTo(c) if c.file == 6 && c.rank == 5)
+        });
+        assert!(!lands_on_gate, "knight cannot land on closed Gate; moves = {moves:?}");
+    }
+
+    /// Defense-in-depth: even if a piece's generator forgot to filter, the
+    /// safety net in `make_move_unchecked` rejects a hand-crafted move
+    /// onto a non-walkable square. Bypass `get_moves` by submitting the
+    /// raw move through `make_move`, which still runs validation first —
+    /// the candidate-list check will reject it as not in the legal set.
+    /// We use `make_move_unchecked` directly to confirm the apply-layer
+    /// guard fires.
+    #[test]
+    fn test_make_move_unchecked_rejects_landing_on_closed_gate() {
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 0,
+            open: false,
+        });
+
+        let bogus = GameMove {
+            from: Coord { file: 3, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+        };
+        let err = board.make_move_unchecked(bogus).expect_err("must reject");
+        assert!(
+            err.contains("not walkable"),
+            "expected walkability rejection, got: {err}",
+        );
+    }
+
+    /// Brainrot scopes to piece movement (plan 04), not infrastructure.
+    /// A Junction sitting inside a Skibidi's brainrot aura must still
+    /// respond to signals fired by a Switch outside the aura — signals
+    /// are abstract wiring events, not piece actions. Locks in the
+    /// design decision documented on `Board::activate_receiver`.
+    #[test]
+    fn test_brainrotted_junction_still_receives_signal() {
+        use crate::board::square::TrackDir;
+
+        let mut board = empty_board();
+        // Place a Skibidi at (3,3) phase 2 (radius 1) so the brainrot
+        // aura covers the 4-neighbourhood, including (4,3).
+        board.grid[3][3] = Square::new().set_piece(PieceType::Skibidi(Skibidi {
+            color: Color::White,
+            phase: 2,
+        }));
+        // Junction inside the aura.
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+        // recalc_brainrot paints the aura on the surrounding squares.
+        board.recalc_brainrot();
+        // Sanity: the junction's square is indeed brainrotted.
+        assert!(
+            board.grid[4][3]
+                .conditions
+                .contains(&SquareCondition::Brainrot),
+            "test setup: junction square should be brainrotted",
+        );
+
+        board.fire_signal(&[1]);
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 1, "brainrot must not block signal activation");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    // ============================================================
+    // Plan 08 step 4 — PressurePlate fires on landing
+    // ============================================================
+
+    /// Pawn moves onto a PressurePlate; the plate fires its targets as
+    /// part of the move, advancing the wired junction.
+    #[test]
+    fn test_pressure_plate_fires_on_step() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        // White pawn at (3,6) pushes one step to (3,5), which is a plate.
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 6 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+            })
+            .expect("legal pawn push onto plate");
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 1, "plate must fire wired junction");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// A plate restricted to `OnlyColor(White)` does NOT fire when a
+    /// black piece settles on it.
+    #[test]
+    fn test_pressure_plate_color_restriction_blocks_wrong_color() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.grid[1][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[2][3] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::OnlyColor(Color::White),
+        });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 1 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 2 }),
+            })
+            .expect("legal pawn push onto color-restricted plate");
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(
+                    *state, 0,
+                    "OnlyColor(White) plate must not fire for a black piece",
+                );
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// Positive case for the color trigger: `OnlyColor(White)` fires
+    /// when a white piece lands.
+    #[test]
+    fn test_pressure_plate_color_restriction_fires_for_match() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::OnlyColor(Color::White),
+        });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 6 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+            })
+            .expect("legal push");
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, .. } => assert_eq!(*state, 1),
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// Castle moves two pieces — both their landings should fire plates.
+    /// Place a plate where the castle-rook lands (file 5, kingside) and
+    /// verify it fires when white castles kingside.
+    #[test]
+    fn test_castle_rook_landing_fires_plate() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        // Standard castle setup on rank 7 (white back rank).
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // PressurePlate at the rook's kingside-castle landing (file 5).
+        board.grid[7][5] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 7 },
+                move_type: MoveType::Castle {
+                    side: CastleSide::Kingside,
+                },
+            })
+            .expect("legal kingside castle");
+
+        match &board.grid[0][0].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 1, "rook's landing on plate must fire");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// A piece that *passes over* but does not *settle on* a plate must
+    /// not fire it. Verified via a sliding rook that lands beyond a plate.
+    #[test]
+    fn test_pressure_plate_does_not_fire_when_piece_only_passes() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+
+        let mut board = empty_board();
+        board.grid[3][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // Plate at (3, file=4); rook will slide past it to (3, file=7).
+        board.grid[3][4] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 0, rank: 3 },
+                move_type: MoveType::MoveTo(Coord { file: 7, rank: 3 }),
+            })
+            .expect("legal slide past plate");
+
+        match &board.grid[0][0].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 0, "plate fires on settle, not pass-through");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// A passenger exiting a carrier onto a PressurePlate must fire the
+    /// plate — the passenger is the piece that "settles" on the tile.
+    /// Locks in `collect_landings`' `PieceInCarrier { MoveTo }` branch.
+    #[test]
+    fn test_pressure_plate_fires_when_passenger_exits_onto_it() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        // White Bus at white's starting rank with a Pawn passenger. The
+        // Bus's passenger-move-gen places the pawn at the Bus's coord and
+        // asks for its moves — white pawn at (3,6) can single-push to (3,5).
+        let bus_with_pawn = PieceType::Bus(Bus {
+            color: Color::White,
+            pieces: vec![PieceType::new_pawn(Color::White)],
+        });
+        board.grid[6][3] = Square::new().set_piece(bus_with_pawn);
+        // Plate at (3,5) wired to junction id=1.
+        board.grid[5][3] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![1],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        // Junction parked off-path so it doesn't interfere with movement.
+        board.grid[0][0] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![TrackDir::N, TrackDir::E],
+        });
+
+        // Passenger exits onto the plate.
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 6 },
+                move_type: MoveType::PieceInCarrier {
+                    piece_index: 0,
+                    move_type: Arc::new(MoveType::MoveTo(Coord { file: 3, rank: 5 })),
+                },
+            })
+            .expect("legal passenger exit");
+
+        match &board.grid[0][0].square_type {
+            SquareType::Junction { state, .. } => {
+                assert_eq!(*state, 1, "plate must fire for passenger settling on it");
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+
+        // Sanity: the pawn is now on the plate, the bus has no passengers.
+        match &board.grid[5][3].piece {
+            Some(PieceType::Pawn(p)) => assert_eq!(p.color, Color::White),
+            other => panic!("expected white Pawn on plate, got {other:?}"),
+        }
+        match &board.grid[6][3].piece {
+            Some(PieceType::Bus(b)) => assert!(b.pieces.is_empty(), "bus should be empty"),
+            other => panic!("expected empty Bus, got {other:?}"),
+        }
+    }
+
+    /// Defensive: a plate isn't itself a chainable receiver, but the
+    /// dispatcher's bounded-propagation rule still matters — a plate
+    /// firing a Gate must not cause that Gate to in turn re-emit. Today
+    /// Gates don't emit at all (only Switches and Plates do), so the
+    /// "no cascade" property holds trivially. This test locks that in.
+    #[test]
+    fn test_pressure_plate_no_propagation_cascade() {
+        use crate::board::square::PressureTrigger;
+
+        let mut board = empty_board();
+        board.grid[6][3] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][3] = Square::new().set_square_type(SquareType::PressurePlate {
+            targets: vec![7],
+            fires_for: PressureTrigger::AnyPiece,
+        });
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Gate {
+            id: 7,
+            open: false,
+        });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 6 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 5 }),
+            })
+            .expect("legal pawn push");
+
+        // The gate flipped open exactly once.
+        match &board.grid[4][3].square_type {
+            SquareType::Gate { open, .. } => assert!(*open, "gate must have toggled open"),
+            other => panic!("expected Gate, got {other:?}"),
+        }
+        // The plate itself is still a plate (didn't get re-consumed) and
+        // didn't double-fire (gate isn't somewhere mid-toggle).
+        match &board.grid[5][3].square_type {
+            SquareType::PressurePlate { .. } => {} // ok
+            other => panic!("plate disappeared, got {other:?}"),
+        }
+    }
+
+    /// Defensive: a Junction with an empty `branches` list must not panic
+    /// when its ID is signaled (modulo-by-zero territory). The plan
+    /// flagged this as a latent risk in step 1; step 3's `activate_receiver`
+    /// guards against it.
+    #[test]
+    fn test_junction_with_empty_branches_does_not_panic() {
+        let mut board = empty_board();
+        board.grid[4][3] = Square::new().set_square_type(SquareType::Junction {
+            id: 1,
+            state: 0,
+            branches: vec![],
+        });
+
+        // Must not panic; state stays put.
+        board.fire_signal(&[1]);
+
+        match &board.grid[4][3].square_type {
+            SquareType::Junction { state, branches, .. } => {
+                assert_eq!(*state, 0);
+                assert!(branches.is_empty());
+            }
+            other => panic!("expected Junction, got {other:?}"),
+        }
+    }
+
+    /// A malformed `OPEN` value (anything other than 0 or 1) must not
+    /// silently produce an open Gate — that would mean a typo lets a piece
+    /// walk through what should have been a blocker. The parser now coerces
+    /// the suspect input to a *closed* Gate, which is the safer fallback
+    /// (and visibly broken to anyone watching the board).
+    #[test]
+    fn test_signal_gate_bad_open_value_falls_back_to_closed() {
+        let board = fen_to_board("(T=GATE,ID=3,OPEN=2)7/8/8/8/8/8/8/8 w KQkq -");
+        match &board.grid[0][0].square_type {
+            SquareType::Gate { id, open } => {
+                assert_eq!(*id, 3);
+                assert!(!*open, "malformed OPEN should fall back to closed");
+            }
+            other => panic!("expected Gate, got {other:?}"),
+        }
+    }
+
     // ============================================================
     // Pass 1 regression tests — critical-bug coverage
     // ============================================================

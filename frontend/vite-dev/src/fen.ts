@@ -200,6 +200,29 @@ function splitKeyValue(field: string): [string, string] {
 // Parse ONE square from FEN
 // ----------------------------------------------
 
+/// Engine-recognized `T=` values. Anything outside this set is treated as
+/// unknown and parses to `STANDARD` with a warning.
+const KNOWN_SQUARE_TYPES = new Set<SquareType>([
+  "STANDARD",
+  "TURRET",
+  "VENT",
+  "SWITCH",
+  "JUNCTION",
+  "GATE",
+  "PLATE",
+]);
+
+/// Variant-payload keys we know about but the editor doesn't yet model
+/// individually. We round-trip them verbatim via `Square.extraFields`.
+const PAYLOAD_KEYS = new Set<string>([
+  "ID",
+  "STATE",
+  "BRANCHES",
+  "TARGETS",
+  "OPEN",
+  "FIRES",
+]);
+
 export function fenToSquare(fen: string): Square {
   // Empty or "()"
   if (fen === "" || fen === "()") {
@@ -216,6 +239,7 @@ export function fenToSquare(fen: string): Square {
     let piece: string | null = null;
     let squareType: SquareType = "STANDARD";
     const conditions: string[] = [];
+    const extraFields: Record<string, string> = {};
 
     for (const field of fields) {
       const [key, value] = splitKeyValue(field);
@@ -223,12 +247,13 @@ export function fenToSquare(fen: string): Square {
       switch (key) {
         case "P":
           piece = value;
-          console.log("Parsed piece:", piece, "from", field);
           break;
 
         case "T":
-          if (value === "TURRET" || value === "VENT" || value === "STANDARD") {
-            squareType = value;
+          if (KNOWN_SQUARE_TYPES.has(value as SquareType)) {
+            squareType = value as SquareType;
+          } else {
+            console.warn(`Unknown square type "${value}"; treating as STANDARD`);
           }
           break;
 
@@ -237,11 +262,19 @@ export function fenToSquare(fen: string): Square {
           break;
 
         default:
-          console.warn("Unknown FEN square field:", field);
+          if (PAYLOAD_KEYS.has(key)) {
+            // Known variant-payload field — preserve verbatim so the FEN
+            // round-trips even though the editor doesn't render it yet.
+            extraFields[key] = value;
+          } else {
+            console.warn("Unknown FEN square field:", field);
+          }
       }
     }
 
-    return { piece, squareType, conditions };
+    const sq: Square = { piece, squareType, conditions };
+    if (Object.keys(extraFields).length > 0) sq.extraFields = extraFields;
+    return sq;
   }
 
   // ------------------------------------------
@@ -258,10 +291,24 @@ export function fenToSquare(fen: string): Square {
 // Convert square → FEN
 // ----------------------------------------------
 
+/// Canonical write order for variant-payload fields. Matches the engine
+/// encoder so server↔client FEN strings stay byte-identical when nothing
+/// else has changed. Parsers on both sides are order-agnostic but
+/// determinism makes diffing easier.
+const PAYLOAD_FIELD_ORDER: readonly string[] = [
+  "ID",
+  "STATE",
+  "BRANCHES",
+  "TARGETS",
+  "OPEN",
+  "FIRES",
+];
+
 export function squareToFEN(square: Square): string {
   const isStandardPiece =
     square.squareType === "STANDARD" &&
     square.conditions.length === 0 &&
+    (!square.extraFields || Object.keys(square.extraFields).length === 0) &&
     square.piece !== null &&
     square.piece.length === 1;
 
@@ -275,6 +322,14 @@ export function squareToFEN(square: Square): string {
 
   if (square.piece) parts.push(`P=${square.piece}`);
   if (square.squareType !== "STANDARD") parts.push(`T=${square.squareType}`);
+
+  if (square.extraFields) {
+    for (const key of PAYLOAD_FIELD_ORDER) {
+      const v = square.extraFields[key];
+      if (v !== undefined) parts.push(`${key}=${v}`);
+    }
+  }
+
   for (const c of square.conditions) parts.push(`C=${c}`);
 
   return `(${parts.join(",")})`;

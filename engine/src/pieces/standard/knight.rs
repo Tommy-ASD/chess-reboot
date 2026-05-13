@@ -33,17 +33,26 @@ impl Piece for Knight {
         for (df, dr) in &knight_moves {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
-            if board.in_bounds(new_file, new_rank) {
-                let coord = Coord {
-                    file: new_file as u8,
-                    rank: new_rank as u8,
-                };
-                let game_move = GameMove {
-                    from: from.clone(),
-                    move_type: MoveType::MoveTo(coord),
-                };
-                moves.push(game_move);
+            if !board.in_bounds(new_file, new_rank) {
+                continue;
             }
+            let coord = Coord {
+                file: new_file as u8,
+                rank: new_rank as u8,
+            };
+            // Plan 08: skip non-walkable destinations (closed Gate / Turret / Vent).
+            // The general filter handles same-color targets later.
+            if !board
+                .get_square_at(&coord)
+                .map(|s| s.square_type.is_walkable())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            moves.push(GameMove {
+                from: from.clone(),
+                move_type: MoveType::MoveTo(coord),
+            });
         }
         moves
     }

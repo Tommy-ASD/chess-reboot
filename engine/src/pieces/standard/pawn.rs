@@ -95,13 +95,17 @@ impl Piece for Pawn {
             };
             if let Some(square) = board.get_square_at(&forward_coord) {
                 trace!(?square, ?forward_coord, "forward square");
-                if square.piece.is_none() {
-                    trace!("forward square empty, pushing move");
+                // Plan 08: a closed Gate (or Turret/Vent) is non-walkable;
+                // the pawn can't push onto it even though `piece.is_none()`.
+                if square.piece.is_none() && square.square_type.is_walkable() {
+                    trace!("forward square empty + walkable, pushing move");
                     self.push_advance_or_promotion(forward_coord.clone(), from, board, &mut moves);
 
                     // Two squares forward from starting position. Double push
                     // never coincides with a promotion rank, so no promotion
-                    // handling is needed here.
+                    // handling is needed here. The intermediate square is
+                    // already known walkable from the single-push check; we
+                    // still need to verify the target square is walkable too.
                     let starting_rank = self.starting_rank(board);
                     if from.rank == starting_rank {
                         let two_forward_coord = Coord {
@@ -109,7 +113,9 @@ impl Piece for Pawn {
                             rank: (new_rank + direction) as u8,
                         };
                         if let Some(two_square) = board.get_square_at(&two_forward_coord) {
-                            if two_square.piece.is_none() {
+                            if two_square.piece.is_none()
+                                && two_square.square_type.is_walkable()
+                            {
                                 let game_move = GameMove {
                                     from: from.clone(),
                                     move_type: MoveType::MoveTo(two_forward_coord.clone()),
@@ -135,6 +141,13 @@ impl Piece for Pawn {
                 rank: new_rank as u8,
             };
             if let Some(square) = board.get_square_at(&capture_coord) {
+                // Plan 08: even a capture can't land on a non-walkable
+                // square. (A piece couldn't legally be sitting on a closed
+                // Gate in the first place, but be defensive against
+                // hand-crafted FENs.)
+                if !square.square_type.is_walkable() {
+                    continue;
+                }
                 // Ordinary diagonal capture: enemy piece sitting on the square.
                 if let Some(piece) = &square.piece {
                     if piece.get_color() != self.color {

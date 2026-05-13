@@ -6,6 +6,7 @@
 import { initBoardResize, setBoardDimensions } from "./board_size";
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
+import { squareIconSvg } from "./signal_icons";
 import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
@@ -56,8 +57,17 @@ function renderBoard(fen: string) {
         if (square_data.conditions.includes("BRAINROT")) {
           square.classList.add("cond-brainrot");
         }
-        if (square_data.squareType === "VENT") {
-          square.classList.add("type-vent");
+        // Plan 08: substrate types render with a per-type accent border
+        // (via `type-{lowercase}`) plus an SVG icon overlay.
+        if (square_data.squareType !== "STANDARD") {
+          square.classList.add(`type-${square_data.squareType.toLowerCase()}`);
+          const svg = squareIconSvg(square_data);
+          if (svg) {
+            const wrap = document.createElement("div");
+            wrap.className = "square-icon";
+            wrap.innerHTML = svg;
+            square.appendChild(wrap);
+          }
         }
 
       }
@@ -166,6 +176,10 @@ function renderSpecialActions(moves: GameMove[]) {
     switch (m.move_type.kind) {
       case "PhaseShift":
         li.textContent = "Increase Brainrot Radius (PhaseShift)";
+        break;
+
+      case "ThrowSwitch":
+        li.textContent = "Throw Switch";
         break;
 
       default:

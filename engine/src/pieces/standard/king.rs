@@ -59,8 +59,13 @@ impl King {
                     Some(PieceType::Rook(r)) if r.color == self.color
                 )
             };
+        // Plan 08: a castle path crossing a non-walkable square
+        // (e.g. closed Gate) is blocked. Pieceless ≠ walkable.
         let empty = |board: &Board, sq: &Coord| -> bool {
-            matches!(board.get_square_at(sq), Some(s) if s.piece.is_none())
+            matches!(
+                board.get_square_at(sq),
+                Some(s) if s.piece.is_none() && s.square_type.is_walkable()
+            )
         };
 
         if can_ks {

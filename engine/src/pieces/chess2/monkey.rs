@@ -163,6 +163,12 @@ impl Monkey {
             let Some(jump_square) = board.get_square_at(&jump_coord) else {
                 continue;
             };
+            // Plan 08: the Monkey can't land on non-walkable terrain (closed
+            // Gate / Turret / Vent) — neither as a jump landing nor as a
+            // capture target.
+            if !jump_square.square_type.is_walkable() {
+                continue;
+            }
 
             if jump_square.piece.is_none() {
                 moves.push(GameMove {

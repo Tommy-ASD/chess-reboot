@@ -113,6 +113,11 @@ impl Piece for Skibidi {
             let Some(square) = board.get_square_at(&coord) else {
                 continue;
             };
+            // Plan 08: non-walkable destinations (closed Gate / Turret / Vent)
+            // are off-limits regardless of what's on them.
+            if !square.square_type.is_walkable() {
+                continue;
+            }
             // Spec: cannot take other pieces, but can take other Skibidis.
             // Empty squares are allowed; non-empty squares only if the
             // occupant is an enemy Skibidi. The `PieceType::get_moves`
@@ -188,7 +193,8 @@ impl Piece for Skibidi {
             | MoveType::PieceInCarrier { .. }
             | MoveType::Promotion { .. }
             | MoveType::Castle { .. }
-            | MoveType::EnPassant { .. } => {}
+            | MoveType::EnPassant { .. }
+            | MoveType::ThrowSwitch { .. } => {}
         }
     }
 }

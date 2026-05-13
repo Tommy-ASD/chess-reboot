@@ -62,8 +62,16 @@
     </aside>
 
     <div id="board-column">
-      <div id="board"></div>
+      <div class="board-wrapper">
+        <div id="board"></div>
+        <svg id="wiring-overlay" class="wiring-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
       <p class="board-hint">Click a square to apply the active brush.</p>
+
+      <div class="state-section" id="inspector-section">
+        <h3>Signal inspector</h3>
+        <div id="inspector"></div>
+      </div>
     </div>
 
     <aside id="state-panel">

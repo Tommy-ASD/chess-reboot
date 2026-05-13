@@ -16,7 +16,32 @@ import {
   type BoardFlags,
   type Side,
 } from "./fen";
-import type { Square, SquareType } from "./variables";
+import { squareIconSvg, squareTypeIconByType } from "./signal_icons";
+import {
+  ALL_PRESSURE_TRIGGERS,
+  ALL_TRACK_DIRS,
+  getEmitterTargets,
+  getGateId,
+  getGateOpen,
+  getJunctionBranches,
+  getJunctionId,
+  getJunctionState,
+  getPlateTrigger,
+  getReceiverId,
+  isEmitter,
+  isReceiver,
+  nextSignalId,
+  setEmitterTargets,
+  setGateId,
+  setGateOpen,
+  setJunctionBranches,
+  setJunctionId,
+  setJunctionState,
+  setPlateTrigger,
+  toggleEmitterTarget,
+  type PressureTrigger,
+} from "./signal_payload";
+import type { Coord, Square, SquareType } from "./variables";
 
 // ---------------------------
 // Brush model
@@ -29,10 +54,19 @@ type Brush =
   | { kind: "erase-piece" }
   | { kind: "erase-conditions" }
   | { kind: "erase-type" }
-  | { kind: "erase-all" };
+  | { kind: "erase-all" }
+  /// Plan-08 inspect/wire brush. Clicking a substrate square shows its
+  /// details panel; clicking an emitter then clicking receivers toggles
+  /// them in/out of the emitter's targets.
+  | { kind: "inspect" };
 
 let activeBrush: Brush | null = null;
 let activeBrushButton: HTMLButtonElement | null = null;
+
+/// Coord currently under inspection (rendered with `.selected-inspect`).
+/// Null = nothing selected. When set to an emitter, the renderer also
+/// rings its wired receivers; clicking other receivers toggles them.
+let inspectedSquare: Coord | null = null;
 
 const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
 const EMPTY_FEN = "8/8/8/8/8/8/8/8 w - -";
@@ -47,7 +81,27 @@ let flags: BoardFlags = { ...DEFAULT_FLAGS };
 const WHITE_PIECES = ["K", "Q", "R", "B", "N", "P"];
 const BLACK_PIECES = ["k", "q", "r", "b", "n", "p"];
 const CUSTOM_PIECES = ["G", "g", "BUS", "bus"];
-const SQUARE_TYPES: SquareType[] = ["STANDARD", "VENT", "TURRET"];
+const SQUARE_TYPES: SquareType[] = [
+  "STANDARD",
+  "VENT",
+  "TURRET",
+  "SWITCH",
+  "JUNCTION",
+  "GATE",
+  "PLATE",
+];
+
+/// Lower-cased class suffix per square type so render code can do
+/// `cell.classList.add(`type-${TYPE_CLASS[sq.squareType]}`)` without a
+/// switch each time. Standard is excluded — it has no class.
+const TYPE_CLASS: Record<Exclude<SquareType, "STANDARD">, string> = {
+  VENT: "vent",
+  TURRET: "turret",
+  SWITCH: "switch",
+  JUNCTION: "junction",
+  GATE: "gate",
+  PLATE: "plate",
+};
 const CONDITIONS = ["FROZEN", "BRAINROT"];
 
 const PRESETS: { name: string; fen: string }[] = [
@@ -56,6 +110,10 @@ const PRESETS: { name: string; fen: string }[] = [
   { name: "Goblin test", fen: "(P=g(H=0-0))nbqkbn(P=g(H=7-0))/pppppppp/8/8/8/8/PPPPPPPP/(P=G(H=0-7))NBQKBN(P=G(H=7-7)) w KQkq -" },
   { name: "Vent test", fen: "(T=VENT)7/8/8/8/8/8/8/8 w - -" },
   { name: "Frozen test", fen: "(C=FROZEN)7/8/8/8/8/8/8/8 w - -" },
+  {
+    name: "Signal substrate test",
+    fen: "(T=SWITCH,TARGETS=(3,7))(T=JUNCTION,ID=3,STATE=0,BRANCHES=(N,E))(T=GATE,ID=7,OPEN=0)(T=PLATE,TARGETS=(3),FIRES=B)4/8/8/8/8/8/8/8 w - -",
+  },
 ];
 
 // ---------------------------
@@ -77,6 +135,7 @@ function describeBrush(b: Brush): string {
     case "erase-conditions": return "Erase conditions";
     case "erase-type":     return "Reset square type";
     case "erase-all":      return "Erase everything on square";
+    case "inspect":        return "Inspect / wire signal squares";
   }
 }
 
@@ -102,6 +161,25 @@ function applyBrush(rank: number, file: number) {
       break;
     case "type":
       sq.squareType = activeBrush.squareType;
+      delete sq.extraFields;
+      // Auto-populate payload defaults so freshly-painted substrate
+      // squares are immediately well-formed and the user only has to
+      // tweak what they want to change.
+      if (activeBrush.squareType === "JUNCTION") {
+        setJunctionId(sq, nextSignalId(board));
+        setJunctionState(sq, 0);
+        // Default to a 4-way junction so the SVG renders something useful;
+        // the user can prune via the details panel.
+        setJunctionBranches(sq, [...ALL_TRACK_DIRS]);
+      } else if (activeBrush.squareType === "GATE") {
+        setGateId(sq, nextSignalId(board));
+        setGateOpen(sq, true);
+      } else if (activeBrush.squareType === "SWITCH") {
+        setEmitterTargets(sq, []);
+      } else if (activeBrush.squareType === "PLATE") {
+        setEmitterTargets(sq, []);
+        setPlateTrigger(sq, "ANY");
+      }
       break;
     case "condition": {
       const c = activeBrush.condition;
@@ -118,12 +196,31 @@ function applyBrush(rank: number, file: number) {
       break;
     case "erase-type":
       sq.squareType = "STANDARD";
+      delete sq.extraFields;
       break;
     case "erase-all":
       sq.piece = null;
       sq.conditions = [];
       sq.squareType = "STANDARD";
+      delete sq.extraFields;
       break;
+    case "inspect": {
+      // Two-mode: if an emitter is currently inspected AND the user
+      // clicks a receiver, toggle the receiver's ID in the emitter's
+      // targets. Otherwise, just inspect the clicked square.
+      const inspected = inspectedSquare
+        ? board[inspectedSquare.rank]?.[inspectedSquare.file] ?? null
+        : null;
+      if (inspected && isEmitter(inspected) && isReceiver(sq)) {
+        const rid = getReceiverId(sq);
+        if (rid !== null) {
+          toggleEmitterTarget(inspected, rid);
+        }
+      } else {
+        inspectedSquare = { file, rank };
+      }
+      break;
+    }
   }
 
   syncFromState();
@@ -162,7 +259,32 @@ function renderBoard() {
       }
       if (sq.conditions.includes("FROZEN")) cell.classList.add("cond-frozen");
       if (sq.conditions.includes("BRAINROT")) cell.classList.add("cond-brainrot");
-      if (sq.squareType === "VENT") cell.classList.add("type-vent");
+      if (sq.squareType !== "STANDARD") {
+        cell.classList.add(`type-${TYPE_CLASS[sq.squareType]}`);
+        const svg = squareIconSvg(sq);
+        if (svg) {
+          const iconWrap = document.createElement("div");
+          iconWrap.className = "square-icon";
+          iconWrap.innerHTML = svg;
+          cell.appendChild(iconWrap);
+        }
+      }
+
+      // Inspect-mode highlights: the currently-inspected square gets a
+      // ring; if it's an emitter, every receiver whose ID is in its
+      // targets gets a "wired" ring.
+      if (inspectedSquare && inspectedSquare.rank === rank && inspectedSquare.file === file) {
+        cell.classList.add("selected-inspect");
+      } else if (inspectedSquare) {
+        const insp = board[inspectedSquare.rank]?.[inspectedSquare.file];
+        if (insp && isEmitter(insp) && isReceiver(sq)) {
+          const targets = getEmitterTargets(insp);
+          const rid = getReceiverId(sq);
+          if (rid !== null && targets.includes(rid)) {
+            cell.classList.add("wired-target");
+          }
+        }
+      }
 
       cell.onclick = () => applyBrush(rank, file);
       boardEl.appendChild(cell);
@@ -177,6 +299,8 @@ function syncFromState() {
     serializeFullFEN(board, flags);
   syncFlagsToControls();
   renderBoard();
+  renderInspector();
+  renderWiringOverlay();
 }
 
 function syncFlagsToControls() {
@@ -223,25 +347,299 @@ function loadFEN(fen: string) {
   try {
     board = parseFEN(fen);
     flags = parseFENFlags(fen);
+    inspectedSquare = null;
     renderBoard();
     syncFlagsToControls();
+    renderInspector();
+    renderWiringOverlay();
   } catch (e) {
     console.warn("Invalid FEN ignored:", e);
   }
 }
 
 // ---------------------------
+// Inspector panel (substrate payload editor)
+// ---------------------------
+
+/// Render the details panel for the currently-inspected square. If
+/// nothing is inspected (or the inspected square is Standard / has no
+/// payload), the panel shows a short usage hint.
+function renderInspector() {
+  const host = document.getElementById("inspector");
+  if (!host) return;
+  host.innerHTML = "";
+
+  if (!inspectedSquare) {
+    host.appendChild(hint(
+      "Pick the Inspect tool, then click a Switch / Junction / Gate / Plate to edit it.",
+    ));
+    return;
+  }
+  const { rank, file } = inspectedSquare;
+  const sq = board[rank]?.[file];
+  if (!sq) return;
+
+  const coordLabel = document.createElement("div");
+  coordLabel.className = "inspector-coord";
+  coordLabel.textContent = `(${file}, ${rank}) — ${sq.squareType}`;
+  host.appendChild(coordLabel);
+
+  switch (sq.squareType) {
+    case "SWITCH":
+      host.appendChild(renderTargetsEditor(sq, "SWITCH"));
+      host.appendChild(hint(
+        "With this Switch selected, click any Junction or Gate to wire / un-wire it.",
+      ));
+      break;
+    case "JUNCTION":
+      host.appendChild(renderJunctionEditor(sq));
+      break;
+    case "GATE":
+      host.appendChild(renderGateEditor(sq));
+      break;
+    case "PLATE":
+      host.appendChild(renderTargetsEditor(sq, "PLATE"));
+      host.appendChild(renderPlateTriggerEditor(sq));
+      host.appendChild(hint(
+        "With this Plate selected, click any Junction or Gate to wire / un-wire it.",
+      ));
+      break;
+    default:
+      host.appendChild(hint(`${sq.squareType} squares have no editable payload.`));
+  }
+}
+
+function hint(text: string): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "inspector-hint";
+  p.textContent = text;
+  return p;
+}
+
+function renderTargetsEditor(sq: Square, kind: "SWITCH" | "PLATE"): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+  const label = document.createElement("label");
+  label.textContent = "Targets (signal IDs):";
+  wrap.appendChild(label);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "e.g. 1,3,7";
+  input.value = getEmitterTargets(sq).join(",");
+  input.addEventListener("change", () => {
+    const ids = input.value
+      .split(",")
+      .map(x => Number.parseInt(x.trim(), 10))
+      .filter(n => Number.isFinite(n) && n >= 0);
+    setEmitterTargets(sq, ids);
+    syncFromState();
+  });
+  wrap.appendChild(input);
+  void kind; // both kinds use the same TARGETS shape
+  return wrap;
+}
+
+function renderJunctionEditor(sq: Square): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+
+  wrap.appendChild(numericField("ID", getJunctionId(sq), v => {
+    setJunctionId(sq, v);
+    syncFromState();
+  }));
+  wrap.appendChild(numericField("State", getJunctionState(sq), v => {
+    setJunctionState(sq, v);
+    syncFromState();
+  }));
+
+  const branchesLabel = document.createElement("div");
+  branchesLabel.className = "inspector-sublabel";
+  branchesLabel.textContent = "Branches:";
+  wrap.appendChild(branchesLabel);
+
+  const current = getJunctionBranches(sq);
+  const branchRow = document.createElement("div");
+  branchRow.className = "inspector-branches";
+  for (const dir of ALL_TRACK_DIRS) {
+    const btn = document.createElement("button");
+    btn.className = "branch-toggle";
+    btn.textContent = dir;
+    if (current.includes(dir)) btn.classList.add("on");
+    btn.onclick = () => {
+      const next = getJunctionBranches(sq);
+      const idx = next.indexOf(dir);
+      if (idx === -1) next.push(dir);
+      else next.splice(idx, 1);
+      setJunctionBranches(sq, next);
+      syncFromState();
+    };
+    branchRow.appendChild(btn);
+  }
+  wrap.appendChild(branchRow);
+
+  return wrap;
+}
+
+function renderGateEditor(sq: Square): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+
+  wrap.appendChild(numericField("ID", getGateId(sq), v => {
+    setGateId(sq, v);
+    syncFromState();
+  }));
+
+  const row = document.createElement("label");
+  row.className = "inspector-toggle";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = getGateOpen(sq);
+  cb.addEventListener("change", () => {
+    setGateOpen(sq, cb.checked);
+    syncFromState();
+  });
+  row.appendChild(cb);
+  row.append(" Open");
+  wrap.appendChild(row);
+
+  return wrap;
+}
+
+function renderPlateTriggerEditor(sq: Square): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+  const label = document.createElement("div");
+  label.className = "inspector-sublabel";
+  label.textContent = "Fires for:";
+  wrap.appendChild(label);
+
+  const current = getPlateTrigger(sq);
+  const row = document.createElement("div");
+  row.className = "inspector-branches";
+  for (const trig of ALL_PRESSURE_TRIGGERS) {
+    const btn = document.createElement("button");
+    btn.className = "branch-toggle";
+    btn.textContent = triggerLabel(trig);
+    if (trig === current) btn.classList.add("on");
+    btn.onclick = () => {
+      setPlateTrigger(sq, trig);
+      syncFromState();
+    };
+    row.appendChild(btn);
+  }
+  wrap.appendChild(row);
+  return wrap;
+}
+
+function triggerLabel(trig: PressureTrigger): string {
+  switch (trig) {
+    case "ANY": return "Any";
+    case "W":   return "White";
+    case "B":   return "Black";
+  }
+}
+
+function numericField(label: string, value: number, onCommit: (v: number) => void): HTMLElement {
+  const row = document.createElement("label");
+  row.className = "inspector-field";
+  const text = document.createElement("span");
+  text.textContent = `${label}: `;
+  row.appendChild(text);
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.value = String(value);
+  input.addEventListener("change", () => {
+    const n = Number.parseInt(input.value, 10);
+    if (Number.isFinite(n) && n >= 0) onCommit(n);
+  });
+  row.appendChild(input);
+  return row;
+}
+
+// ---------------------------
+// Wiring overlay (SVG over board)
+// ---------------------------
+
+/// Redraw the SVG overlay that shows emitter→receiver wires. Only drawn
+/// for the currently-inspected emitter (otherwise the board gets noisy).
+function renderWiringOverlay() {
+  const overlay = document.getElementById("wiring-overlay") as SVGSVGElement | null;
+  if (!overlay) return;
+  while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
+
+  if (!inspectedSquare) return;
+  const insp = board[inspectedSquare.rank]?.[inspectedSquare.file];
+  if (!insp || !isEmitter(insp)) return;
+
+  const cells = document.querySelectorAll<HTMLElement>("#board .square");
+  const cols = board[0]?.length ?? 0;
+  if (cols === 0) return;
+  const boardRect = (document.getElementById("board") as HTMLElement).getBoundingClientRect();
+
+  // viewBox = pixel coords relative to the board origin.
+  overlay.setAttribute("viewBox", `0 0 ${boardRect.width} ${boardRect.height}`);
+  overlay.style.width = `${boardRect.width}px`;
+  overlay.style.height = `${boardRect.height}px`;
+
+  const srcIdx = inspectedSquare.rank * cols + inspectedSquare.file;
+  const srcCenter = cellCenter(cells[srcIdx], boardRect);
+
+  const targets = getEmitterTargets(insp);
+  for (let r = 0; r < board.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      const sq = board[r][c];
+      if (!isReceiver(sq)) continue;
+      const rid = getReceiverId(sq);
+      if (rid === null || !targets.includes(rid)) continue;
+      const destIdx = r * cols + c;
+      const destCenter = cellCenter(cells[destIdx], boardRect);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", String(srcCenter.x));
+      line.setAttribute("y1", String(srcCenter.y));
+      line.setAttribute("x2", String(destCenter.x));
+      line.setAttribute("y2", String(destCenter.y));
+      overlay.appendChild(line);
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", String(destCenter.x));
+      dot.setAttribute("cy", String(destCenter.y));
+      dot.setAttribute("r", "4");
+      overlay.appendChild(dot);
+    }
+  }
+}
+
+function cellCenter(cell: HTMLElement | undefined, boardRect: DOMRect): { x: number; y: number } {
+  if (!cell) return { x: 0, y: 0 };
+  const r = cell.getBoundingClientRect();
+  return {
+    x: r.left - boardRect.left + r.width / 2,
+    y: r.top - boardRect.top + r.height / 2,
+  };
+}
+
+// ---------------------------
 // Build palettes
 // ---------------------------
 
-function makeBrushButton(label: string, brush: Brush, opts: { glyph?: string; img?: string } = {}): HTMLButtonElement {
+function makeBrushButton(
+  label: string,
+  brush: Brush,
+  opts: { glyph?: string; img?: string; svg?: string; accent?: string } = {},
+): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = "brush-btn";
+  if (opts.accent) btn.style.setProperty("--brush-accent", opts.accent);
   if (opts.img) {
     const img = document.createElement("img");
     img.src = opts.img;
     img.className = "brush-img";
     btn.appendChild(img);
+  } else if (opts.svg) {
+    const wrap = document.createElement("span");
+    wrap.className = "brush-svg";
+    wrap.innerHTML = opts.svg;
+    btn.appendChild(wrap);
   } else {
     const span = document.createElement("span");
     span.className = "brush-glyph";
@@ -255,6 +653,18 @@ function makeBrushButton(label: string, brush: Brush, opts: { glyph?: string; im
   btn.onclick = () => setActiveBrush(brush, btn);
   return btn;
 }
+
+/// Accent color per substrate type — kept in lockstep with the matching
+/// `.type-*` rules in style.css so the palette previews match the board.
+const TYPE_ACCENT: Record<SquareType, string> = {
+  STANDARD: "rgba(180, 180, 180, 0.7)",
+  TURRET:   "rgba(180, 90, 30, 0.95)",
+  VENT:     "rgba(60, 60, 60, 0.85)",
+  SWITCH:   "rgba(255, 196, 0, 0.95)",
+  JUNCTION: "rgba(120, 200, 255, 0.95)",
+  GATE:     "rgba(220, 80, 80, 0.95)",
+  PLATE:    "rgba(170, 130, 255, 0.95)",
+};
 
 function buildPiecePalette(containerId: string, pieces: string[]) {
   const div = $(containerId);
@@ -272,8 +682,19 @@ function buildTypePalette() {
   const div = $("palette-types");
   div.innerHTML = "";
   for (const t of SQUARE_TYPES) {
-    div.appendChild(makeBrushButton(t, { kind: "type", squareType: t }, { glyph: t[0] }));
+    const svg = squareTypeIconByType(t) ?? undefined;
+    div.appendChild(makeBrushButton(t, { kind: "type", squareType: t }, {
+      glyph: t[0],
+      svg,
+      accent: TYPE_ACCENT[t],
+    }));
   }
+  // Inspect / wiring tool: not a square-type brush but lives next to the
+  // type palette since it's about substrate squares.
+  div.appendChild(makeBrushButton("INSPECT", { kind: "inspect" }, {
+    glyph: "?",
+    accent: "rgba(255, 255, 255, 0.95)",
+  }));
 }
 
 function buildConditionPalette() {

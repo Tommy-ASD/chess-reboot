@@ -23,6 +23,14 @@ pub trait Piece {
         false
     }
 
+    /// Plan 08: can this piece throw a Switch tile it's standing on?
+    /// Default `true` — every piece can. Override to `false` for pieces
+    /// the spec disallows (none in v1, but the hook is here so a future
+    /// piece definition can disable it without touching `Board::get_moves`).
+    fn can_throw_switch(&self) -> bool {
+        true
+    }
+
     fn clone_box(&self) -> Box<dyn Piece>;
 
     fn post_move_effects(

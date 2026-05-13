@@ -52,18 +52,30 @@ pub fn generate_glider_moves(
                 rank: r as Rank,
             };
 
+            // Non-walkable terrain (closed Gate, Turret, Vent) blocks
+            // both stepping onto AND sliding past — the square is
+            // impassable, so we stop the ray here without emitting the
+            // move. This is what makes Plan 08's Gate { open: false }
+            // an actual blocker rather than visual decoration.
+            let sq = board.get_square_at(&coord);
+            if !sq
+                .map(|s| s.square_type.is_walkable())
+                .unwrap_or(false)
+            {
+                break;
+            }
+
             moves.push(GameMove {
                 from: from.clone(),
                 move_type: MoveType::MoveTo(coord.clone()),
             });
 
             // stop if encountering a piece that blocks
-            if let Some(sq) = board.get_square_at(&coord) {
-                if let Some(piece) = &sq.piece
-                    && piece.blocks_path()
-                {
-                    break;
-                }
+            if let Some(sq) = sq
+                && let Some(piece) = &sq.piece
+                && piece.blocks_path()
+            {
+                break;
             }
 
             // stop if bounded and reached max range

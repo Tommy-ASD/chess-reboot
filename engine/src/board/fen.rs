@@ -2,8 +2,8 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     board::{
-        Board, BoardFlags, Coord,
-        square::{Square, SquareCondition, SquareType},
+        Board, BoardFlags, Coord, SignalId,
+        square::{PressureTrigger, Square, SquareCondition, SquareType, TrackDir},
     },
     pieces::{Color, piecetype::PieceType},
 };
@@ -342,7 +342,34 @@ pub fn square_to_fen(square: &Square) -> String {
     }
 
     if !matches!(square.square_type, SquareType::Standard) {
-        parts.push(format!("T={}", square.square_type.as_str()));
+        parts.push(format!("T={}", square.square_type.type_tag()));
+        // Each variant only emits the fields it carries. Within a variant,
+        // fields appear in the relative order ID → STATE → BRANCHES →
+        // TARGETS → OPEN → FIRES so the encoder is deterministic; the
+        // parser is order-agnostic (two-pass accumulator below).
+        match &square.square_type {
+            SquareType::Standard | SquareType::Turret | SquareType::Vent => {}
+            SquareType::Switch { targets } => {
+                parts.push(format!("TARGETS={}", format_id_list(targets)));
+            }
+            SquareType::Junction {
+                id,
+                state,
+                branches,
+            } => {
+                parts.push(format!("ID={}", id));
+                parts.push(format!("STATE={}", state));
+                parts.push(format!("BRANCHES={}", format_dir_list(branches)));
+            }
+            SquareType::Gate { id, open } => {
+                parts.push(format!("ID={}", id));
+                parts.push(format!("OPEN={}", if *open { 1 } else { 0 }));
+            }
+            SquareType::PressurePlate { targets, fires_for } => {
+                parts.push(format!("TARGETS={}", format_id_list(targets)));
+                parts.push(format!("FIRES={}", format_pressure_trigger(fires_for)));
+            }
+        }
     }
 
     for cond in &square.conditions {
@@ -350,6 +377,84 @@ pub fn square_to_fen(square: &Square) -> String {
     }
 
     format!("({})", parts.join(","))
+}
+
+fn format_id_list(ids: &[SignalId]) -> String {
+    let inner = ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("({inner})")
+}
+
+fn parse_id_list(v: &str) -> Vec<SignalId> {
+    let Some(inner) = v.strip_prefix('(').and_then(|s| s.strip_suffix(')')) else {
+        warn!(v, "malformed id list; expected (...)");
+        return vec![];
+    };
+    if inner.is_empty() {
+        return vec![];
+    }
+    split_top_level(inner)
+        .iter()
+        .filter_map(|s| match s.parse::<SignalId>() {
+            Ok(id) => Some(id),
+            Err(e) => {
+                warn!(s, ?e, "bad signal id");
+                None
+            }
+        })
+        .collect()
+}
+
+fn format_dir_list(dirs: &[TrackDir]) -> String {
+    let inner = dirs
+        .iter()
+        .map(|d| d.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("({inner})")
+}
+
+fn parse_dir_list(v: &str) -> Vec<TrackDir> {
+    let Some(inner) = v.strip_prefix('(').and_then(|s| s.strip_suffix(')')) else {
+        warn!(v, "malformed dir list; expected (...)");
+        return vec![];
+    };
+    if inner.is_empty() {
+        return vec![];
+    }
+    split_top_level(inner)
+        .iter()
+        .filter_map(|s| match TrackDir::parse_tag(s) {
+            Some(d) => Some(d),
+            None => {
+                warn!(s, "bad track direction");
+                None
+            }
+        })
+        .collect()
+}
+
+fn format_pressure_trigger(t: &PressureTrigger) -> String {
+    match t {
+        PressureTrigger::AnyPiece => "ANY".to_string(),
+        PressureTrigger::OnlyColor(Color::White) => "W".to_string(),
+        PressureTrigger::OnlyColor(Color::Black) => "B".to_string(),
+    }
+}
+
+fn parse_pressure_trigger(v: &str) -> Option<PressureTrigger> {
+    match v {
+        "ANY" => Some(PressureTrigger::AnyPiece),
+        "W" => Some(PressureTrigger::OnlyColor(Color::White)),
+        "B" => Some(PressureTrigger::OnlyColor(Color::Black)),
+        _ => {
+            warn!(v, "unknown pressure trigger");
+            None
+        }
+    }
 }
 
 /// Splits a string on **top-level commas**, i.e., commas that are **not**
@@ -445,8 +550,18 @@ pub fn fen_to_square(fen: &str) -> Square {
     if fen.starts_with('(') && fen.ends_with(')') {
         let inner = &fen[1..fen.len() - 1];
         let mut piece: Option<PieceType> = None;
-        let mut square_type = SquareType::Standard;
         let mut conditions = Vec::new();
+
+        // Variant payload accumulators — buffered through the loop and
+        // collapsed into the right `SquareType` by `type_tag` once every
+        // field is seen. Lets fields appear in any order.
+        let mut type_tag: Option<String> = None;
+        let mut id: Option<SignalId> = None;
+        let mut state: Option<u8> = None;
+        let mut branches: Option<Vec<TrackDir>> = None;
+        let mut targets: Option<Vec<SignalId>> = None;
+        let mut open: Option<bool> = None;
+        let mut fires: Option<PressureTrigger> = None;
 
         // Split only at top-level commas (nested-safe)
         let fields = split_top_level(inner);
@@ -461,15 +576,30 @@ pub fn fen_to_square(fen: &str) -> Square {
                     piece = PieceType::symbol_to_piece(value);
                 }
                 "T" => {
-                    square_type = match value {
-                        "TURRET" => SquareType::Turret,
-                        "VENT" => SquareType::Vent,
-                        _ => {
-                            warn!(value, "unknown square type");
-                            SquareType::Standard
-                        }
-                    }
+                    type_tag = Some(value.to_string());
                 }
+                "ID" => match value.parse::<SignalId>() {
+                    Ok(v) => id = Some(v),
+                    Err(e) => warn!(value, ?e, "bad ID field"),
+                },
+                "STATE" => match value.parse::<u8>() {
+                    Ok(v) => state = Some(v),
+                    Err(e) => warn!(value, ?e, "bad STATE field"),
+                },
+                "BRANCHES" => branches = Some(parse_dir_list(value)),
+                "TARGETS" => targets = Some(parse_id_list(value)),
+                "OPEN" => match value {
+                    "0" => open = Some(false),
+                    "1" => open = Some(true),
+                    other => {
+                        // Reject the whole square — silently defaulting to
+                        // `open: true` would mask malformed input and let
+                        // an attacker/test author "open" a Gate by typo.
+                        warn!(other, "bad OPEN field; expected 0 or 1");
+                        open = Some(false);
+                    }
+                },
+                "FIRES" => fires = parse_pressure_trigger(value),
                 "C" => match value {
                     "FROZEN" => conditions.push(SquareCondition::Frozen),
                     "BRAINROT" => conditions.push(SquareCondition::Brainrot),
@@ -478,6 +608,33 @@ pub fn fen_to_square(fen: &str) -> Square {
                 _ => warn!(field, "unknown field"),
             }
         }
+
+        let square_type = match type_tag.as_deref() {
+            None => SquareType::Standard,
+            Some("STANDARD") => SquareType::Standard,
+            Some("TURRET") => SquareType::Turret,
+            Some("VENT") => SquareType::Vent,
+            Some("SWITCH") => SquareType::Switch {
+                targets: targets.unwrap_or_default(),
+            },
+            Some("JUNCTION") => SquareType::Junction {
+                id: id.unwrap_or(0),
+                state: state.unwrap_or(0),
+                branches: branches.unwrap_or_default(),
+            },
+            Some("GATE") => SquareType::Gate {
+                id: id.unwrap_or(0),
+                open: open.unwrap_or(true),
+            },
+            Some("PLATE") => SquareType::PressurePlate {
+                targets: targets.unwrap_or_default(),
+                fires_for: fires.unwrap_or(PressureTrigger::AnyPiece),
+            },
+            Some(other) => {
+                warn!(other, "unknown square type");
+                SquareType::Standard
+            }
+        };
 
         return Square {
             piece,

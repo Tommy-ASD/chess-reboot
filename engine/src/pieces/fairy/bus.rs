@@ -123,6 +123,10 @@ impl Piece for Bus {
                     rank: new_rank as u8,
                 };
                 match board.get_square_at(&coord) {
+                    // Plan 08: non-walkable terrain blocks the Bus's slide
+                    // the same way a piece does — and we don't emit a move
+                    // onto it.
+                    Some(sq) if !sq.square_type.is_walkable() => break,
                     Some(sq) if sq.piece.is_none() => {
                         moves.push(GameMove {
                             from: from.clone(),

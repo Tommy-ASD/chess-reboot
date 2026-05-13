@@ -149,6 +149,10 @@ impl PieceType {
         dispatch!(self, p => p.can_carry_piece())
     }
 
+    pub fn can_throw_switch(&self) -> bool {
+        dispatch!(self, p => p.can_throw_switch())
+    }
+
     pub fn get_color(&self) -> Color {
         dispatch!(self, p => p.color())
     }
@@ -212,6 +216,11 @@ impl PieceType {
                 // pass, but skipping it explicitly avoids any temptation
                 // to interpret the capture-coord as a target.
                 MoveType::EnPassant { .. } => return true,
+                // ThrowSwitch doesn't move the piece — the filter's
+                // target-occupancy logic doesn't apply. Whether the piece
+                // is even *allowed* to throw is checked at move-generation
+                // time in `Board::get_moves` via `can_throw_switch()`.
+                MoveType::ThrowSwitch { .. } => return true,
                 MoveType::MoveIntoCarrier(_) => {
                     // No piece's `initial_moves` produces a top-level
                     // MoveIntoCarrier today — the filter is the sole

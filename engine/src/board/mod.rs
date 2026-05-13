@@ -10,11 +10,18 @@ use crate::{
 pub mod brainrot;
 pub mod fen;
 pub mod make_move;
+pub mod signal;
 pub mod square;
 mod tests;
 
 pub type File = u8; // 0–7 for default boards
 pub type Rank = u8; // 0–7 for default boards
+
+/// Opaque identifier wiring a signal emitter (e.g. `SquareType::Switch`) to
+/// one or more receivers (e.g. `SquareType::Junction`, `SquareType::Gate`).
+/// Many-to-many: a switch can target several IDs, and several switches can
+/// share a target ID. IDs are arbitrary u32 — the editor allocates them.
+pub type SignalId = u32;
 
 /// We use this so there's no confusion with which index is which.
 #[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
@@ -87,6 +94,15 @@ pub enum MoveType {
         target: Coord,
         captured: Coord,
     },
+    /// Plan 08: throw the Switch tile this piece is standing on. The piece
+    /// stays put; the signal pulse fires at the Switch's `targets`. The
+    /// `switch` coord is technically redundant with `GameMove.from` today
+    /// (the piece on the switch tile is throwing it) but storing it
+    /// explicitly leaves room for a future "throw an adjacent switch"
+    /// mechanic without breaking the move shape.
+    ThrowSwitch {
+        switch: Coord,
+    },
 }
 
 impl std::fmt::Display for MoveType {
@@ -106,6 +122,7 @@ impl std::fmt::Display for MoveType {
             MoveType::EnPassant { target, captured } => {
                 write!(f, "en-passant to {target} (capturing {captured})")
             }
+            MoveType::ThrowSwitch { switch } => write!(f, "throw switch at {switch}"),
         }
     }
 }
@@ -292,7 +309,7 @@ impl Board {
 
     pub fn square_is_empty(&self, coord: &Coord) -> bool {
         if let Some(square) = self.get_square_at(coord) {
-            square.square_type == SquareType::Standard && square.piece.is_none()
+            square.square_type.is_walkable() && square.piece.is_none()
         } else {
             false
         }
@@ -300,20 +317,35 @@ impl Board {
 
     /// Get all possible moves for the piece at `from`.
     pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
-        if let Some(square) = self.get_square_at(from) {
-            if square.conditions.contains(&SquareCondition::Brainrot)
-                || square.conditions.contains(&SquareCondition::Frozen)
-            {
-                return vec![];
-            }
-            if let Some(piece) = &square.piece {
-                piece.get_moves(self, from)
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
+        let Some(square) = self.get_square_at(from) else {
+            return vec![];
+        };
+        if square.conditions.contains(&SquareCondition::Brainrot)
+            || square.conditions.contains(&SquareCondition::Frozen)
+        {
+            return vec![];
         }
+        let Some(piece) = &square.piece else {
+            return vec![];
+        };
+
+        let mut moves = piece.get_moves(self, from);
+
+        // Square-driven additions: a piece standing on a Switch tile can
+        // throw that switch. This is independent of the piece's own
+        // movement, so we add it after the piece-level move generation.
+        // `Piece::can_throw_switch()` lets specific pieces opt out (the
+        // default is `true`).
+        if matches!(square.square_type, SquareType::Switch { .. }) && piece.can_throw_switch() {
+            moves.push(GameMove {
+                from: from.clone(),
+                move_type: MoveType::ThrowSwitch {
+                    switch: from.clone(),
+                },
+            });
+        }
+
+        moves
     }
 
     /// Takes a from and to coordinate and returns true if the move is valid.
