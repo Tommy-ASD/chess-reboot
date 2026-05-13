@@ -85,10 +85,20 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
         trace!(index, ?ch, "char");
 
         // -------------------------------
-        // 1. DIGIT → run-length empties
+        // 1. DIGITS → run-length empties (multi-digit, e.g. "10" → 10 empty
+        //    squares on a 10-wide board). Consume the full digit run greedily.
         // -------------------------------
         if ch.is_ascii_digit() {
-            let count = ch.to_digit(10).unwrap();
+            let mut count: u32 = 0;
+            while let Some(&peek) = chars.peek() {
+                if let Some(d) = peek.to_digit(10) {
+                    count = count.saturating_mul(10).saturating_add(d);
+                    chars.next();
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
             trace!(count, "digit run-length");
 
             for _ in 0..count {
@@ -98,8 +108,6 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                     conditions: vec![],
                 });
             }
-            chars.next();
-            index += 1;
             continue;
         }
 
@@ -186,38 +194,35 @@ pub fn board_to_fen(board: &Board) -> String {
     };
     let castling = castle_rights_to_fen(&board.flags);
     let ep = match &board.flags.en_passant_target {
-        Some(c) => coord_to_algebraic(c),
+        Some(c) => board.format_coord(c),
         None => "-".to_string(),
     };
     format!("{grid} {stm} {castling} {ep}")
 }
 
-/// Algebraic ("e3") notation for an internal Coord.
-///
-/// File 0..=7 maps to a..=h; rank 0..=7 maps to algebraic 8..=1 (rank 0 is
-/// the FEN-top row, which is algebraic 8).
-fn coord_to_algebraic(c: &Coord) -> String {
-    let file_letter = (b'a' + c.file) as char;
-    let algebraic_rank = 8u8.saturating_sub(c.rank);
-    format!("{file_letter}{algebraic_rank}")
-}
-
-fn algebraic_to_coord(s: &str) -> Option<Coord> {
+/// Parse an algebraic square ("e3") into a Coord. Needs the board height
+/// so the algebraic rank (1 = bottom row) inverts correctly: rank 8 →
+/// internal rank 0 for an 8-tall board, rank 12 → 0 for a 12-tall board.
+/// The file width bound is checked too — algebraic "i9" on a 6-wide board
+/// returns `None`.
+fn algebraic_to_coord(s: &str, height: u8, width: u8) -> Option<Coord> {
+    // Files use letters a..z (so up to 26-wide boards).
     let bytes = s.as_bytes();
-    if bytes.len() != 2 {
+    if bytes.len() < 2 {
         return None;
     }
     let file = bytes[0].checked_sub(b'a')?;
-    if file > 7 {
+    if file >= width {
         return None;
     }
-    let algebraic_rank = (bytes[1] as char).to_digit(10)? as u8;
-    if !(1..=8).contains(&algebraic_rank) {
+    let rank_str = std::str::from_utf8(&bytes[1..]).ok()?;
+    let algebraic_rank: u8 = rank_str.parse().ok()?;
+    if algebraic_rank == 0 || algebraic_rank > height {
         return None;
     }
     Some(Coord {
         file,
-        rank: 8 - algebraic_rank,
+        rank: height - algebraic_rank,
     })
 }
 
@@ -295,9 +300,13 @@ pub fn fen_to_board(fen: &str) -> Board {
         None => (true, true, true, true),
     };
 
+    // Algebraic EP parsing needs to know the board's dimensions to invert
+    // the rank correctly. Read them off the grid built above.
+    let height = grid.len() as u8;
+    let width = grid.first().map(|row| row.len() as u8).unwrap_or(0);
     let en_passant_target = match ep_part {
         None | Some("-") => None,
-        Some(s) => algebraic_to_coord(s),
+        Some(s) => algebraic_to_coord(s, height, width),
     };
 
     let flags = BoardFlags {

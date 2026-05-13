@@ -9,9 +9,11 @@ pub struct King {
     pub color: Color,
 }
 impl King {
-    fn back_rank(&self) -> u8 {
+    /// Home rank for this color, taken from the board's height. White's
+    /// back rank is the bottom row (`height - 1`); black's is rank 0.
+    pub fn back_rank(&self, board: &Board) -> u8 {
         match self.color {
-            Color::White => 7,
+            Color::White => board.height().saturating_sub(1),
             Color::Black => 0,
         }
     }
@@ -20,9 +22,17 @@ impl King {
     /// precondition: the relevant castle right, king on its starting square,
     /// rook of the right colour on its starting square, empty path, and the
     /// king's start + intermediate + destination squares not under attack.
+    ///
+    /// Castling is only generated when the board is at least 8 wide: king
+    /// targets sit at files 2 (queenside) and 6 (kingside), and the
+    /// kingside rook is at `width - 1`. Narrower boards can't host the
+    /// move geometrically.
     fn castle_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         let mut moves = Vec::new();
-        let back_rank = self.back_rank();
+        if board.width() < 8 {
+            return moves;
+        }
+        let back_rank = self.back_rank(board);
         if from.file != 4 || from.rank != back_rank {
             return moves;
         }
@@ -62,13 +72,15 @@ impl King {
                 file: 6,
                 rank: back_rank,
             };
-            let p7 = Coord {
-                file: 7,
+            // Kingside rook always sits on the right-edge file, which is
+            // `width - 1` (== 7 for a standard 8-wide board).
+            let p_rook = Coord {
+                file: board.width().saturating_sub(1),
                 rank: back_rank,
             };
             if empty(board, &p5)
                 && empty(board, &p6)
-                && rook_is_friendly(board, &p7)
+                && rook_is_friendly(board, &p_rook)
                 && !board.is_attacked_by(&p5, opp)
                 && !board.is_attacked_by(&p6, opp)
             {

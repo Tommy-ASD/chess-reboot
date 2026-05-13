@@ -24,12 +24,11 @@ pub struct Coord {
 }
 
 impl std::fmt::Display for Coord {
-    /// Algebraic notation (`e4`, `a1`, `h8`). Assumes the default 8-rank
-    /// board; same assumption baked into `fen::coord_to_algebraic`.
+    /// `(file, rank)` index notation. Algebraic ("e4") needs the board
+    /// height to be correct, which `Coord` doesn't have access to — use
+    /// `Board::format_coord` when you need algebraic for a real board.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let file_letter = (b'a' + self.file) as char;
-        let algebraic_rank = 8u8.saturating_sub(self.rank);
-        write!(f, "{file_letter}{algebraic_rank}")
+        write!(f, "({}, {})", self.file, self.rank)
     }
 }
 
@@ -515,5 +514,26 @@ impl Board {
             && file >= 0
             && (rank as usize) < self.grid.len()
             && (file as usize) < self.grid[rank as usize].len()
+    }
+
+    /// Number of ranks (rows) in the board. `height() - 1` is the bottom rank.
+    pub fn height(&self) -> u8 {
+        self.grid.len() as u8
+    }
+
+    /// Number of files (columns) on the board, measured by the first row.
+    /// Rows are expected to be uniform in length; FEN parsing enforces this.
+    pub fn width(&self) -> u8 {
+        self.grid.first().map(|row| row.len() as u8).unwrap_or(0)
+    }
+
+    /// Algebraic notation ("e4") for a Coord, using this board's height to
+    /// invert the rank. For 8-tall boards this is the same as the chess
+    /// convention; for taller boards the rank counts up from 1 at the
+    /// bottom-most row.
+    pub fn format_coord(&self, c: &Coord) -> String {
+        let file_letter = (b'a' + c.file) as char;
+        let algebraic_rank = self.height().saturating_sub(c.rank);
+        format!("{file_letter}{algebraic_rank}")
     }
 }

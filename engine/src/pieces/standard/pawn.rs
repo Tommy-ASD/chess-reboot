@@ -11,18 +11,38 @@ pub struct Pawn {
 }
 
 impl Pawn {
-    fn promotion_rank(&self) -> u8 {
+    /// Furthest rank from the home side — promotion fires when a pawn
+    /// lands here. Black promotes at the bottom (`height - 1`); white
+    /// promotes at the top (rank 0). Height comes from the board so this
+    /// is correct for boards taller or shorter than 8.
+    fn promotion_rank(&self, board: &Board) -> u8 {
         match self.color {
             Color::White => 0,
-            Color::Black => 7,
+            Color::Black => board.height().saturating_sub(1),
+        }
+    }
+
+    /// Rank a pawn occupies before its first move — the row eligible for
+    /// the optional double-push. White starts one row up from the back
+    /// (`height - 2`); black starts on rank 1 (one row down from rank 0).
+    fn starting_rank(&self, board: &Board) -> u8 {
+        match self.color {
+            Color::White => board.height().saturating_sub(2),
+            Color::Black => 1,
         }
     }
 
     /// Push either a `MoveTo` or the four `Promotion` variants — same target,
     /// four piece choices — depending on whether the destination is the
     /// promotion rank.
-    fn push_advance_or_promotion(&self, target: Coord, from: &Coord, out: &mut Vec<GameMove>) {
-        if target.rank == self.promotion_rank() {
+    fn push_advance_or_promotion(
+        &self,
+        target: Coord,
+        from: &Coord,
+        board: &Board,
+        out: &mut Vec<GameMove>,
+    ) {
+        if target.rank == self.promotion_rank(board) {
             for into in [
                 PromotionTarget::Queen,
                 PromotionTarget::Rook,
@@ -77,15 +97,12 @@ impl Piece for Pawn {
                 trace!(?square, ?forward_coord, "forward square");
                 if square.piece.is_none() {
                     trace!("forward square empty, pushing move");
-                    self.push_advance_or_promotion(forward_coord.clone(), from, &mut moves);
+                    self.push_advance_or_promotion(forward_coord.clone(), from, board, &mut moves);
 
                     // Two squares forward from starting position. Double push
                     // never coincides with a promotion rank, so no promotion
                     // handling is needed here.
-                    let starting_rank = match self.color {
-                        Color::White => 6,
-                        Color::Black => 1,
-                    };
+                    let starting_rank = self.starting_rank(board);
                     if from.rank == starting_rank {
                         let two_forward_coord = Coord {
                             file: from.file,
@@ -124,6 +141,7 @@ impl Piece for Pawn {
                         self.push_advance_or_promotion(
                             capture_coord.clone(),
                             from,
+                            board,
                             &mut moves,
                         );
                     }

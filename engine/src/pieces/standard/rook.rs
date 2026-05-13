@@ -34,7 +34,7 @@ impl Piece for Rook {
 
     fn post_move_effects(
         &mut self,
-        _board_before: &Board,
+        board_before: &Board,
         board_after: &mut Board,
         game_move: &GameMove,
     ) {
@@ -42,13 +42,19 @@ impl Piece for Rook {
         // that side. Rooks that promoted onto the board started life on a
         // non-corner square, so the starting-square test correctly leaves the
         // flags alone for them.
+        //
+        // Right-edge file is `width - 1`, not necessarily 7 — needed for
+        // non-8-wide boards. We read the width from `board_before` because
+        // dimensions are immutable across a move.
         let from = &game_move.from;
+        let right_edge = board_before.width().saturating_sub(1);
+        let white_back = board_before.height().saturating_sub(1);
         match self.color {
             Color::White => {
-                if from.rank == 7 {
+                if from.rank == white_back {
                     if from.file == 0 {
                         board_after.flags.white_can_castle_queenside = false;
-                    } else if from.file == 7 {
+                    } else if from.file == right_edge {
                         board_after.flags.white_can_castle_kingside = false;
                     }
                 }
@@ -57,7 +63,7 @@ impl Piece for Rook {
                 if from.rank == 0 {
                     if from.file == 0 {
                         board_after.flags.black_can_castle_queenside = false;
-                    } else if from.file == 7 {
+                    } else if from.file == right_edge {
                         board_after.flags.black_can_castle_kingside = false;
                     }
                 }

@@ -106,8 +106,12 @@ impl Board {
             }
             MoveType::Castle { side } => {
                 let back_rank = from.rank;
+                // Kingside rook lives on the right-edge file (`width - 1`),
+                // not necessarily file 7 — keep this in sync with
+                // `king.rs::castle_moves`.
+                let right_edge = self.width().saturating_sub(1);
                 let (king_target_file, rook_source_file, rook_target_file) = match side {
-                    CastleSide::Kingside => (6u8, 7u8, 5u8),
+                    CastleSide::Kingside => (6u8, right_edge, 5u8),
                     CastleSide::Queenside => (2u8, 0u8, 3u8),
                 };
                 let king_target = Coord {
@@ -299,12 +303,16 @@ impl Board {
         let PieceType::Rook(r) = captured_piece else {
             return;
         };
+        // Right-edge file (`width - 1`) hosts the kingside rook on any
+        // board width — file 7 was the old 8-wide assumption.
+        let right_edge = self.width().saturating_sub(1);
+        let white_back = self.height().saturating_sub(1);
         match r.color {
             Color::White => {
-                if captured_square.rank == 7 {
+                if captured_square.rank == white_back {
                     if captured_square.file == 0 {
                         self.flags.white_can_castle_queenside = false;
-                    } else if captured_square.file == 7 {
+                    } else if captured_square.file == right_edge {
                         self.flags.white_can_castle_kingside = false;
                     }
                 }
@@ -313,7 +321,7 @@ impl Board {
                 if captured_square.rank == 0 {
                     if captured_square.file == 0 {
                         self.flags.black_can_castle_queenside = false;
-                    } else if captured_square.file == 7 {
+                    } else if captured_square.file == right_edge {
                         self.flags.black_can_castle_kingside = false;
                     }
                 }

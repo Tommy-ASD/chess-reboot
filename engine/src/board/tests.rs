@@ -1736,9 +1736,12 @@ mod tests {
             !msg.contains("Coord {"),
             "message must not leak Debug formatting, got: {msg}"
         );
+        // Coord's Display is board-agnostic `(file, rank)` index notation —
+        // algebraic ("a8") needs the board's height and is only available
+        // via `Board::format_coord`.
         assert!(
-            msg.contains("a8"),
-            "message should refer to source square in algebraic, got: {msg}"
+            msg.contains("(0, 0)"),
+            "message should refer to source square in (file, rank) form, got: {msg}"
         );
     }
 }
