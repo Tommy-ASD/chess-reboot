@@ -24,19 +24,54 @@ impl Board {
         })
     }
 
-    /// Apply a move without re-running legality checks. The caller (e.g.
-    /// `legal_moves`) is responsible for having generated the move from
-    /// `get_moves` first. Internal invariants (source square exists, piece
-    /// present, target shape matches variant) are still verified — they
-    /// become `Err` rather than `panic!`.
+    /// Apply a move without re-running legality checks. Composes the
+    /// three apply phases — bare-piece relocation, piece-level post
+    /// effects, and environment reactions (train tick) — in order. The
+    /// caller (e.g. `legal_moves`) is responsible for having generated
+    /// the move from `get_moves` first; internal invariants are still
+    /// verified and become `Err` rather than `panic!`.
     pub fn make_move_unchecked(&mut self, game_move: GameMove) -> Result<(), String> {
+        let board_before = self.clone();
+        self.relocate_pieces(&game_move)?;
+        let ctx = PostMoveCtx {
+            before_state: &board_before,
+            game_move: &game_move,
+        };
+        self.apply_piece_post_effects(&ctx)?;
+        self.apply_environment_reactions(&ctx);
+        Ok(())
+    }
+
+    /// Apply a move's piece-relocation phase only — no environment
+    /// reactions (no train tick). Used by `validate_move` so king-safety
+    /// is evaluated on the player-move-only state, before any train tick
+    /// could roll over the mover's king (which would otherwise make
+    /// `WouldLeaveKingInCheck` un-detectable).
+    pub(crate) fn apply_move_for_validation(
+        &mut self,
+        game_move: GameMove,
+    ) -> Result<(), String> {
+        let board_before = self.clone();
+        self.relocate_pieces(&game_move)?;
+        let ctx = PostMoveCtx {
+            before_state: &board_before,
+            game_move: &game_move,
+        };
+        self.apply_piece_post_effects(&ctx)?;
+        Ok(())
+    }
+
+    /// Phase 1: physically move pieces around. No piece-level post hooks,
+    /// no environment reactions — those are separate phases. This is the
+    /// pure mechanical effect of the move on the grid.
+    fn relocate_pieces(&mut self, game_move: &GameMove) -> Result<(), String> {
         // Plan 08 safety net: any move that lands a piece on a non-walkable
         // square (closed Gate, Turret, Vent) is rejected here, even if a
         // piece-level generator forgot to filter. Catches new pieces and
         // hand-crafted moves alike. ThrowSwitch is not piece-relocating, so
         // it bypasses this check; carrier-internal moves are validated at
         // their own arms.
-        if let Some(landing) = piece_landing_square(&game_move) {
+        if let Some(landing) = piece_landing_square(game_move) {
             let walkable = self
                 .get_square_at(landing)
                 .map(|s| s.square_type.is_walkable())
@@ -48,8 +83,6 @@ impl Board {
                 ));
             }
         }
-
-        let board_before = self.clone();
 
         let from = &game_move.from;
 
@@ -212,6 +245,7 @@ impl Board {
                 _ => return Err("Non-skibidi piece making phaseshift move".to_string()),
             },
             MoveType::MoveIntoCarrier(target) => {
+                let boarder_color = piece.get_color();
                 {
                     let from_sq = self
                         .get_square_mut(from)
@@ -225,9 +259,23 @@ impl Board {
                     let target_piece = to_sq.piece.as_mut().ok_or_else(|| {
                         format!("MoveIntoCarrier target {:?} is empty", target)
                     })?;
-                    match target_piece {
-                        PieceType::Bus(bus) => bus.pieces.push(piece),
-                        _ => {
+                    let carrier_color = target_piece.get_color();
+                    match target_piece.passengers_mut() {
+                        Some(passengers) => {
+                            // Plan 09: when a non-Neutral piece boards a
+                            // Neutral cart, capture every passenger of
+                            // the opposite color (the "passenger
+                            // captured by enemy entering cart" rule).
+                            // The cart itself is invincible — it stays
+                            // put and just swaps occupants.
+                            if carrier_color == Color::Neutral
+                                && boarder_color != Color::Neutral
+                            {
+                                passengers.retain(|p| p.get_color() == boarder_color);
+                            }
+                            passengers.push(piece);
+                        }
+                        None => {
                             return Err(format!(
                                 "MoveIntoCarrier target {:?} is not a carrier",
                                 target
@@ -262,19 +310,17 @@ impl Board {
                 piece_index,
                 move_type,
             } => {
-                let mut bus = match piece.clone() {
-                    PieceType::Bus(bus) => bus,
-                    other => {
-                        return Err(format!(
-                            "PieceInCarrier source must be a carrier, got {:?}",
-                            other
-                        ));
-                    }
-                };
+                let mut carrier = piece.clone();
                 let idx = *piece_index as usize;
-                let moving_out_piece = bus.pieces.get(idx).cloned().ok_or_else(|| {
-                    format!("PieceInCarrier index {} out of range", piece_index)
-                })?;
+                let moving_out_piece = carrier
+                    .passengers()
+                    .and_then(|ps| ps.get(idx).cloned())
+                    .ok_or_else(|| {
+                        format!(
+                            "PieceInCarrier source must be a carrier with passenger {idx}, got {:?}",
+                            carrier
+                        )
+                    })?;
 
                 match move_type.as_ref() {
                     MoveType::MoveTo(target) => {
@@ -282,7 +328,10 @@ impl Board {
                             .get_square_mut(target)
                             .ok_or_else(|| format!("No square at {:?}", target))?;
                         to_sq.piece = Some(moving_out_piece);
-                        bus.pieces.remove(idx);
+                        carrier
+                            .passengers_mut()
+                            .expect("just verified is carrier")
+                            .remove(idx);
                         debug!(?from, ?target, "moved out of carrier");
                     }
                     MoveType::MoveIntoCarrier(target) => {
@@ -295,23 +344,45 @@ impl Board {
                                 target
                             )
                         })?;
-                        match target_piece {
-                            PieceType::Bus(target_bus) => {
-                                target_bus.pieces.push(moving_out_piece);
-                                bus.pieces.remove(idx);
-                                debug!(
-                                    ?from,
-                                    ?target,
-                                    "passenger moved between carriers"
-                                );
-                            }
-                            _ => {
-                                return Err(format!(
-                                    "PieceInCarrier->MoveIntoCarrier target {:?} is not a carrier",
-                                    target
-                                ));
-                            }
+                        let target_carrier_color = target_piece.get_color();
+                        let boarder_color = moving_out_piece.get_color();
+                        let target_is_bus = matches!(target_piece, PieceType::Bus(_));
+                        let Some(target_passengers) = target_piece.passengers_mut()
+                        else {
+                            return Err(format!(
+                                "PieceInCarrier->MoveIntoCarrier target {:?} is not a carrier",
+                                target
+                            ));
+                        };
+                        // Same cart-invincibility rule as the top-level
+                        // MoveIntoCarrier arm: a non-Neutral piece
+                        // boarding a Neutral cart captures any
+                        // opposite-colour passengers. Same-colour
+                        // carriers (Bus) are unaffected here because
+                        // the filter only emits MoveIntoCarrier when
+                        // the carrier and boarder agree on colour.
+                        if target_carrier_color == Color::Neutral
+                            && boarder_color != Color::Neutral
+                        {
+                            target_passengers
+                                .retain(|p| p.get_color() == boarder_color);
                         }
+                        // Bus cap-5 defence in depth — the carrier-
+                        // capacity guard inside `PieceType::get_moves`'
+                        // `retain_mut` is the primary check, but a
+                        // hand-crafted move bypassing the filter
+                        // shouldn't overfill a Bus.
+                        if target_is_bus && target_passengers.len() >= 5 {
+                            return Err(format!(
+                                "PieceInCarrier->MoveIntoCarrier: target Bus at {target:?} at capacity"
+                            ));
+                        }
+                        target_passengers.push(moving_out_piece);
+                        carrier
+                            .passengers_mut()
+                            .expect("just verified is carrier")
+                            .remove(idx);
+                        debug!(?from, ?target, "passenger moved between carriers");
                     }
                     other => {
                         return Err(format!(
@@ -324,11 +395,9 @@ impl Board {
                 let from_sq = self
                     .get_square_mut(from)
                     .ok_or_else(|| format!("No square at {:?}", from))?;
-                from_sq.piece = Some(PieceType::Bus(bus));
+                from_sq.piece = Some(carrier);
             }
         };
-
-        self.handle_post_move_effects(&board_before, game_move)?;
 
         Ok(())
     }
@@ -369,55 +438,128 @@ impl Board {
                     }
                 }
             }
+            // Neutral pieces never hold castle rights.
+            Color::Neutral => {}
         }
     }
 
-    fn handle_post_move_effects(
-        &mut self,
-        before_state: &Board,
-        game_move: GameMove,
-    ) -> Result<(), String> {
+    /// Phase 2 (validate-relevant): piece-level reactions to the move
+    /// the player just made. Updates en passant tracking, runs each
+    /// piece's `post_move_effects`, fires pressure plates the move
+    /// landed on, and recalcs the brainrot map. These are all
+    /// deterministic consequences of the player's choice — validate
+    /// runs them so king-safety sees the same state real make_move
+    /// would, *minus* the train tick (which lives in phase 3).
+    fn apply_piece_post_effects(&mut self, ctx: &PostMoveCtx<'_>) -> Result<(), String> {
         // Reset en-passant target before piece-level hooks. Pawn's
         // post_move_effects re-sets it if this move was a double push.
         self.flags.en_passant_target = None;
 
-        // The square at which the moving piece ends up (if any). For
-        // PhaseShift and Bus-internal moves we skip the post-effect dispatch
-        // entirely.
-        let piece_target: Option<Coord> = match &game_move.move_type {
-            MoveType::PhaseShift => None,
-            MoveType::MoveTo(target) => Some(target.clone()),
-            MoveType::Promotion { target, .. } => Some(target.clone()),
-            MoveType::EnPassant { target, .. } => Some(target.clone()),
+        // Identify the *moving* piece and dispatch its
+        // `post_move_effects`. There are four cases:
+        //
+        // 1. Top-level relocations (MoveTo, Promotion, EnPassant,
+        //    Castle) — the mover lands at a concrete target square on
+        //    the post-relocation board. We fetch that landed piece.
+        //    For Promotion this is the *promoted* piece, not the
+        //    pawn; today that's benign because the only promoted-rook
+        //    side effect (clearing castle rights) is gated on
+        //    `from == starting corner` and a promotion always
+        //    originates from a non-corner pawn rank.
+        //
+        // 2. MoveIntoCarrier — the mover is now stored inside the
+        //    target carrier's passenger list, not at a top-level
+        //    square. Fetch it from `before_state` so hooks like
+        //    `King::post_move_effects` (clears castle rights) and
+        //    `Skibidi::post_move_effects` (resets phase) still fire.
+        //    Without this, a king-into-bus silently preserves castle
+        //    rights for the duration of the ride.
+        //
+        // 3. PieceInCarrier { inner: MoveTo(_) } — a passenger exits
+        //    onto a board tile. The passenger's hook should fire on
+        //    that landing.
+        //
+        // 4. PieceInCarrier { inner: MoveIntoCarrier(_) } — passenger
+        //    hops cart A → cart B (round-4 addition). The hook still
+        //    fires so a king-passenger clears its own castle rights.
+        //
+        // PhaseShift and ThrowSwitch don't relocate a piece — skip.
+        let mover_dispatch: Option<PieceType> = match &ctx.game_move.move_type {
+            MoveType::PhaseShift | MoveType::ThrowSwitch { .. } => None,
+            MoveType::MoveTo(target)
+            | MoveType::Promotion { target, .. }
+            | MoveType::EnPassant { target, .. } => {
+                let square = self
+                    .get_square_at(target)
+                    .ok_or_else(|| format!("No square at {:?}", target))?;
+                let piece = square
+                    .piece
+                    .clone()
+                    .ok_or_else(|| format!("No piece at {:?}", target))?;
+                Some(piece)
+            }
             MoveType::Castle { side } => {
                 let king_file = match side {
                     CastleSide::Kingside => 6,
                     CastleSide::Queenside => 2,
                 };
-                Some(Coord {
+                let target = Coord {
                     file: king_file,
-                    rank: game_move.from.rank,
-                })
-            }
-            // ThrowSwitch doesn't relocate a piece, so there's no
-            // post-move dispatch on the (non-existent) destination.
-            MoveType::MoveIntoCarrier(_)
-            | MoveType::PieceInCarrier { .. }
-            | MoveType::ThrowSwitch { .. } => None,
-        };
-
-        if let Some(target) = piece_target {
-            let mut piece = {
+                    rank: ctx.game_move.from.rank,
+                };
                 let square = self
                     .get_square_at(&target)
                     .ok_or_else(|| format!("No square at {:?}", target))?;
-
-                square
+                let piece = square
                     .piece
                     .clone()
-                    .ok_or_else(|| format!("No piece at {:?}", target))?
-            };
-            piece.post_move_effects(before_state, self, &game_move);
+                    .ok_or_else(|| format!("No piece at {:?}", target))?;
+                Some(piece)
+            }
+            MoveType::MoveIntoCarrier(_) => {
+                // Mover came from `from` and is now inside the target
+                // carrier; before_state still has it as a top-level
+                // piece at `from`.
+                let square = ctx
+                    .before_state
+                    .get_square_at(&ctx.game_move.from)
+                    .ok_or_else(|| format!("No square at {:?}", ctx.game_move.from))?;
+                square.piece.clone()
+            }
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => {
+                let supported_inner = matches!(
+                    move_type.as_ref(),
+                    MoveType::MoveTo(_) | MoveType::MoveIntoCarrier(_)
+                );
+                if !supported_inner {
+                    None
+                } else {
+                    let carrier_sq = ctx
+                        .before_state
+                        .get_square_at(&ctx.game_move.from)
+                        .ok_or_else(|| format!("No square at {:?}", ctx.game_move.from))?;
+                    carrier_sq
+                        .piece
+                        .as_ref()
+                        .and_then(|p| p.passengers())
+                        .and_then(|ps| ps.get(*piece_index as usize).cloned())
+                }
+            }
+        };
+
+        if let Some(piece) = mover_dispatch {
+            // `post_move_effects` takes `&self` — pieces that want to
+            // change their own state do it by writing a new piece
+            // through `board_after.set_piece_at(...)` rather than
+            // mutating a local clone whose changes would otherwise be
+            // dropped. Goblin already follows this convention by
+            // re-fetching its on-board piece and downcasting; Skibidi
+            // builds a fresh `Skibidi` with the new phase and writes
+            // it back via `set_piece_at`.
+            piece.post_move_effects(ctx.before_state, self, ctx.game_move);
         }
 
         // Plan 08 step 4: PressurePlate scan. For every square the move
@@ -425,24 +567,77 @@ impl Board {
         // landing-set varies by move shape — see `collect_landings` for the
         // mapping. A Castle settles two pieces (king + rook); a passenger
         // exiting a carrier settles one passenger piece on the target tile.
-        for landing in collect_landings(&game_move) {
+        for landing in collect_landings(ctx.game_move) {
             self.maybe_fire_pressure_plate(&landing);
         }
 
         self.recalc_brainrot();
 
-        // Plan 01: flip turn at the very end so post-move hooks see the
-        // pre-flip state (matters if a hook ever wants to know whose move
-        // it was).
-        self.flags.side_to_move = self.flags.side_to_move.opposite();
-
         Ok(())
     }
+
+    /// Phase 3 (skipped by validate): board-level auto-mechanics that
+    /// run after the move + piece reactions settle. Currently just the
+    /// train tick and the side-to-move flip. Validate's clone deliberately
+    /// stops before this phase so the player's chosen move can be
+    /// king-safety-checked without an in-progress train tick removing
+    /// the king from the board mid-evaluation.
+    fn apply_environment_reactions(&mut self, _ctx: &PostMoveCtx<'_>) {
+        // Plan 09: trains advance one step per tick-gate opening.
+        let ticked = self.maybe_advance_trains();
+
+        // A train tick can capture pieces — most importantly a
+        // Skibidi sitting on a track tile. The brainrot map computed
+        // in phase 2 is keyed on Skibidi positions, so re-run the
+        // recalc *if and only if* the tick actually fired. Most
+        // moves don't tick (`EveryFullTurn` is the default rate), so
+        // gating avoids a wasted O(N²) recalc per move.
+        if ticked {
+            self.recalc_brainrot();
+        }
+
+        // Plan 01: flip turn at the very end so the train tick (and any
+        // future environment reactions) still see the mover as the
+        // side-to-move if they need to.
+        //
+        // `Color::Neutral.opposite() == Color::Neutral`, so a Neutral
+        // side-to-move would lock the game forever. `validate_move`
+        // rejects Neutral as a mover via the `WrongTurn` check, so
+        // this is unreachable via the public API — but a debug-only
+        // assert leaves release builds vulnerable to silent freezing
+        // if a test or future code path bypasses validate. So we both
+        // assert (dev: panic loudly) and recover (release: coerce to
+        // White + warn) to keep prod always moving while loudly
+        // flagging the misuse.
+        debug_assert_ne!(
+            self.flags.side_to_move,
+            crate::pieces::Color::Neutral,
+            "side_to_move must never be Neutral at flip time"
+        );
+        if self.flags.side_to_move == crate::pieces::Color::Neutral {
+            tracing::warn!(
+                "side_to_move was Neutral at flip; coercing to White to keep the game progressing"
+            );
+            self.flags.side_to_move = crate::pieces::Color::White;
+        }
+        self.flags.side_to_move = self.flags.side_to_move.opposite();
+    }
+}
+
+/// Bundle of inputs flowing through the post-move-effect phases. Lives
+/// outside `Board` so the methods that consume it stay borrow-friendly.
+/// Keeping a struct (rather than threading individual params) means
+/// adding a new piece of context — say, a future "move-was-a-capture"
+/// flag — is one field at the call site instead of a signature change
+/// fan-out.
+pub(crate) struct PostMoveCtx<'a> {
+    pub before_state: &'a Board,
+    pub game_move: &'a GameMove,
 }
 
 /// Plan 08 step 4 helper: every board-square where a piece settled as a
 /// result of this move. Used by the PressurePlate scan in
-/// `handle_post_move_effects` to fire plates for any of the landings.
+/// `apply_piece_post_effects` to fire plates for any of the landings.
 ///
 /// - `MoveTo` / `Promotion` / `EnPassant`: one landing (the target).
 /// - `Castle`: two landings — king's destination and rook's destination.
@@ -503,11 +698,16 @@ fn piece_landing_square(game_move: &GameMove) -> Option<&Coord> {
         // net is redundant here. Skip rather than re-derive king/rook
         // target files for both castle sides.
         MoveType::Castle { .. } => None,
-        // Passenger-internal moves and PhaseShift don't relocate a
-        // piece onto an outer-board square in a way the safety net can
-        // helpfully validate. ThrowSwitch doesn't move the piece at all.
-        MoveType::PieceInCarrier { .. }
-        | MoveType::PhaseShift
-        | MoveType::ThrowSwitch { .. } => None,
+        // PieceInCarrier{MoveTo} is a real relocation — the passenger
+        // exits onto `target`, so the safety net should check that
+        // tile's walkability. Other PIC inners (MoveIntoCarrier =
+        // cross-cart hop, anything else = unsupported) don't land a
+        // piece on an outer-board square. PhaseShift doesn't relocate;
+        // ThrowSwitch doesn't move the piece.
+        MoveType::PieceInCarrier { move_type, .. } => match move_type.as_ref() {
+            MoveType::MoveTo(c) => Some(c),
+            _ => None,
+        },
+        MoveType::PhaseShift | MoveType::ThrowSwitch { .. } => None,
     }
 }

@@ -15,17 +15,32 @@ export type CastlingRights = {
   q: boolean; // black queenside
 };
 
+/// Plan 09: serialized form of the engine's `TrainTickRate`. We keep it
+/// as a string union rather than a discriminated union since the field
+/// has no other payload than the optional `<n>` for `EveryNPly`.
+export type TrainTickRate =
+  | { kind: "EveryPly" }
+  | { kind: "EveryFullTurn" }
+  | { kind: "EveryNPly"; n: number };
+
 export type BoardFlags = {
   sideToMove: Side;
   castling: CastlingRights;
   /** Algebraic square ("e3") or null when no en-passant target. */
   enPassant: string | null;
+  /// Plan 09: how often the train tick fires. Default `EveryFullTurn`
+  /// matches the engine's `BoardFlags::train_tick_rate` default.
+  trainTickRate: TrainTickRate;
+  /// Plan 09: monotonic ply counter, bumped at every successful move.
+  plyCount: number;
 };
 
 export const DEFAULT_FLAGS: BoardFlags = {
   sideToMove: "w",
   castling: { K: true, Q: true, k: true, q: true },
   enPassant: null,
+  trainTickRate: { kind: "EveryFullTurn" },
+  plyCount: 0,
 };
 
 /// Split a full FEN ("<grid> <stm> <castling> <ep>") into its grid +
@@ -34,10 +49,15 @@ export const DEFAULT_FLAGS: BoardFlags = {
 /// fallback in the engine, so a bare grid round-trips identically.
 export function parseFENFlags(fen: string): BoardFlags {
   const parts = fen.trim().split(/\s+/);
-  // parts[0] is the grid; the rest are flag fields.
+  // parts[0] is the grid; the rest are flag fields:
+  //   [1] stm, [2] castling, [3] ep, [4] train-tick rate, [5] ply count.
+  // Plan 09 appended trainTickRate + plyCount; both fall back to engine
+  // defaults when absent, so older grid-only FENs still round-trip.
   const stm = parts[1];
   const castle = parts[2];
   const ep = parts[3];
+  const tr = parts[4];
+  const p = parts[5];
 
   const sideToMove: Side = stm === "b" ? "b" : "w";
 
@@ -53,8 +73,44 @@ export function parseFENFlags(fen: string): BoardFlags {
       };
 
   const enPassant = ep === undefined || ep === "-" ? null : ep;
+  const trainTickRate = parseTrainTickRate(tr) ?? { kind: "EveryFullTurn" };
+  const plyCount = parsePlyCount(p) ?? 0;
 
-  return { sideToMove, castling, enPassant };
+  return { sideToMove, castling, enPassant, trainTickRate, plyCount };
+}
+
+function parseTrainTickRate(field: string | undefined): TrainTickRate | null {
+  if (field === undefined) return null;
+  const body = field.startsWith("tr=") ? field.slice(3) : field;
+  if (body === "full") return { kind: "EveryFullTurn" };
+  if (body === "ply") return { kind: "EveryPly" };
+  if (body.endsWith("ply")) {
+    const n = Number.parseInt(body.slice(0, -3), 10);
+    if (Number.isFinite(n) && n > 0) return { kind: "EveryNPly", n };
+  }
+  return null;
+}
+
+function parsePlyCount(field: string | undefined): number | null {
+  if (field === undefined) return null;
+  const body = field.startsWith("p=") ? field.slice(2) : field;
+  const n = Number.parseInt(body, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function trainTickRateToFEN(rate: TrainTickRate): string {
+  switch (rate.kind) {
+    case "EveryPly":      return "tr=ply";
+    case "EveryFullTurn": return "tr=full";
+    case "EveryNPly":
+      // Canonicalize `EveryNPly(1)` to `tr=ply` to match the engine's
+      // parser + encoder (both normalize: `ply_count % 1 == 0` is
+      // always true, so `EveryNPly(1)` is behaviorally identical to
+      // `EveryPly`). Without this, a server round-trip would byte-
+      // shift the FEN: editor emits `tr=1ply`, engine parses to
+      // `EveryPly`, engine re-encodes as `tr=ply`.
+      return rate.n === 1 ? "tr=ply" : `tr=${rate.n}ply`;
+  }
 }
 
 function castlingToFEN(c: CastlingRights): string {
@@ -72,7 +128,9 @@ export function serializeFullFEN(board: Square[][], flags: BoardFlags): string {
   const stm = flags.sideToMove;
   const castling = castlingToFEN(flags.castling);
   const ep = flags.enPassant ?? "-";
-  return `${grid} ${stm} ${castling} ${ep}`;
+  const tr = trainTickRateToFEN(flags.trainTickRate);
+  const p = `p=${flags.plyCount}`;
+  return `${grid} ${stm} ${castling} ${ep} ${tr} ${p}`;
 }
 
 // For pretty optional rendering
@@ -87,27 +145,23 @@ export const pieceToSymbol = (p: string): string => {
 };
 
 export const pieceToImage = (p: string): string | undefined => {
-  // for custom pieces
-  // currently, skibidi and bus
-  // currently let's just take letters before first paranthesis
+  // For custom pieces (multi-char or payload-bearing symbols). Strip
+  // any parenthesised payload first so "LOCO(ID=1,H=F)" reduces to
+  // "LOCO".
   const base = p.split("(")[0];
-  // if first char is lowercase, turn entire base to lowercase
-  // likewise, if uppercase, turn entire base to uppercase
-  // this is so "Bus" and "BUS" both map to same image
-  // only the first letter matters for color
-  if (base[0] >= "a" && base[0] <= "z") {
-    base.toLowerCase();
-  } else if (base[0] >= "A" && base[0] <= "Z") {
-    base.toUpperCase();
-  }
-  // map base to image filename
+  // Train carts are color-blind (Neutral) — single sprite per kind.
+  // The engine accepts both "LOCO"/"loco" so route either casing to
+  // the same image.
+  const baseUpper = base.toUpperCase();
+  if (baseUpper === "LOCO") return "/img/pieces/locomotive.svg";
+  if (baseUpper === "CART") return "/img/pieces/carriage.svg";
+  // map base to image filename for non-train custom pieces.
   const map: Record<string, string> = {
-    "G": "/img/pieces/Goblin white.png",
-    "g": "/img/pieces/Goblin black.png",
-    "BUS": "/img/pieces/Bus white.png",
-    "bus": "/img/pieces/Bus black.png",
+    "G":    "/img/pieces/Goblin white.png",
+    "g":    "/img/pieces/Goblin black.png",
+    "BUS":  "/img/pieces/Bus white.png",
+    "bus":  "/img/pieces/Bus black.png",
   };
-  console.log("pieceToImage:", p, "->", map[base]);
   return map[base];
 }
 
@@ -144,7 +198,22 @@ export function getBusPassengers(busPiece: string): string[] {
     if (key !== "P") continue;
     // value is "(N,P,p)" — strip the wrapping parens
     if (!value.startsWith("(") || !value.endsWith(")")) return [];
-    return splitTopLevel(value.slice(1, -1));
+    // Mirror the engine's nested-carrier rejection: a Bus passenger
+    // that's itself a carrier (BUS / LOCO / CART) is dropped at FEN
+    // parse on the engine side. Filter here so the editor doesn't
+    // display state the engine then silently strips on round-trip.
+    const raw = splitTopLevel(value.slice(1, -1));
+    return raw.filter(sym => {
+      const prefix = sym.split("(")[0].toLowerCase();
+      const isCarrier =
+        prefix === "bus" || prefix === "loco" || prefix === "cart";
+      if (isCarrier) {
+        console.warn(
+          `getBusPassengers: dropping nested carrier passenger '${sym}'`,
+        );
+      }
+      return !isCarrier;
+    });
   }
   return [];
 }
@@ -210,6 +279,7 @@ const KNOWN_SQUARE_TYPES = new Set<SquareType>([
   "JUNCTION",
   "GATE",
   "PLATE",
+  "TRACK",
 ]);
 
 /// Variant-payload keys we know about but the editor doesn't yet model
@@ -221,6 +291,7 @@ const PAYLOAD_KEYS = new Set<string>([
   "TARGETS",
   "OPEN",
   "FIRES",
+  "D",
 ]);
 
 export function fenToSquare(fen: string): Square {
@@ -265,7 +336,16 @@ export function fenToSquare(fen: string): Square {
           if (PAYLOAD_KEYS.has(key)) {
             // Known variant-payload field — preserve verbatim so the FEN
             // round-trips even though the editor doesn't render it yet.
-            extraFields[key] = value;
+            // OPEN is canonicalized to "1"/"0" to match engine-side
+            // strict parsing (fen.rs Gate: anything other than "0"/"1"
+            // is treated as closed). Without this, a pasted FEN with
+            // `OPEN=garbage` would render closed in the editor but
+            // still emit `OPEN=garbage` on the next round-trip.
+            if (key === "OPEN") {
+              extraFields[key] = value === "1" ? "1" : "0";
+            } else {
+              extraFields[key] = value;
+            }
           } else {
             console.warn("Unknown FEN square field:", field);
           }
@@ -302,6 +382,7 @@ const PAYLOAD_FIELD_ORDER: readonly string[] = [
   "TARGETS",
   "OPEN",
   "FIRES",
+  "D",
 ];
 
 export function squareToFEN(square: Square): string {

@@ -56,7 +56,8 @@ increment it. When flipping `side_to_move`, decrement first — if it was
 non-zero, *don't* flip.
 
 ```rust
-// In make_move at end of handle_post_move_effects:
+// In make_move at the tail of apply_environment_reactions
+// (phase 3 — the renamed handle_post_move_effects):
 if self.flags.extra_moves > 0 {
     self.flags.extra_moves -= 1;
 } else {

@@ -4,7 +4,10 @@ use crate::{
     board::GameMove,
     pieces::{
         Color, Piece,
-        fairy::{bus::Bus, goblin::Goblin, skibidi::Skibidi},
+        fairy::{
+            bus::Bus, carriage::Carriage, goblin::Goblin, locomotive::Locomotive,
+            skibidi::Skibidi,
+        },
         standard::{
             bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook,
         },
@@ -27,7 +30,8 @@ macro_rules! dispatch {
             PieceType::Goblin($piece) => $body,
             PieceType::Skibidi($piece) => $body,
             PieceType::Bus($piece) => $body,
-            PieceType::Custom($piece) => $body,
+            PieceType::Locomotive($piece) => $body,
+            PieceType::Carriage($piece) => $body,
         }
     };
 }
@@ -45,8 +49,33 @@ pub enum PieceType {
     Goblin(crate::pieces::fairy::goblin::Goblin),
     Skibidi(crate::pieces::fairy::skibidi::Skibidi),
     Bus(crate::pieces::fairy::bus::Bus),
+    Locomotive(crate::pieces::fairy::locomotive::Locomotive),
+    Carriage(crate::pieces::fairy::carriage::Carriage),
+}
 
-    Custom(Box<dyn Piece>),
+impl PieceType {
+    /// Plan 09: is this piece a train cart (locomotive or carriage)?
+    /// Used by `advance_trains` to identify carts quickly, and by
+    /// `find_king` to know which carriers to descend into.
+    pub fn is_train_cart(&self) -> bool {
+        matches!(self, PieceType::Locomotive(_) | PieceType::Carriage(_))
+    }
+
+    /// Read-only view of a carrier's passenger list. Returns `Some(&[])`
+    /// for an empty carrier and `None` for non-carriers. Dispatches
+    /// to `Piece::passengers`, so any future custom carrier piece
+    /// only needs to override the trait method — no `PieceType` arm
+    /// to update.
+    pub fn passengers(&self) -> Option<&[PieceType]> {
+        dispatch!(self, p => p.passengers())
+    }
+
+    /// Mutable handle on a carrier's passenger list. Dispatches to
+    /// `Piece::passengers_mut`. Used by make_move when a passenger
+    /// enters, exits, or is captured by an enemy boarding.
+    pub fn passengers_mut(&mut self) -> Option<&mut Vec<PieceType>> {
+        dispatch!(self, p => p.passengers_mut())
+    }
 }
 
 impl From<Rc<PieceType>> for PieceType {
@@ -109,6 +138,8 @@ impl PieceType {
             "g" => Goblin::from_symbol(symbol),
             "s" => Skibidi::from_symbol(symbol),
             "bus" => Bus::from_symbol(symbol),
+            "loco" => Locomotive::from_symbol(symbol),
+            "cart" => Carriage::from_symbol(symbol),
 
             _ => None,
         }
@@ -238,11 +269,30 @@ impl PieceType {
                 return true;
             };
 
-            if !is_promotion
-                && target_piece.can_carry_piece()
-                && target_piece.get_color() == self.get_color()
-            {
-                // Capacity check — Bus holds at most 5 (per spec).
+            // Same-color carrier → friendly board. Neutral carrier (a
+            // train cart) → board-by-capture: the cart is invincible, so
+            // moving onto its tile boards it rather than capturing it.
+            // When the cart is Neutral and the boarder isn't, the
+            // make_move MoveIntoCarrier handler removes opposite-
+            // colour passengers (plan 09's "passenger captured by
+            // enemy entering cart" rule). Same-colour boarding of a
+            // colour-matched carrier (Bus) is purely additive — no
+            // passenger capture.
+            let target_is_boardable = target_piece.can_carry_piece()
+                && (target_piece.get_color() == self.get_color()
+                    || target_piece.get_color() == Color::Neutral);
+            // Promotion onto a Neutral cart would let `relocate_pieces`
+            // overwrite the cart with the promoted piece, breaking the
+            // trains-invincible invariant. The pawn has no way to
+            // "promote inside the cart" through the current pipeline,
+            // so drop the move — the pawn can still push or capture
+            // onto a non-cart promotion square.
+            if is_promotion && target_piece.get_color() == Color::Neutral {
+                return false;
+            }
+            if !is_promotion && target_is_boardable {
+                // Capacity check — Bus holds at most 5 (per spec). Trains
+                // have no cap in v1.
                 let at_capacity = match target_piece {
                     PieceType::Bus(bus) => bus.pieces.len() >= 5,
                     _ => false,
@@ -250,28 +300,22 @@ impl PieceType {
                 if at_capacity {
                     return false;
                 }
-                // Forbid nested carriers — Bus inside Bus would let total
-                // transported pieces escape the capacity-5 spec, since the
-                // outer Bus only counts the inner Bus as a single entry.
-                // The entering piece is `self` (top-level) or
-                // `self.pieces[idx]` (passenger of a carrier).
+                // Forbid nested carriers — a carrier inside a carrier
+                // would obscure passenger accounting and break the
+                // "topmost piece is the cart" invariant for trains.
                 let entering_is_carrier = match carrier_index {
                     None => self.can_carry_piece(),
-                    Some(idx) => match self {
-                        PieceType::Bus(bus) => bus
-                            .pieces
-                            .get(idx as usize)
-                            .map(|p| p.can_carry_piece())
-                            .unwrap_or(false),
-                        _ => false,
-                    },
+                    Some(idx) => self
+                        .passengers()
+                        .and_then(|ps| ps.get(idx as usize))
+                        .map(|p| p.can_carry_piece())
+                        .unwrap_or(false),
                 };
                 if entering_is_carrier {
                     return false;
                 }
-                // Landing on a friendly carrier: swap the *inner* move (or the
-                // top-level move) to MoveIntoCarrier, preserving any
-                // PieceInCarrier wrapper.
+                // Rewrite the move so make_move treats this as boarding
+                // (cart preserved), not relocation (cart destroyed).
                 let into = MoveType::MoveIntoCarrier(target);
                 game_move.move_type = match carrier_index {
                     None => into,
@@ -290,7 +334,7 @@ impl PieceType {
     }
 
     pub fn post_move_effects(
-        &mut self,
+        &self,
         board_before: &crate::board::Board,
         board_after: &mut crate::board::Board,
         game_move: &GameMove,
@@ -305,5 +349,18 @@ impl PieceType {
         from: &crate::board::Coord,
     ) -> Vec<crate::board::Coord> {
         dispatch!(self, p => p.attacks(board, from))
+    }
+
+    /// See `Piece::would_capture_at` for semantics. Drives the
+    /// "phantom-attack" guard in `Board::is_attacked_by`: a piece
+    /// may *reach* a tile via its attack set without that constituting
+    /// a capture. Default-true for everything except train carts.
+    pub fn would_capture_at(
+        &self,
+        board: &crate::board::Board,
+        from: &crate::board::Coord,
+        target: &crate::board::Coord,
+    ) -> bool {
+        dispatch!(self, p => p.would_capture_at(board, from, target))
     }
 }

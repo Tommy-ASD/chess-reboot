@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" preserveAspectRatio="xMidYMid meet">
+  <title>Locomotive (top-down, facing east)</title>
+  <defs>
+    <linearGradient id="loco-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a55428"/>
+      <stop offset="0.5" stop-color="#8a4520"/>
+      <stop offset="1" stop-color="#4a2208"/>
+    </linearGradient>
+    <radialGradient id="boiler-shading" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#6a6a6a"/>
+      <stop offset="1" stop-color="#222"/>
+    </radialGradient>
+    <radialGradient id="smoke" cx="0.4" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#f4ede0"/>
+      <stop offset="1" stop-color="#bbb2a0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ground shadow -->
+  <ellipse cx="128" cy="220" rx="116" ry="9" fill="rgba(0,0,0,0.22)"/>
+
+  <!-- rear coupling -->
+  <rect x="8" y="120" width="22" height="16" rx="3" fill="#1a0f06"/>
+
+  <!-- cab (rear) -->
+  <rect x="30" y="72" width="60" height="112" rx="5" fill="url(#loco-body)" stroke="#1a0f06" stroke-width="3"/>
+  <line x1="30" y1="86" x2="90" y2="86" stroke="#3a1a0a" stroke-width="2"/>
+  <line x1="30" y1="170" x2="90" y2="170" stroke="#3a1a0a" stroke-width="2"/>
+  <!-- side windows -->
+  <rect x="40" y="92" width="42" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="40" y="142" width="42" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+
+  <!-- boiler -->
+  <rect x="90" y="78" width="116" height="100" rx="4" fill="url(#boiler-shading)" stroke="#1a0f06" stroke-width="3"/>
+  <line x1="118" y1="78" x2="118" y2="178" stroke="#0a0a0a" stroke-width="2.5"/>
+  <line x1="150" y1="78" x2="150" y2="178" stroke="#0a0a0a" stroke-width="2.5"/>
+  <line x1="180" y1="78" x2="180" y2="178" stroke="#0a0a0a" stroke-width="2.5"/>
+
+  <!-- smokestack (circle viewed from above) -->
+  <circle cx="135" cy="128" r="20" fill="#1a1a1a" stroke="#0d0d0d" stroke-width="3"/>
+  <circle cx="135" cy="128" r="11" fill="#3a3a3a" stroke="#0a0a0a" stroke-width="2"/>
+  <!-- smoke puff -->
+  <circle cx="135" cy="128" r="16" fill="url(#smoke)" opacity="0.7"/>
+
+  <!-- steam dome -->
+  <circle cx="170" cy="128" r="14" fill="#4a4a4a" stroke="#0d0d0d" stroke-width="3"/>
+  <circle cx="170" cy="128" r="6" fill="#6a6a6a"/>
+
+  <!-- headlight (front edge of boiler) -->
+  <circle cx="200" cy="128" r="7" fill="#fff3a3" stroke="#1a0f06" stroke-width="2"/>
+
+  <!-- cowcatcher (front, pointing east) -->
+  <polygon points="206,80 244,128 206,176" fill="#3a1a0a" stroke="#1a0f06" stroke-width="3"/>
+  <line x1="214" y1="94" x2="232" y2="118" stroke="#7a3d1f" stroke-width="2"/>
+  <line x1="220" y1="100" x2="236" y2="122" stroke="#7a3d1f" stroke-width="2"/>
+  <line x1="214" y1="162" x2="232" y2="138" stroke="#7a3d1f" stroke-width="2"/>
+  <line x1="220" y1="156" x2="236" y2="134" stroke="#7a3d1f" stroke-width="2"/>
+
+  <!-- top-side wheels -->
+  <g stroke="#0a0a0a" stroke-width="2">
+    <rect x="100" y="58" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="140" y="58" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="178" y="58" width="14" height="22" rx="2" fill="#1a1a1a"/>
+  </g>
+
+  <!-- bottom-side wheels -->
+  <g stroke="#0a0a0a" stroke-width="2">
+    <rect x="100" y="176" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="140" y="176" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="178" y="176" width="14" height="22" rx="2" fill="#1a1a1a"/>
+  </g>
+</svg>

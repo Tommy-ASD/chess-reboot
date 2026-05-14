@@ -16,6 +16,7 @@ import {
   type BoardFlags,
   type Side,
 } from "./fen";
+import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg, squareTypeIconByType } from "./signal_icons";
 import {
   ALL_PRESSURE_TRIGGERS,
@@ -28,6 +29,7 @@ import {
   getJunctionState,
   getPlateTrigger,
   getReceiverId,
+  getTrackDir,
   isEmitter,
   isReceiver,
   nextSignalId,
@@ -38,9 +40,22 @@ import {
   setJunctionId,
   setJunctionState,
   setPlateTrigger,
+  setTrackDir,
   toggleEmitterTarget,
   type PressureTrigger,
+  type TrackDir,
 } from "./signal_payload";
+import {
+  ALL_TRAIN_HEADINGS,
+  highestChainIndex,
+  firstOrphanTrainId,
+  highestTrainId,
+  isTrainCart,
+  parseTrainCart,
+  serializeTrainCart,
+  trainCartRotationDegrees,
+  type TrainCart,
+} from "./train_payload";
 import type { Coord, Square, SquareType } from "./variables";
 
 // ---------------------------
@@ -68,8 +83,8 @@ let activeBrushButton: HTMLButtonElement | null = null;
 /// rings its wired receivers; clicking other receivers toggles them.
 let inspectedSquare: Coord | null = null;
 
-const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
-const EMPTY_FEN = "8/8/8/8/8/8/8/8 w - -";
+const STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - tr=full p=0";
+const EMPTY_FEN = "8/8/8/8/8/8/8/8 w - - tr=full p=0";
 
 let board: Square[][] = parseFEN(EMPTY_FEN);
 let flags: BoardFlags = { ...DEFAULT_FLAGS };
@@ -80,7 +95,10 @@ let flags: BoardFlags = { ...DEFAULT_FLAGS };
 
 const WHITE_PIECES = ["K", "Q", "R", "B", "N", "P"];
 const BLACK_PIECES = ["k", "q", "r", "b", "n", "p"];
-const CUSTOM_PIECES = ["G", "g", "BUS", "bus"];
+/// Train brushes carry minimal payload — the inspector tunes the rest.
+/// `train_id=1` keeps successive placements in the same train by default;
+/// pick a different ID in the inspector for a separate train.
+const CUSTOM_PIECES = ["G", "g", "BUS", "bus", "LOCO(ID=1,H=F)", "CART(ID=1,I=1)"];
 const SQUARE_TYPES: SquareType[] = [
   "STANDARD",
   "VENT",
@@ -89,6 +107,7 @@ const SQUARE_TYPES: SquareType[] = [
   "JUNCTION",
   "GATE",
   "PLATE",
+  "TRACK",
 ];
 
 /// Lower-cased class suffix per square type so render code can do
@@ -101,6 +120,7 @@ const TYPE_CLASS: Record<Exclude<SquareType, "STANDARD">, string> = {
   JUNCTION: "junction",
   GATE: "gate",
   PLATE: "plate",
+  TRACK: "track",
 };
 const CONDITIONS = ["FROZEN", "BRAINROT"];
 
@@ -113,6 +133,22 @@ const PRESETS: { name: string; fen: string }[] = [
   {
     name: "Signal substrate test",
     fen: "(T=SWITCH,TARGETS=(3,7))(T=JUNCTION,ID=3,STATE=0,BRANCHES=(N,E))(T=GATE,ID=7,OPEN=0)(T=PLATE,TARGETS=(3),FIRES=B)4/8/8/8/8/8/8/8 w - -",
+  },
+  {
+    // Loco at the western end of a 5-tile east-pointing rail. Tiles
+    // downstream of the loco's start tile don't need their D set —
+    // neighbor-detection picks the right exit at each tick.
+    name: "Train test (straight east)",
+    fen: "8/8/8/8/(T=TRACK,D=E,P=LOCO(ID=1,H=F))(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)3/8/8/8 w - - tr=ply p=0",
+  },
+  {
+    // 4-tile loop in a 2×2 square. Loco starts on the NW tile facing
+    // east; neighbor-detection bends the rails into a closed loop.
+    // The cart trails one chain step behind the loco. Connection
+    // graph: NW↔NE (top edge), NE↔SE (right edge), SE↔SW (bottom),
+    // SW↔NW (left). Loco rolls E→S→W→N→E... and the cart follows.
+    name: "Train test (loop + cart)",
+    fen: "8/8/8/3(T=TRACK,D=E,P=LOCO(ID=1,H=F))(T=TRACK,D=E)3/3(T=TRACK,D=E,P=CART(ID=1,I=1))(T=TRACK,D=E)3/8/8/8 w - - tr=ply p=0",
   },
 ];
 
@@ -151,14 +187,108 @@ function setActiveBrush(brush: Brush, btn: HTMLButtonElement) {
 // Apply brush to a square
 // ---------------------------
 
+/// Rewrite the LOCO/CART brush template so each placement allocates a
+/// fresh train_id (LOCO) or the next chain_index for the most recent
+/// train (CART). Non-train brushes pass through unchanged. Keeps the
+/// common case "I want a new train" / "I want the next carriage"
+/// one-click without dragging the user into the inspector.
+function withSmartTrainPayload(piece: string): string {
+  const cart = parseTrainCart(piece);
+  if (!cart) return piece;
+  if (cart.kind === "LOCO") {
+    // Adopt any existing orphan train (carts placed before this LOCO)
+    // so the user doesn't end up with a silently disconnected chain.
+    // If no orphan exists, allocate a fresh ID.
+    const orphan = firstOrphanTrainId(board);
+    cart.trainId = orphan !== null ? orphan : highestTrainId(board) + 1;
+  } else {
+    // Attach to the highest train_id currently on the board (assumed
+    // to be the loco the user just placed). If no loco exists yet,
+    // fall back to train 1 so the carriage still has a sensible ID
+    // — and warn the user. The LOCO branch above will adopt this
+    // train_id when a matching LOCO is later placed, so the orphan
+    // is recoverable.
+    const max = highestTrainId(board);
+    if (max === 0) {
+      console.warn(
+        "Placing a CART before any LOCO — assigning train_id=1. The next " +
+          "LOCO you place will adopt this train automatically; until then " +
+          "the carriage will be orphaned and won't move.",
+      );
+    }
+    const target = Math.max(1, max);
+    cart.trainId = target;
+    cart.chainIndex = highestChainIndex(board, target) + 1;
+  }
+  return serializeTrainCart(cart);
+}
+
+/// When painting a Locomotive onto a Track tile, re-orient the tile's
+/// `D` field to point away from same-train carriages. The engine uses
+/// `D` on the first tick, and the default E often points at empty
+/// space; this rule eliminates the most common "paint a chain and the
+/// train won't move" surprise. Looks at the 4 cardinal neighbors and
+/// picks a track exit that isn't already occupied by a cart of the
+/// same train.
+function pickLocoStartDir(
+  boardGrid: Square[][],
+  file: number,
+  rank: number,
+  trainId: number,
+): TrackDir | null {
+  const cardinal: { dir: TrackDir; df: number; dr: number }[] = [
+    { dir: "N", df: 0, dr: -1 },
+    { dir: "E", df: 1, dr: 0 },
+    { dir: "S", df: 0, dr: 1 },
+    { dir: "W", df: -1, dr: 0 },
+  ];
+  const behind: TrackDir[] = [];
+  const candidates: TrackDir[] = [];
+  for (const { dir, df, dr } of cardinal) {
+    const sq = boardGrid[rank + dr]?.[file + df];
+    if (!sq) continue;
+    if (sq.squareType !== "TRACK" && sq.squareType !== "JUNCTION") continue;
+    if (sq.piece) {
+      const c = parseTrainCart(sq.piece);
+      if (c && c.trainId === trainId) {
+        behind.push(dir);
+        continue;
+      }
+    }
+    candidates.push(dir);
+  }
+  if (candidates.length === 0) return null;
+  // If we have a "behind" direction, prefer its opposite — that's the
+  // intuitive "forward" out of a chain.
+  for (const b of behind) {
+    const opposite: TrackDir =
+      b === "N" ? "S" : b === "S" ? "N" : b === "E" ? "W" : "E";
+    if (candidates.includes(opposite)) return opposite;
+  }
+  return candidates[0];
+}
+
 function applyBrush(rank: number, file: number) {
   if (!activeBrush) return;
   const sq = board[rank][file];
 
   switch (activeBrush.kind) {
-    case "piece":
-      sq.piece = activeBrush.piece;
+    case "piece": {
+      sq.piece = withSmartTrainPayload(activeBrush.piece);
+      // Plan 09 polish: a freshly-painted LOCO on a Track tile gets
+      // its tile's `D` re-oriented so the first tick moves the train
+      // out of the chain, not into empty space. CART placement
+      // doesn't touch D — carts inherit direction from the loco at
+      // tick time, so their tile's D is engine-irrelevant.
+      if (sq.piece && sq.squareType === "TRACK") {
+        const placed = parseTrainCart(sq.piece);
+        if (placed && placed.kind === "LOCO") {
+          const newDir = pickLocoStartDir(board, file, rank, placed.trainId);
+          if (newDir !== null) setTrackDir(sq, newDir);
+        }
+      }
       break;
+    }
     case "type":
       sq.squareType = activeBrush.squareType;
       delete sq.extraFields;
@@ -179,6 +309,9 @@ function applyBrush(rank: number, file: number) {
       } else if (activeBrush.squareType === "PLATE") {
         setEmitterTargets(sq, []);
         setPlateTrigger(sq, "ANY");
+      } else if (activeBrush.squareType === "TRACK") {
+        // East by default — the inspector lets the user rotate it.
+        setTrackDir(sq, "E");
       }
       break;
     case "condition": {
@@ -252,16 +385,21 @@ function renderBoard() {
           img.src = imgPath;
           img.alt = sq.piece;
           img.classList.add("piece-image");
+          if (isTrainCart(sq.piece)) {
+            const deg = trainCartRotationDegrees(sq.piece, board, file, rank);
+            if (deg !== 0) img.style.transform = `rotate(${deg}deg)`;
+          }
           cell.appendChild(img);
         } else {
           cell.textContent = pieceToSymbol(sq.piece);
         }
+        renderCarrierPassengerOverlay(cell, sq.piece);
       }
       if (sq.conditions.includes("FROZEN")) cell.classList.add("cond-frozen");
       if (sq.conditions.includes("BRAINROT")) cell.classList.add("cond-brainrot");
       if (sq.squareType !== "STANDARD") {
         cell.classList.add(`type-${TYPE_CLASS[sq.squareType]}`);
-        const svg = squareIconSvg(sq);
+        const svg = squareIconSvg(sq, { board, file, rank });
         if (svg) {
           const iconWrap = document.createElement("div");
           iconWrap.className = "square-icon";
@@ -315,6 +453,18 @@ function syncFlagsToControls() {
   (document.getElementById("ep-target") as HTMLInputElement).value = flags.enPassant ?? "";
   (document.getElementById("board-cols") as HTMLInputElement).value = String(board[0]?.length ?? 0);
   (document.getElementById("board-rows") as HTMLInputElement).value = String(board.length);
+
+  // Plan 09: train tick rate + ply count. The mode select switches the
+  // discriminated union; only `EveryNPly` exposes the `n` input.
+  const tickMode = document.getElementById("train-tick-mode") as HTMLSelectElement | null;
+  const tickN = document.getElementById("train-tick-n") as HTMLInputElement | null;
+  const ply = document.getElementById("ply-count") as HTMLInputElement | null;
+  if (tickMode) tickMode.value = flags.trainTickRate.kind;
+  if (tickN) {
+    tickN.value = flags.trainTickRate.kind === "EveryNPly" ? String(flags.trainTickRate.n) : "";
+    tickN.disabled = flags.trainTickRate.kind !== "EveryNPly";
+  }
+  if (ply) ply.value = String(flags.plyCount);
 }
 
 /// Resize the board grid to the requested dimensions, preserving any
@@ -339,6 +489,16 @@ function resizeBoard(newCols: number, newRows: number) {
     next.push(row);
   }
   board = next;
+  // Clear the inspected coord if it's now outside the new bounds —
+  // otherwise the inspector silently disappears (renderInspector
+  // early-returns on missing square) while the user wonders why
+  // their click doesn't show anything.
+  if (
+    inspectedSquare &&
+    (inspectedSquare.rank >= rows || inspectedSquare.file >= cols)
+  ) {
+    inspectedSquare = null;
+  }
   syncFromState();
 }
 
@@ -347,7 +507,27 @@ function loadFEN(fen: string) {
   try {
     board = parseFEN(fen);
     flags = parseFENFlags(fen);
-    inspectedSquare = null;
+    // Preserve `inspectedSquare` across re-parses — typing into the FEN
+    // box (which fires `input` per keystroke) used to clear the
+    // selection mid-edit. Drop it if (a) the parsed board no longer
+    // covers the coord (smaller board parsed in), or (b) the inspected
+    // tile is now a STANDARD square with no train cart on it — in
+    // either case there's nothing left to inspect at that coord.
+    if (inspectedSquare) {
+      const inBounds =
+        inspectedSquare.rank < board.length &&
+        inspectedSquare.file < (board[0]?.length ?? 0);
+      if (!inBounds) {
+        inspectedSquare = null;
+      } else {
+        const sq = board[inspectedSquare.rank][inspectedSquare.file];
+        const hasInspectable =
+          sq.squareType !== "STANDARD" || (sq.piece && isTrainCart(sq.piece));
+        if (!hasInspectable) {
+          inspectedSquare = null;
+        }
+      }
+    }
     renderBoard();
     syncFlagsToControls();
     renderInspector();
@@ -404,8 +584,20 @@ function renderInspector() {
         "With this Plate selected, click any Junction or Gate to wire / un-wire it.",
       ));
       break;
+    case "TRACK":
+      host.appendChild(renderTrackEditor(sq));
+      break;
     default:
-      host.appendChild(hint(`${sq.squareType} squares have no editable payload.`));
+      if (!isTrainCart(sq.piece)) {
+        host.appendChild(hint(`${sq.squareType} squares have no editable payload.`));
+      }
+  }
+
+  // Train carts are *pieces*, not square types — so they can sit on a
+  // TRACK tile alongside the square-payload editor. Append the cart
+  // editor whenever the square holds a LOCO or CART.
+  if (isTrainCart(sq.piece)) {
+    host.appendChild(renderTrainCartEditor(sq));
   }
 }
 
@@ -520,6 +712,7 @@ function renderPlateTriggerEditor(sq: Square): HTMLElement {
     const btn = document.createElement("button");
     btn.className = "branch-toggle";
     btn.textContent = triggerLabel(trig);
+    btn.title = triggerTooltip(trig);
     if (trig === current) btn.classList.add("on");
     btn.onclick = () => {
       setPlateTrigger(sq, trig);
@@ -536,10 +729,202 @@ function triggerLabel(trig: PressureTrigger): string {
     case "ANY": return "Any";
     case "W":   return "White";
     case "B":   return "Black";
+    case "N":   return "Neutral";
   }
 }
 
-function numericField(label: string, value: number, onCommit: (v: number) => void): HTMLElement {
+function triggerTooltip(trig: PressureTrigger): string {
+  switch (trig) {
+    case "ANY": return "Fires for any piece";
+    case "W":   return "Fires only for white pieces";
+    case "B":   return "Fires only for black pieces";
+    case "N":   return "Fires only for train carts (Neutral)";
+  }
+}
+
+function renderTrackEditor(sq: Square): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+
+  const label = document.createElement("div");
+  label.className = "inspector-sublabel";
+  label.textContent = "Direction (outgoing):";
+  wrap.appendChild(label);
+
+  const current = getTrackDir(sq);
+  const row = document.createElement("div");
+  row.className = "inspector-branches";
+  for (const dir of ALL_TRACK_DIRS) {
+    const btn = document.createElement("button");
+    btn.className = "branch-toggle";
+    btn.textContent = dir;
+    if (dir === current) btn.classList.add("on");
+    btn.onclick = () => {
+      setTrackDir(sq, dir);
+      syncFromState();
+    };
+    row.appendChild(btn);
+  }
+  wrap.appendChild(row);
+  return wrap;
+}
+
+/// Inspector for the LOCO / CART piece sitting on the inspected square.
+/// Reads the structured form via `parseTrainCart`, lets the user edit
+/// the fields, and writes back through `serializeTrainCart` so the FEN
+/// always sees the canonical engine-ordered shape.
+function renderTrainCartEditor(sq: Square): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "inspector-section";
+  const cart = parseTrainCart(sq.piece ?? "");
+  if (!cart) {
+    wrap.appendChild(hint("(invalid train symbol)"));
+    return wrap;
+  }
+
+  const heading = document.createElement("div");
+  heading.className = "inspector-sublabel";
+  heading.textContent = cart.kind === "LOCO" ? "Locomotive" : "Carriage";
+  wrap.appendChild(heading);
+
+  const commit = (mutate: (c: TrainCart) => void) => {
+    mutate(cart);
+    sq.piece = serializeTrainCart(cart);
+    syncFromState();
+  };
+
+  wrap.appendChild(numericField("Train ID", cart.trainId, v => {
+    commit(c => { c.trainId = v; });
+  }));
+
+  if (cart.kind === "LOCO") {
+    const subLabel = document.createElement("div");
+    subLabel.className = "inspector-sublabel";
+    subLabel.textContent = "Heading (first tick only):";
+    wrap.appendChild(subLabel);
+
+    const row = document.createElement("div");
+    row.className = "inspector-branches";
+    for (const h of ALL_TRAIN_HEADINGS) {
+      const btn = document.createElement("button");
+      btn.className = "branch-toggle";
+      btn.textContent = h === "F" ? "Forward" : "Reverse";
+      if (h === cart.heading) btn.classList.add("on");
+      btn.onclick = () => commit(c => { c.heading = h; });
+      row.appendChild(btn);
+    }
+    wrap.appendChild(row);
+
+    // Last-direction selector. After the first tick the engine uses
+    // neighbor-detection: it exits through the side that isn't
+    // `lastDir`. The "Reset" choice clears the field so the loco
+    // bootstraps from the tile's `D` again. Useful for hand-tuning a
+    // mid-game scenario where the loco is already partway through a
+    // rail and the rail's stored `D` would send it the wrong way.
+    const lastLabel = document.createElement("div");
+    lastLabel.className = "inspector-sublabel";
+    lastLabel.textContent = "Entered from (last_dir):";
+    wrap.appendChild(lastLabel);
+
+    const lastRow = document.createElement("div");
+    lastRow.className = "inspector-branches";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "branch-toggle";
+    resetBtn.textContent = "—";
+    resetBtn.title = "Clear last_dir; engine uses the tile's D on the next tick.";
+    if (cart.lastDir === null) resetBtn.classList.add("on");
+    resetBtn.onclick = () => commit(c => { c.lastDir = null; });
+    lastRow.appendChild(resetBtn);
+
+    for (const d of ALL_TRACK_DIRS) {
+      const btn = document.createElement("button");
+      btn.className = "branch-toggle";
+      btn.textContent = d;
+      if (cart.lastDir === d) btn.classList.add("on");
+      btn.onclick = () => commit(c => { c.lastDir = d; });
+      lastRow.appendChild(btn);
+    }
+    wrap.appendChild(lastRow);
+  } else {
+    // Chain index 0 is reserved for the locomotive head — the engine
+    // warns and rewrites I=0 to I=1 at parse time, so disallow it in
+    // the UI for byte-identical FEN round-trip.
+    wrap.appendChild(numericField("Chain index", cart.chainIndex, v => {
+      commit(c => { c.chainIndex = v; });
+    }, { min: 1 }));
+  }
+
+  // Passenger list editor — comma-separated symbols. Same shape as the
+  // engine's `P=(...)` field. Empty input means "no passengers".
+  // Unknown symbols are dropped with a visible warning rather than
+  // silently — otherwise a typo round-trips through the engine
+  // (`symbol_to_piece` returns `None`) and the passenger vanishes.
+  const passLabel = document.createElement("div");
+  passLabel.className = "inspector-sublabel";
+  passLabel.textContent = "Passengers (symbols, comma-separated):";
+  wrap.appendChild(passLabel);
+  const passInput = document.createElement("input");
+  passInput.type = "text";
+  passInput.placeholder = "e.g. P,N";
+  passInput.value = cart.passengers.join(",");
+  const passHint = document.createElement("p");
+  passHint.className = "inspector-hint";
+  passInput.addEventListener("change", () => {
+    const raw = passInput.value
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    // Validate each — a passenger's leading prefix (before any
+    // parens) must be a recognised piece kind that the engine's
+    // `PieceType::symbol_to_piece` accepts. Nested carriers
+    // (Bus/LOCO/CART as passengers) are also rejected: the engine
+    // refuses them at FEN parse, and the move filter never produces
+    // them, so accepting them here would diverge from the engine.
+    //
+    // Note: Monkey (M/m) is intentionally absent — the engine's
+    // `symbol_to_piece` doesn't have a Monkey arm, so a Monkey
+    // passenger would parse on the frontend but get silently
+    // dropped on engine round-trip. Keep the validator's accept-set
+    // in sync with the engine's parse-set.
+    const known = new Set([
+      "p", "r", "n", "b", "q", "k",
+      "g", "s",
+    ]);
+    const customCarriers = new Set(["bus", "loco", "cart"]);
+    const accepted: string[] = [];
+    const rejected: string[] = [];
+    for (const sym of raw) {
+      const prefix = sym.split("(")[0].toLowerCase();
+      if (customCarriers.has(prefix)) {
+        rejected.push(`${sym} (nested carrier)`);
+      } else if (known.has(prefix)) {
+        accepted.push(sym);
+      } else {
+        rejected.push(sym);
+      }
+    }
+    if (rejected.length > 0) {
+      passHint.textContent = `Dropped: ${rejected.join(", ")}`;
+      console.warn("Inspector dropped invalid passengers:", rejected);
+    } else {
+      passHint.textContent = "";
+    }
+    commit(c => { c.passengers = accepted; });
+  });
+  wrap.appendChild(passInput);
+  wrap.appendChild(passHint);
+
+  return wrap;
+}
+
+
+function numericField(
+  label: string,
+  value: number,
+  onCommit: (v: number) => void,
+  opts?: { min?: number },
+): HTMLElement {
   const row = document.createElement("label");
   row.className = "inspector-field";
   const text = document.createElement("span");
@@ -547,11 +932,12 @@ function numericField(label: string, value: number, onCommit: (v: number) => voi
   row.appendChild(text);
   const input = document.createElement("input");
   input.type = "number";
-  input.min = "0";
+  const min = opts?.min ?? 0;
+  input.min = String(min);
   input.value = String(value);
   input.addEventListener("change", () => {
     const n = Number.parseInt(input.value, 10);
-    if (Number.isFinite(n) && n >= 0) onCommit(n);
+    if (Number.isFinite(n) && n >= min) onCommit(n);
   });
   row.appendChild(input);
   return row;
@@ -664,6 +1050,7 @@ const TYPE_ACCENT: Record<SquareType, string> = {
   JUNCTION: "rgba(120, 200, 255, 0.95)",
   GATE:     "rgba(220, 80, 80, 0.95)",
   PLATE:    "rgba(170, 130, 255, 0.95)",
+  TRACK:    "rgba(200, 170, 110, 0.95)",
 };
 
 function buildPiecePalette(containerId: string, pieces: string[]) {
@@ -740,7 +1127,25 @@ function wireFENInput() {
 function wireDimensionControls() {
   const cols = document.getElementById("board-cols") as HTMLInputElement;
   const rows = document.getElementById("board-rows") as HTMLInputElement;
-  const apply = () => resizeBoard(Number(cols.value), Number(rows.value));
+  const apply = () => {
+    // Guard against empty / non-numeric input. `Number("")` is 0,
+    // `Number("abc")` is NaN. Both would erase the board via
+    // resizeBoard. Fall back to the current dimension on bad input
+    // and snap the input value back so the user sees the rejection.
+    const cParsed = Number(cols.value);
+    const rParsed = Number(rows.value);
+    const safeCols =
+      Number.isFinite(cParsed) && cParsed >= 1
+        ? Math.round(cParsed)
+        : board[0]?.length ?? 8;
+    const safeRows =
+      Number.isFinite(rParsed) && rParsed >= 1
+        ? Math.round(rParsed)
+        : board.length;
+    cols.value = String(safeCols);
+    rows.value = String(safeRows);
+    resizeBoard(safeCols, safeRows);
+  };
   cols.addEventListener("change", apply);
   rows.addEventListener("change", apply);
 }
@@ -766,6 +1171,42 @@ function wireFlagControls() {
     (document.getElementById("fen-input") as HTMLInputElement).value =
       serializeFullFEN(board, flags);
   });
+
+  const tickMode = document.getElementById("train-tick-mode") as HTMLSelectElement | null;
+  const tickN = document.getElementById("train-tick-n") as HTMLInputElement | null;
+  if (tickMode) {
+    tickMode.addEventListener("change", () => {
+      const value = tickMode.value;
+      if (value === "EveryNPly") {
+        const current = flags.trainTickRate.kind === "EveryNPly" ? flags.trainTickRate.n : 2;
+        flags.trainTickRate = { kind: "EveryNPly", n: current };
+      } else if (value === "EveryPly") {
+        flags.trainTickRate = { kind: "EveryPly" };
+      } else {
+        flags.trainTickRate = { kind: "EveryFullTurn" };
+      }
+      syncFromState();
+    });
+  }
+  if (tickN) {
+    tickN.addEventListener("change", () => {
+      const n = Number.parseInt(tickN.value, 10);
+      if (Number.isFinite(n) && n > 0) {
+        flags.trainTickRate = { kind: "EveryNPly", n };
+        syncFromState();
+      }
+    });
+  }
+  const ply = document.getElementById("ply-count") as HTMLInputElement | null;
+  if (ply) {
+    ply.addEventListener("change", () => {
+      const n = Number.parseInt(ply.value, 10);
+      if (Number.isFinite(n) && n >= 0) {
+        flags.plyCount = n;
+        syncFromState();
+      }
+    });
+  }
 }
 
 function wireTopButtons() {

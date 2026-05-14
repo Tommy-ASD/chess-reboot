@@ -54,9 +54,11 @@ pub fn is_valid_move(&self, game_move: &GameMove) -> bool {
 
 ### `engine/src/board/make_move.rs`
 
-After a successful move, flip `side_to_move`. Place this in
-`handle_post_move_effects` after `recalc_brainrot()`, or at the end of
-`make_move` itself.
+After a successful move, flip `side_to_move`. As shipped: the flip lives at
+the tail of `apply_environment_reactions` (phase 3 of the make_move pipeline),
+after `maybe_advance_trains` and `recalc_brainrot`. `apply_environment_reactions`
+is the renamed successor of the old `handle_post_move_effects`; phase 2's
+piece-level reactions now live in `apply_piece_post_effects`.
 
 ```rust
 self.flags.side_to_move = self.flags.side_to_move.opposite();

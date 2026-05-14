@@ -31,6 +31,13 @@ impl Piece for Monkey {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: Neutral non-train pieces yield no moves. The
+        // Monkey's opposite-color jump-capture rule would otherwise
+        // collapse to "captures other Neutral pieces" since
+        // `Color::Neutral.opposite() == Color::Neutral`.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let mut moves = Vec::new();
         let directions: [(isize, isize); 8] = [
             (1, 0),
@@ -52,7 +59,15 @@ impl Piece for Monkey {
                     file: new_file as u8,
                     rank: new_rank as u8,
                 };
-                if board.square_is_empty(&coord) {
+                // Empty walkable square: ordinary king-step.
+                // Neutral cart on a walkable square: emit MoveTo so the
+                // filter in `piecetype.rs` rewrites to `MoveIntoCarrier`
+                // (plan-09 cart-boarding). Without this, Monkey alone
+                // among pieces would fail to board a cart it stepped
+                // onto.
+                let target_occupant = board.get_square_at(&coord).and_then(|s| s.piece.as_ref());
+                let is_neutral_carrier = matches!(target_occupant, Some(p) if p.get_color() == Color::Neutral && p.can_carry_piece());
+                if board.square_is_empty(&coord) || is_neutral_carrier {
                     let game_move = GameMove {
                         from: from.clone(),
                         move_type: MoveType::MoveTo(coord.clone()),
@@ -70,6 +85,7 @@ impl Piece for Monkey {
         match self.color {
             Color::White => 'M'.to_string(),
             Color::Black => 'm'.to_string(),
+            Color::Neutral => 'M'.to_string(),
         }
     }
 
@@ -87,10 +103,43 @@ impl Piece for Monkey {
     /// for the "if the king were here instead, would Monkey capture?"
     /// semantics king-safety needs).
     fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        // Plan 09 S1: Neutral non-train piece threatens nothing. The
+        // S1 guard in `initial_moves` doesn't flow here because this
+        // override builds its own attack list via jump-detection.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         let mut visited = Vec::new();
         self.collect_jump_threats(board, from, &mut visited, &mut out);
         out
+    }
+
+    /// Monkey captures the piece on its jump-landing. The default
+    /// `would_capture_at` returns true for any target, which is right
+    /// for non-cart landings (jump-onto-enemy = capture, jump-onto-
+    /// friendly = "if a king were here we'd take it" for king-safety).
+    /// Neutral carts are the exception: Monkey *boards* a cart, and
+    /// the cart's `passengers.retain(|p| p.get_color() == boarder_color)`
+    /// rule (make_move.rs, Plan 09 Q7 pinned current behavior) culls
+    /// only opposite-color passengers. So Monkey "captures at" a
+    /// Neutral-cart tile iff that cart holds at least one opposite-
+    /// color passenger; otherwise the tile is benign and king-safety
+    /// must not flag it.
+    fn would_capture_at(&self, board: &Board, _from: &Coord, target: &Coord) -> bool {
+        let Some(sq) = board.get_square_at(target) else {
+            return true;
+        };
+        let Some(piece) = sq.piece.as_ref() else {
+            return true;
+        };
+        if piece.get_color() == Color::Neutral && piece.can_carry_piece() {
+            return piece
+                .passengers()
+                .map(|ps| ps.iter().any(|p| p.get_color() != self.color))
+                .unwrap_or(false);
+        }
+        true
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -184,6 +233,25 @@ impl Monkey {
                     move_type: MoveType::MoveTo(jump_coord.clone()),
                 });
                 // Capture ends the chain — no recursion, no need to record visited.
+            } else if matches!(
+                jump_square.piece.as_ref(),
+                Some(p) if p.get_color() == Color::Neutral && p.can_carry_piece()
+            ) {
+                // Jump-landing on a Neutral cart: emit MoveTo so the
+                // piecetype.rs filter rewrites to MoveIntoCarrier. The
+                // cart itself survives (cart-invincibility), but any
+                // opposite-colour passengers are captured by the
+                // boarding (see `passengers.retain` in make_move.rs
+                // and Plan 09 Q7's pinned current behavior).
+                // King-safety queries this scenario through
+                // `Monkey::would_capture_at`, which inspects the
+                // cart's passenger list. Boarding ends the chain (the
+                // Monkey is now inside the cart, not free to continue
+                // jumping).
+                moves.push(GameMove {
+                    from: origin.clone(),
+                    move_type: MoveType::MoveTo(jump_coord.clone()),
+                });
             }
         }
     }
@@ -239,9 +307,13 @@ impl Monkey {
                 continue;
             }
 
-            // The landing square is threatened. Recurse only if the landing
-            // is empty (chain continues); a captured-ladder landing ends
-            // the chain in `find_jump_moves`, mirror that here.
+            // The landing square is threatened. Whether Monkey would
+            // *actually* capture there is filtered by `would_capture_at`
+            // in `is_attacked_by` — that's the central phantom-attack
+            // filter for cases like Neutral-cart landings where Monkey
+            // boards rather than captures. Recurse only if the landing
+            // is empty (chain continues); a captured-ladder landing
+            // ends the chain in `find_jump_moves`, mirror that here.
             out.push(jump_coord.clone());
             let Some(jump_square) = board.get_square_at(&jump_coord) else {
                 continue;

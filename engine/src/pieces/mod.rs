@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::board::{Board, Coord, GameMove, MoveType};
+use crate::pieces::piecetype::PieceType;
 
 pub mod chess2;
 pub mod fairy;
@@ -23,6 +24,22 @@ pub trait Piece {
         false
     }
 
+    /// Read-only view of this carrier's passenger list, or `None` if
+    /// the piece isn't a carrier. Default-`None` so non-carriers don't
+    /// need to override. Carriers (Bus, Locomotive, Carriage) override
+    /// to expose their internal `Vec<PieceType>`. Used by the move
+    /// filter, `find_king` descent, and the PieceInCarrier dispatch.
+    fn passengers(&self) -> Option<&[PieceType]> {
+        None
+    }
+
+    /// Mutable handle on this carrier's passenger list, or `None` for
+    /// non-carriers. Used by `make_move` when a passenger enters /
+    /// exits / is captured by an enemy boarding.
+    fn passengers_mut(&mut self) -> Option<&mut Vec<PieceType>> {
+        None
+    }
+
     /// Plan 08: can this piece throw a Switch tile it's standing on?
     /// Default `true` — every piece can. Override to `false` for pieces
     /// the spec disallows (none in v1, but the hook is here so a future
@@ -33,8 +50,38 @@ pub trait Piece {
 
     fn clone_box(&self) -> Box<dyn Piece>;
 
+    /// Called once after a player move lands this piece on its
+    /// destination square. Use this to update piece-private state or
+    /// flag state on the board: pawn double-push records the
+    /// en-passant target, rook/king moves clear castle rights,
+    /// Goblin captures transition to `Kidnapping`, etc.
+    ///
+    /// Calling convention: `&self` is a *clone* of the on-board
+    /// piece. Mutating it locally has no effect — the clone is
+    /// dropped after this call. If your piece needs to change its
+    /// own state on the board, choose one of two patterns:
+    ///
+    /// - **Rebuild + overwrite** (Skibidi). Clone `self`, mutate
+    ///   the clone, then `board_after.set_piece_at(target, ...)`.
+    ///   Best for "I want to be a different concrete piece at the
+    ///   same square" or "I want to fully replace myself".
+    ///
+    /// - **In-place mutate via downcast** (Goblin's Free →
+    ///   Kidnapping branch). Get a mut handle on the on-board
+    ///   piece via `board_after.get_square_mut(target)` and use
+    ///   `as_any_mut().downcast_mut::<Self>()` to mutate fields
+    ///   directly. Best for "I want to change my own internal state
+    ///   but stay the same kind of piece".
+    ///
+    /// Goblin actually uses both: the Free → Kidnapping branch
+    /// downcasts; the Kidnapping → home branch overwrites with the
+    /// converted (ex-victim) piece, since "the goblin dies" per spec.
+    ///
+    /// `board_after` is the post-relocation board; the moved piece
+    /// sits at the move's destination, and `board_before` is its
+    /// pre-move snapshot.
     fn post_move_effects(
-        &mut self,
+        &self,
         _board_before: &Board,
         _board_after: &mut Board,
         _game_move: &GameMove,
@@ -71,6 +118,23 @@ pub trait Piece {
             .collect()
     }
 
+    /// Predicate: if this piece (sitting at `from`) reaches `target`,
+    /// does that count as a *capture* of whatever is on `target`?
+    ///
+    /// Default is "yes, anything I attack I also capture." Overrides
+    /// are for pieces whose movement reaches a tile without
+    /// destroying its occupant — most notably train carts, which roll
+    /// onto a same-train cart's tile via chain-following (not
+    /// capture). King-safety checks AND captures both call this so a
+    /// "phantom" attack doesn't put a king in spurious check.
+    ///
+    /// Plan 10 will fold this into the movement-stack registry; for
+    /// now it's a per-piece hook to keep the train-specific
+    /// conditionals out of `is_attacked_by`.
+    fn would_capture_at(&self, _board: &Board, _from: &Coord, _target: &Coord) -> bool {
+        true
+    }
+
     /// For downcasting support
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -98,13 +162,24 @@ impl Clone for Box<dyn Piece> {
 pub enum Color {
     White,
     Black,
+    /// Trains and other unaligned actors. Has no opposite (returns itself);
+    /// no king of this color exists; can never be the side-to-move.
+    Neutral,
 }
 
 impl Color {
+    /// The opposing side. White ↔ Black; **Neutral is a fixed point**
+    /// (`Neutral.opposite() == Neutral`). The fixed point is a
+    /// defensive choice — there's no meaningful opposite of "trains
+    /// and unaligned actors." Callers that need a real swap must
+    /// guarantee non-Neutral input; `apply_environment_reactions`
+    /// asserts this before the side-to-move flip, and `validate_move`
+    /// rejects a Neutral mover via `WrongTurn`.
     pub fn opposite(&self) -> Color {
         match self {
             Color::White => Color::Black,
             Color::Black => Color::White,
+            Color::Neutral => Color::Neutral,
         }
     }
 }
@@ -114,6 +189,7 @@ impl std::fmt::Display for Color {
         f.write_str(match self {
             Color::White => "white",
             Color::Black => "black",
+            Color::Neutral => "neutral",
         })
     }
 }

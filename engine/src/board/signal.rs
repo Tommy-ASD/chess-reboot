@@ -25,7 +25,7 @@ impl Board {
 
     /// Plan 08 step 4: if `coord` is a `PressurePlate` whose `fires_for`
     /// matches the piece currently standing on it, fire its targets.
-    /// Called from `handle_post_move_effects` once per landing square of
+    /// Called from `apply_piece_post_effects` once per landing square of
     /// the moving piece(s) — see `make_move.rs::collect_landings`.
     ///
     /// Empty plates and color-mismatched plates are silent no-ops.
@@ -96,7 +96,15 @@ impl Board {
                         if branches.is_empty() {
                             warn!(id, "junction has no branches; signal ignored");
                         } else {
-                            let new_state = (*state + 1) % branches.len() as u8;
+                            // Compute in `usize` and cast back; using
+                            // `branches.len() as u8` for the modulus
+                            // would wrap to `len % 256` for >255-branch
+                            // junctions and could even produce a zero
+                            // modulus (panic in debug). The cast at the
+                            // end is bounded by `branches.len()` which
+                            // we keep ≤ 255 (see fen.rs parse).
+                            let next = ((*state as usize).wrapping_add(1)) % branches.len();
+                            let new_state = next as u8;
                             trace!(
                                 id,
                                 old = *state,

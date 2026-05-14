@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" preserveAspectRatio="xMidYMid meet">
+  <title>Carriage (top-down)</title>
+  <defs>
+    <linearGradient id="cart-body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b06030"/>
+      <stop offset="0.5" stop-color="#8e4b22"/>
+      <stop offset="1" stop-color="#4a2208"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ground shadow -->
+  <ellipse cx="128" cy="220" rx="124" ry="9" fill="rgba(0,0,0,0.22)"/>
+
+  <!-- couplings on both ends — carriage is symmetric -->
+  <rect x="2"   y="120" width="22" height="16" rx="3" fill="#1a0f06"/>
+  <rect x="232" y="120" width="22" height="16" rx="3" fill="#1a0f06"/>
+
+  <!-- body -->
+  <rect x="22" y="76" width="212" height="104" rx="6" fill="url(#cart-body)" stroke="#1a0f06" stroke-width="3"/>
+
+  <!-- side trim (top and bottom edges of the roof seen from above) -->
+  <line x1="22" y1="88"  x2="234" y2="88"  stroke="#2a160a" stroke-width="2"/>
+  <line x1="22" y1="168" x2="234" y2="168" stroke="#2a160a" stroke-width="2"/>
+
+  <!-- central spine / longitudinal beam -->
+  <line x1="22" y1="128" x2="234" y2="128" stroke="#3a1a0a" stroke-width="1.5" opacity="0.55"/>
+
+  <!-- center doors, one per side -->
+  <rect x="120" y="76"  width="16" height="14" fill="#1a0f06"/>
+  <rect x="120" y="166" width="16" height="14" fill="#1a0f06"/>
+
+  <!-- side windows (top side) -->
+  <rect x="40"  y="96" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="78"  y="96" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="150" y="96" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="188" y="96" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+
+  <!-- side windows (bottom side) -->
+  <rect x="40"  y="138" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="78"  y="138" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="150" y="138" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+  <rect x="188" y="138" width="28" height="22" rx="2" fill="#cfe6f4" stroke="#1a0f06" stroke-width="2"/>
+
+  <!-- top-side wheels -->
+  <g stroke="#0a0a0a" stroke-width="2">
+    <rect x="46"  y="58" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="196" y="58" width="14" height="22" rx="2" fill="#1a1a1a"/>
+  </g>
+
+  <!-- bottom-side wheels -->
+  <g stroke="#0a0a0a" stroke-width="2">
+    <rect x="46"  y="176" width="14" height="22" rx="2" fill="#1a1a1a"/>
+    <rect x="196" y="176" width="14" height="22" rx="2" fill="#1a1a1a"/>
+  </g>
+</svg>

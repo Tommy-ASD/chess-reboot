@@ -12,9 +12,12 @@ export type TrackDir = "N" | "S" | "E" | "W";
 export const ALL_TRACK_DIRS: readonly TrackDir[] = ["N", "S", "E", "W"];
 
 /// PressurePlate's `FIRES` field. "ANY" matches any piece; "W" / "B"
-/// only fire for the corresponding color.
-export type PressureTrigger = "ANY" | "W" | "B";
-export const ALL_PRESSURE_TRIGGERS: readonly PressureTrigger[] = ["ANY", "W", "B"];
+/// only fire for the corresponding color. "N" fires only for Neutral
+/// pieces — i.e. train carts (plan 09). Mirrors the engine's
+/// `PressureTrigger::OnlyColor(Color::Neutral)` round-trip in
+/// `engine/src/board/fen.rs::format_pressure_trigger`.
+export type PressureTrigger = "ANY" | "W" | "B" | "N";
+export const ALL_PRESSURE_TRIGGERS: readonly PressureTrigger[] = ["ANY", "W", "B", "N"];
 
 /// Square types that *emit* signals when activated. Switch is player-
 /// triggered (via ThrowSwitch); PressurePlate fires automatically when
@@ -71,18 +74,6 @@ function ensureFields(sq: Square): Record<string, string> {
 }
 
 // ----------------------------------------------------------------
-// Switch
-// ----------------------------------------------------------------
-
-export function getSwitchTargets(sq: Square): number[] {
-  return parseIdList(sq.extraFields?.TARGETS);
-}
-
-export function setSwitchTargets(sq: Square, ids: number[]): void {
-  ensureFields(sq).TARGETS = formatIdList(ids);
-}
-
-// ----------------------------------------------------------------
 // Junction
 // ----------------------------------------------------------------
 
@@ -126,9 +117,17 @@ export function setGateId(sq: Square, id: number): void {
 }
 
 export function getGateOpen(sq: Square): boolean {
-  // Engine emits "1" / "0"; treat missing as "open" (matches the engine's
-  // `open.unwrap_or(true)` for fresh-placed gates with no FEN OPEN field).
-  return sq.extraFields?.OPEN !== "0";
+  // Match engine semantics (fen.rs Gate parsing exactly):
+  //  - missing field → open (engine: `open.unwrap_or(true)`)
+  //  - "1"           → open
+  //  - "0"           → closed
+  //  - anything else → closed (engine warns and defaults to closed)
+  // The "anything else" arm matters: a hand-typed `OPEN=garbage` must
+  // render closed in the editor so the editor preview matches what the
+  // engine actually executes.
+  const raw = sq.extraFields?.OPEN;
+  if (raw === undefined) return true;
+  return raw === "1";
 }
 
 export function setGateOpen(sq: Square, open: boolean): void {
@@ -136,23 +135,143 @@ export function setGateOpen(sq: Square, open: boolean): void {
 }
 
 // ----------------------------------------------------------------
+// Track (plan 09)
+// ----------------------------------------------------------------
+
+/// Track tiles carry a single `D=...` direction field. The engine
+/// defaults to `E` for tracks parsed without an explicit direction;
+/// match that here so a freshly-painted Track tile renders sensibly
+/// before the user picks a direction.
+export function getTrackDir(sq: Square): TrackDir {
+  const raw = sq.extraFields?.D;
+  if (raw === "N" || raw === "S" || raw === "E" || raw === "W") return raw;
+  return "E";
+}
+
+export function setTrackDir(sq: Square, dir: TrackDir): void {
+  ensureFields(sq).D = dir;
+}
+
+/// Cardinal directions from (file, rank) that point at a Track or
+/// Junction tile. Mirrors `Board::neighbor_track_dirs` in the engine —
+/// drives the editor's minecart-style rail rendering: a tile's shape
+/// (straight / curve / T / X) is computed from which sides have rails.
+export function neighborTrackDirs(
+  board: Square[][],
+  file: number,
+  rank: number,
+): TrackDir[] {
+  const out: TrackDir[] = [];
+  const checks: { dir: TrackDir; df: number; dr: number }[] = [
+    { dir: "N", df: 0, dr: -1 },
+    { dir: "S", df: 0, dr: 1 },
+    { dir: "E", df: 1, dr: 0 },
+    { dir: "W", df: -1, dr: 0 },
+  ];
+  for (const { dir, df, dr } of checks) {
+    const nf = file + df;
+    const nr = rank + dr;
+    const row = board[nr];
+    if (!row) continue;
+    const sq = row[nf];
+    if (!sq) continue;
+    if (sq.squareType === "TRACK" || sq.squareType === "JUNCTION") {
+      out.push(dir);
+    }
+  }
+  return out;
+}
+
+/// Two cardinals form a straight (colinear) pair.
+export function isColinear(a: TrackDir, b: TrackDir): boolean {
+  return (a === "N" && b === "S")
+    || (a === "S" && b === "N")
+    || (a === "E" && b === "W")
+    || (a === "W" && b === "E");
+}
+
+export type CornerType = "NE" | "NW" | "SE" | "SW";
+
+/// Classify a 2-connection tile's perpendicular pair as a corner.
+/// Returns null for colinear pairs or non-2-connection sets — those
+/// aren't corners, so they don't take part in the diagonal-staircase
+/// detection.
+export function cornerTypeOf(connections: TrackDir[]): CornerType | null {
+  if (connections.length !== 2) return null;
+  if (isColinear(connections[0], connections[1])) return null;
+  const has = (d: TrackDir): boolean => connections.includes(d);
+  if (has("N") && has("E")) return "NE";
+  if (has("N") && has("W")) return "NW";
+  if (has("S") && has("E")) return "SE";
+  return "SW";
+}
+
+export function oppositeCornerType(c: CornerType): CornerType {
+  switch (c) {
+    case "NE": return "SW";
+    case "NW": return "SE";
+    case "SE": return "NW";
+    case "SW": return "NE";
+  }
+}
+
+/// Does this corner tile sit on a diagonal staircase? True iff one of
+/// its connected neighbors is the *opposite* corner type — that's the
+/// signature of a NE↔SW or NW↔SE alternating chain. Drives the track-
+/// render path (corner draws as a straight diagonal line instead of
+/// the default quarter-circle curve) so a chain of corner tiles reads
+/// as one smooth diagonal. The cart-sprite rotation path rotates 45°
+/// on *any* perpendicular corner regardless of staircase status —
+/// see `train_payload.ts::trainCartRotationDegrees`.
+export function isStaircaseCorner(
+  board: Square[][],
+  file: number,
+  rank: number,
+  connections: TrackDir[],
+): boolean {
+  const myType = cornerTypeOf(connections);
+  if (myType === null) return false;
+  const opposite = oppositeCornerType(myType);
+  const offsets: Record<TrackDir, [number, number]> = {
+    N: [0, -1],
+    E: [1, 0],
+    S: [0, 1],
+    W: [-1, 0],
+  };
+  for (const dir of connections) {
+    const [df, dr] = offsets[dir];
+    const nFile = file + df;
+    const nRank = rank + dr;
+    const sq = board[nRank]?.[nFile];
+    if (!sq) continue;
+    if (sq.squareType !== "TRACK" && sq.squareType !== "JUNCTION") continue;
+    const nConns = neighborTrackDirs(board, nFile, nRank);
+    if (cornerTypeOf(nConns) === opposite) return true;
+  }
+  return false;
+}
+
+// ----------------------------------------------------------------
 // PressurePlate
 // ----------------------------------------------------------------
 
-export function getPlateTargets(sq: Square): number[] {
-  return parseIdList(sq.extraFields?.TARGETS);
-}
+// NB: `getPlateTargets` / `setPlateTargets` were removed; the editor
+// uses the unified `getEmitterTargets` / `setEmitterTargets` for both
+// Switch and Plate, since they share the `TARGETS` wire-format.
 
-export function setPlateTargets(sq: Square, ids: number[]): void {
-  ensureFields(sq).TARGETS = formatIdList(ids);
-}
-
+/// Read this plate's `FIRES` trigger. Falls back to `"ANY"` for any
+/// unrecognised value — defensive so a future engine-side trigger
+/// kind doesn't crash the editor. Known values: `"ANY"`, `"W"`,
+/// `"B"`, `"N"` (Neutral — plan 09 trains).
 export function getPlateTrigger(sq: Square): PressureTrigger {
   const raw = sq.extraFields?.FIRES;
-  if (raw === "W" || raw === "B") return raw;
+  if (raw === "W" || raw === "B" || raw === "N") return raw;
   return "ANY";
 }
 
+/// Write this plate's `FIRES` trigger. Engine-side parser accepts
+/// `"ANY"`, `"W"`, `"B"`, `"N"`; anything else round-trips as
+/// `"ANY"` per `getPlateTrigger`.
 export function setPlateTrigger(sq: Square, trigger: PressureTrigger): void {
   ensureFields(sq).FIRES = trigger;
 }

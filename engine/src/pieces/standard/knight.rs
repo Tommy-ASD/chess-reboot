@@ -18,6 +18,14 @@ impl Piece for Knight {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: only train carts are Neutral; a Neutral non-train
+        // piece would be flagged as a threat to *both* sides by
+        // `is_attacked_by`'s "include Neutral" rule, which is wrong
+        // for non-train pieces. Yield no moves so a stray Neutral
+        // knight (e.g. from a hand-rolled FEN) can't act.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let knight_moves: [(isize, isize); 8] = [
             (2, 1),
             (1, 2),
@@ -60,6 +68,7 @@ impl Piece for Knight {
         match self.color {
             Color::White => 'N'.to_string(),
             Color::Black => 'n'.to_string(),
+            Color::Neutral => 'N'.to_string(),
         }
     }
 

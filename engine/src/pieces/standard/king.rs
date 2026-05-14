@@ -15,6 +15,7 @@ impl King {
         match self.color {
             Color::White => board.height().saturating_sub(1),
             Color::Black => 0,
+            Color::Neutral => board.height().saturating_sub(1),
         }
     }
 
@@ -50,6 +51,7 @@ impl King {
                 board.flags.black_can_castle_kingside,
                 board.flags.black_can_castle_queenside,
             ),
+            Color::Neutral => return moves,
         };
 
         let rook_is_friendly =
@@ -145,6 +147,12 @@ impl Piece for King {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: only train carts are Neutral; a Neutral king
+        // shouldn't exist. Short-circuit to no moves so a hand-rolled
+        // FEN can't produce one that acts like a normal king.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let mut moves = generate_glider_moves(board, from, &OMNI_DIRS, 1);
         moves.extend(self.castle_moves(board, from));
         moves
@@ -156,6 +164,15 @@ impl Piece for King {
     /// `is_in_check` to recurse infinitely the moment a king sits on its
     /// starting square.
     fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        // Plan 09: Neutral non-train piece — threaten nothing. The
+        // S1 guard in `initial_moves` doesn't flow through to this
+        // override, so we have to add it here too. Without this,
+        // `is_attacked_by`'s "Neutral pieces threaten everyone"
+        // rule would treat a stray Neutral king's 8 neighbours as
+        // phantom checks for both sides.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         for &(df, dr) in OMNI_DIRS {
             let nf = from.file as isize + df;
@@ -173,6 +190,7 @@ impl Piece for King {
         match self.color {
             Color::White => 'K'.to_string(),
             Color::Black => 'k'.to_string(),
+            Color::Neutral => 'K'.to_string(),
         }
     }
 
@@ -181,7 +199,7 @@ impl Piece for King {
     }
 
     fn post_move_effects(
-        &mut self,
+        &self,
         _board_before: &Board,
         board_after: &mut Board,
         _game_move: &GameMove,
@@ -197,6 +215,7 @@ impl Piece for King {
                 board_after.flags.black_can_castle_kingside = false;
                 board_after.flags.black_can_castle_queenside = false;
             }
+            Color::Neutral => {}
         }
     }
 

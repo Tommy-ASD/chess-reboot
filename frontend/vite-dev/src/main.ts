@@ -1,12 +1,14 @@
 // src/main.ts
-
-/// Builds with: npx tsc
-/// Runs with: npx serve
+//
+// Play page entry point. Dev: `npm run dev` (Vite). Production
+// build: `npm run build` (runs `tsc && vite build`). See package.json.
 
 import { initBoardResize, setBoardDimensions } from "./board_size";
 import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
+import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
+import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
 import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove } from "./variables";
 
 
@@ -36,7 +38,6 @@ function renderBoard(fen: string) {
       square.classList.add(isDark ? "dark" : "light");
 
       if (square_data) {
-        console.log(square_data);
         if (square_data.piece) {
           // check if pieceToImage returns other than undefined
           // and if it does, use an img element instead of textContent
@@ -46,10 +47,20 @@ function renderBoard(fen: string) {
             img.src = imgPath;
             img.alt = square_data.piece;
             img.classList.add("piece-image");
+            if (isTrainCart(square_data.piece)) {
+              const deg = trainCartRotationDegrees(
+                square_data.piece,
+                currentBoard,
+                file,
+                rank,
+              );
+              if (deg !== 0) img.style.transform = `rotate(${deg}deg)`;
+            }
             square.appendChild(img);
           } else {
             square.textContent = pieceToSymbol(square_data.piece);
           }
+          renderCarrierPassengerOverlay(square, square_data.piece);
         }
         if (square_data.conditions.includes("FROZEN")) {
           square.classList.add("cond-frozen");
@@ -61,7 +72,11 @@ function renderBoard(fen: string) {
         // (via `type-{lowercase}`) plus an SVG icon overlay.
         if (square_data.squareType !== "STANDARD") {
           square.classList.add(`type-${square_data.squareType.toLowerCase()}`);
-          const svg = squareIconSvg(square_data);
+          const svg = squareIconSvg(square_data, {
+            board: currentBoard,
+            file,
+            rank,
+          });
           if (svg) {
             const wrap = document.createElement("div");
             wrap.className = "square-icon";
@@ -120,10 +135,20 @@ async function handleSquareClick(rank: number, file: number) {
   setSelectedSquare(clicked);
   setSelectedPassengerIndex(null);
 
-  // Visually mark the selected square
+  // Visually mark the selected square. Read `--cols` from the
+  // board's CSS variable rather than hardcoding 8 — plan 09 added
+  // variable board dimensions, so any non-8-wide board would pick
+  // the wrong DOM cell here. `board_helpers.ts::highlightMoves`
+  // already follows this convention.
   const squareEls = document.querySelectorAll(".square");
   squareEls.forEach(s => s.classList.remove("selected"));
-  squareEls[rank * 8 + file]?.classList.add("selected");
+  const cols =
+    Number(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--cols")
+        .trim(),
+    ) || currentBoard[0]?.length || 8;
+  squareEls[rank * cols + file]?.classList.add("selected");
 
   try {
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
@@ -418,6 +443,10 @@ document.getElementById("fen-input")!.addEventListener("input", (ev) => {
 // FEN PRESET LIST
 // ------------------------------------------
 
+// Presets here are bare grids — the engine's parser fills in default
+// flag fields (stm=w, castling=KQkq, ep=-, tr=full, p=0) when they're
+// absent. The editor's PRESETS in `editor_page.ts` use the canonical
+// full form. Both round-trip through the engine identically.
 const FEN_PRESETS: { name: string; fen: string }[] = [
   { name: "Empty Board", fen: "8/8/8/8/8/8/8/8" },
   { name: "Standard Chess", fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" },

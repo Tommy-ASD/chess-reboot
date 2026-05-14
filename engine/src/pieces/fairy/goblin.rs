@@ -141,8 +141,16 @@ impl Goblin {
 
         for field in split_top_level(inside) {
             let mut kv = field.splitn(2, '=');
-            let key = kv.next()?.trim();
-            let val = kv.next()?.trim();
+            // Tolerate stray empty segments (`,,`) and bare keys — a
+            // single malformed segment must NOT abort the whole Goblin
+            // parse and silently delete every already-parsed field.
+            // (Same defensive pattern as Bus/Loco/Carriage.)
+            let key = kv.next().unwrap_or("").trim();
+            let val = kv.next().unwrap_or("").trim();
+            if key.is_empty() {
+                warn!(field, "empty Goblin field; skipping");
+                continue;
+            }
 
             trace!(field, key, val, "handling goblin field");
 
@@ -157,6 +165,25 @@ impl Goblin {
                     kidnapped_piece = PieceType::symbol_to_piece(val);
                     if kidnapped_piece.is_none() {
                         warn!(val, "unknown kidnapped piece symbol");
+                    }
+                    // Reject king-symbols and carriers: a kidnapped
+                    // king (direct or hidden inside a Bus / Loco /
+                    // Carriage passenger list) would be invisible to
+                    // `find_king` (Goblin doesn't expose its payload
+                    // via `passengers()`, and find_king's descent is
+                    // one level deep), so `is_in_check` and `status()`
+                    // would silently lose the king. The spec also says
+                    // the Goblin *converts* the kidnapped piece on
+                    // home arrival — converting a king or a carrier
+                    // is nonsensical.
+                    if let Some(ref p) = kidnapped_piece {
+                        if matches!(p, PieceType::King(_)) || p.can_carry_piece() {
+                            warn!(
+                                val,
+                                "Goblin kidnap-payload cannot be a king or carrier; dropping payload"
+                            );
+                            kidnapped_piece = None;
+                        }
                     }
                 }
                 _ => {
@@ -196,13 +223,51 @@ impl Piece for Goblin {
 
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         trace!("goblin initial_moves");
+        // Plan 09: Neutral non-train pieces yield no moves.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         self.generate_goblin_base_moves(board, from.clone())
+    }
+
+    /// In Kidnapping state, the Goblin can only step onto *empty*
+    /// adjacent squares (per `generate_goblin_kidnapping_moves`) and
+    /// it cannot capture anything along the way. The default
+    /// `Piece::attacks` would extract the empty-square destinations
+    /// and report them as threats — which, combined with `is_attacked_by`'s
+    /// passenger iteration, would phantom-block the opponent from
+    /// castling through any empty square adjacent to a Neutral cart
+    /// carrying a Kidnapping Goblin of the queryer's color. Empty
+    /// the attack set entirely while Kidnapping to suppress the
+    /// phantom.
+    fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        match &self.state {
+            GoblinState::Kidnapping { .. } => Vec::new(),
+            GoblinState::Free => self
+                .initial_moves(board, from)
+                .into_iter()
+                .filter_map(|m| match m.move_type {
+                    crate::board::MoveType::MoveTo(c) => Some(c),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// A Kidnapping Goblin never captures — its only legitimate
+    /// move-gen target is an *empty* square (drop-off on home). If
+    /// king-safety ever asks "would this Goblin capture at target?",
+    /// the answer is no while Kidnapping. Belt-and-suspenders with
+    /// the empty `attacks()` override.
+    fn would_capture_at(&self, _board: &Board, _from: &Coord, _target: &Coord) -> bool {
+        matches!(self.state, GoblinState::Free)
     }
 
     fn symbol(&self) -> String {
         let prefix = match self.color {
             Color::White => "G",
             Color::Black => "g",
+            Color::Neutral => "G",
         };
 
         match &self.state {
@@ -232,15 +297,27 @@ impl Piece for Goblin {
     }
 
     fn post_move_effects(
-        &mut self,
+        &self,
         board_before: &Board,
         board_after: &mut Board,
         game_move: &GameMove,
     ) {
+        // Goblin's mechanics only care about top-level relocation moves
+        // (MoveTo). `apply_piece_post_effects` also dispatches the hook
+        // for `MoveIntoCarrier` and `PieceInCarrier { inner: MoveTo(_) }`
+        // — the boarding case is a no-op by design, but a *Kidnapping*
+        // Goblin disembarking onto its home_square must still get to
+        // drop off the kidnapped piece. So when the move is wrapped in
+        // `PieceInCarrier { inner: MoveTo(target) }`, unwrap to the
+        // inner target and continue.
         let to = match &game_move.move_type {
             MoveType::MoveTo(target) => target.clone(),
-            // make_move's handle_post_move_effects only invokes post-move
-            // for MoveTo today, so other variants are unreachable.
+            MoveType::PieceInCarrier { move_type, .. } => match move_type.as_ref() {
+                MoveType::MoveTo(target) => target.clone(),
+                _ => return,
+            },
+            // MoveIntoCarrier / Promotion / EnPassant / Castle / etc.
+            // — no Goblin mechanics apply.
             _ => return,
         };
         match &self.state {
@@ -248,6 +325,33 @@ impl Piece for Goblin {
                 if let Some(square) = board_before.get_square_at(&to) {
                     if let Some(captured_piece) = &square.piece {
                         if captured_piece.get_color() != self.color {
+                            // A kidnapped king (direct or hidden as a
+                            // carrier-passenger) would be invisible
+                            // to `find_king` (Goblin doesn't expose
+                            // its payload via `passengers()`, and the
+                            // descent is one level deep so even an
+                            // exposed payload would miss kings inside
+                            // a captured Bus). `is_in_check` and
+                            // `status()` would silently lose the
+                            // king. Reject both shapes:
+                            //   1. captured_piece IS a king
+                            //   2. captured_piece is a carrier (Bus /
+                            //      Loco / Carriage) whose passengers
+                            //      *could* include a king
+                            // For case 2 we conservatively reject any
+                            // carrier rather than walking passengers —
+                            // kidnapping a Bus/cart is also nonsensical
+                            // per the spec (the convert-at-home rule
+                            // doesn't define what a converted Bus
+                            // would be).
+                            if matches!(captured_piece, PieceType::King(_))
+                                || captured_piece.can_carry_piece()
+                            {
+                                trace!(
+                                    "Goblin captured a king or carrier; leaving the kidnap payload empty (capture still removes the victim)"
+                                );
+                                return;
+                            }
                             // initiate kidnapping — preserve the goblin's
                             // existing home_square; only the state changes.
                             if let Some(goblin_square) = board_after.get_square_mut(&to) {

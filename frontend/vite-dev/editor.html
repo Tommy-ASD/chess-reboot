@@ -99,6 +99,26 @@
       </div>
 
       <div class="state-section">
+        <h3>Trains</h3>
+        <label class="train-row">
+          <span>Tick rate</span>
+          <select id="train-tick-mode">
+            <option value="EveryFullTurn">Every full turn</option>
+            <option value="EveryPly">Every ply</option>
+            <option value="EveryNPly">Every N plies</option>
+          </select>
+        </label>
+        <label class="train-row">
+          <span>N</span>
+          <input id="train-tick-n" type="number" min="1" step="1" disabled />
+        </label>
+        <label class="train-row">
+          <span>Ply count</span>
+          <input id="ply-count" type="number" min="0" step="1" value="0" />
+        </label>
+      </div>
+
+      <div class="state-section">
         <h3>Board dimensions</h3>
         <div class="dim-control">
           <label>Width

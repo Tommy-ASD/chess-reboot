@@ -191,13 +191,45 @@ checkmate as a hard win regardless of other state.
   move. Clients (and a future API) get to distinguish "you must respond
   to a check" from "ordinary turn", which is more useful than reducing
   both to `Ongoing`. Costless given `is_in_check` was already needed.
-- **`find_king` descends into Bus passengers**: a king parked inside a
-  Bus is effectively standing on the Bus's square (capture the Bus,
-  capture the king). Without the descent, `is_in_check` silently
+- **`find_king` descends into every carrier (Bus, Locomotive, Carriage)**: a king
+  parked inside a carrier is effectively standing on the carrier's square (capture
+  the carrier, capture the king). Without the descent, `is_in_check` silently
   returned false and games couldn't end. Regression test:
-  `test_is_in_check_when_passenger_king_under_attack`.
+  `test_is_in_check_when_passenger_king_under_attack`. Round 3 extended the
+  descent semantics to train carts via the `passengers()` trait method, which
+  dispatches uniformly across Bus/Locomotive/Carriage.
 - **`Monkey::attacks` is overridden**: the default
   `extract MoveTo from initial_moves` over-reports threats for the
   Monkey (empty single-step squares show up as attacks even though
   Monkey can't capture by single-step). The override emits only
   jump-landings — the squares Monkey could actually capture on.
+- **`Piece::would_capture_at` filters phantom threats** (plan-09
+  audit). A piece's `attacks()` set is its *geometric reach* — train
+  carts include their next-tick tile, for instance. But a same-train
+  cart on that tile would just be chain-following, not a capture; a
+  king parked there is not in check. The per-piece predicate
+  `would_capture_at(board, from, target)` filters those phantom
+  hits, and `Board::is_attacked_by` queries it before counting a
+  reachable tile as a real threat. Default-`true`; Locomotive and
+  Carriage override to skip same-train carts. Plan 10's movement
+  stack will fold this into the modifier registry.
+- **`apply_move_for_validation` skips the train tick** (plan-09
+  audit). `validate_move` and `legal_moves` call this in-house
+  helper instead of `make_move_unchecked`, so a train can't roll
+  over the mover's king during a hypothetical apply and mask a
+  `WouldLeaveKingInCheck` error.
+- **Neutral-carrier passenger threats are colour-filtered**
+  (round-3 audit). `Locomotive::attacks` / `Carriage::attacks`
+  return *only* the cart's own next-tick tile. The cart's passengers
+  threaten for *their own* colour, not the cart's Neutral colour;
+  `Board::is_attacked_by` iterates those passengers separately with
+  a per-passenger `passenger.get_color() == attacker` filter. Without
+  this, a Black king adjacent to a Neutral cart carrying a Black
+  pawn would be flagged in check by its own pawn.
+- **`would_capture_at` excludes *all* carts on Loco/Carriage**
+  (round-4 audit). Round-3's `advance_trains` foreign-cart Stop
+  means a train never actually captures any cart — same-train
+  (chain-follow) or foreign (stop short). Both predicates now
+  return `false` for any cart on the next-tile, so a king parked
+  inside *either* kind of cart at the loco's next-tile is not
+  flagged in check.

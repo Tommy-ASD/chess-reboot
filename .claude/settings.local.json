@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(cargo check *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(npx tsc *)",
+      "Read(//home/tommy/.nvm/versions/node/**)",
+      "Read(//home/tommy/.volta/tools/image/**)",
+      "Bash(command -v fnm bun)"
     ]
   }
 }

@@ -2,7 +2,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     board::{
-        Board, BoardFlags, Coord, SignalId,
+        Board, BoardFlags, Coord, SignalId, TrainTickRate,
         square::{PressureTrigger, Square, SquareCondition, SquareType, TrackDir},
     },
     pieces::{Color, piecetype::PieceType},
@@ -56,15 +56,24 @@ use crate::{
 ///   processing the opening parenthesis at `open_index`.
 ///
 pub fn find_matching_paren(s: &str, open_index: usize) -> Option<usize> {
-    let mut depth = 0;
+    // `open_index` is a *byte* index (callers pass `str::find('(')`).
+    // Iterate the suffix and add the offset back, so a multi-byte char
+    // before `(` doesn't shift the alignment between `skip` (char count)
+    // and `find` (byte count). See engine/src/board/tests.rs for the
+    // regression test.
+    let suffix = s.get(open_index..)?;
+    let mut depth: i32 = 0;
 
-    for (i, ch) in s.char_indices().skip(open_index) {
+    for (i, ch) in suffix.char_indices() {
         match ch {
             '(' => depth += 1,
             ')' => {
                 depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
                 if depth == 0 {
-                    return Some(i);
+                    return Some(open_index + i);
                 }
             }
             _ => {}
@@ -118,7 +127,8 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
             trace!(index, "extended square begins");
 
             let mut buf = String::new();
-            let mut depth = 0usize;
+            // `i32` for defensive bounds — see find_matching_paren.
+            let mut depth: i32 = 0;
 
             while let Some(c) = chars.next() {
                 buf.push(c);
@@ -129,7 +139,10 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                     }
                     ')' => {
                         depth -= 1;
-                        if depth == 0 {
+                        if depth <= 0 {
+                            // Either correctly balanced (==0) or stray
+                            // `)` with no preceding `(` (<0). Either
+                            // way, stop scanning this block.
                             trace!(buf, "extended block closed");
                             break;
                         }
@@ -191,13 +204,87 @@ pub fn board_to_fen(board: &Board) -> String {
     let stm = match board.flags.side_to_move {
         Color::White => "w",
         Color::Black => "b",
+        // Neutral as side-to-move has no meaning. `make_move`'s phase 3
+        // also defends against it (debug_assert + warn + coerce to
+        // White). Mirror the warn here so encoding a misuse is loud
+        // on both sides of the round-trip.
+        Color::Neutral => {
+            warn!("side_to_move is Neutral at FEN-encode; coercing to 'w'");
+            "w"
+        }
     };
     let castling = castle_rights_to_fen(&board.flags);
     let ep = match &board.flags.en_passant_target {
         Some(c) => board.format_coord(c),
         None => "-".to_string(),
     };
-    format!("{grid} {stm} {castling} {ep}")
+    let tr = format_train_tick_rate(&board.flags.train_tick_rate);
+    let p = format!("p={}", board.flags.ply_count);
+    format!("{grid} {stm} {castling} {ep} {tr} {p}")
+}
+
+fn format_train_tick_rate(rate: &TrainTickRate) -> String {
+    match rate {
+        TrainTickRate::EveryPly => "tr=ply".to_string(),
+        TrainTickRate::EveryFullTurn => "tr=full".to_string(),
+        // `EveryNPly(1)` is behaviorally identical to `EveryPly`
+        // (the modulo gate `ply_count % 1` is always 0). The parser
+        // normalizes `tr=1ply` to `EveryPly`; mirror that on the
+        // encoder side so the canonical wire form is `tr=ply`.
+        TrainTickRate::EveryNPly(1) => "tr=ply".to_string(),
+        TrainTickRate::EveryNPly(n) => format!("tr={n}ply"),
+    }
+}
+
+/// Parse a train-tick rate field. Accepts either bare ("full",
+/// "ply", "<n>ply") or "tr=…"-prefixed forms.
+///
+/// **Rejects `tr=0ply`** (and any equivalent like `0ply`):
+/// `EveryNPly(0)` would divide by zero in the modulo gate without
+/// the runtime clamp at `maybe_advance_trains`, and a round-trip
+/// that serializes the zero back into a FEN would lie about the
+/// actual behavior. A 0-ply rate is treated as malformed; callers
+/// fall back to the default `EveryFullTurn`.
+fn parse_train_tick_rate(s: &str) -> Option<TrainTickRate> {
+    let body = s.strip_prefix("tr=").unwrap_or(s);
+    let parsed = match body {
+        "full" => Some(TrainTickRate::EveryFullTurn),
+        "ply" => Some(TrainTickRate::EveryPly),
+        other => other
+            .strip_suffix("ply")
+            .and_then(|n| n.parse::<u8>().ok())
+            .filter(|n| *n > 0)
+            // Normalize the duplicate-state cases: `tr=1ply` is
+            // behaviorally identical to `tr=ply` (the modulo gate
+            // `ply_count % 1` is always 0). Canonicalize at parse
+            // time so two FENs that describe the same execution
+            // round-trip through one canonical form.
+            .map(|n| if n == 1 {
+                TrainTickRate::EveryPly
+            } else {
+                TrainTickRate::EveryNPly(n)
+            }),
+    };
+    // Only warn when the input *looks* like a train-tick-rate token
+    // (uses the engine's `tr=` prefix). Standard 6-token chess FENs
+    // shove the halfmove clock and fullmove number into the flag
+    // tail; those are pure-numeric and shouldn't trip a warn for
+    // every external client (perft databases, opening books, etc.).
+    if parsed.is_none() && s.starts_with("tr=") {
+        warn!(s, "could not parse train-tick-rate field; ignoring");
+    }
+    parsed
+}
+
+fn parse_ply_count(s: &str) -> Option<u32> {
+    let parsed = s.strip_prefix("p=").and_then(|n| n.parse::<u32>().ok());
+    // Same rationale as `parse_train_tick_rate`: only warn when the
+    // token is prefixed `p=` (engine convention). A bare integer
+    // halfmove clock from a standard FEN shouldn't trigger.
+    if parsed.is_none() && s.starts_with("p=") {
+        warn!(s, "could not parse ply-count field; defaulting to 0");
+    }
+    parsed
 }
 
 /// Parse an algebraic square ("e3") into a Coord. Needs the board height
@@ -269,18 +356,43 @@ fn parse_castle_rights(s: &str) -> (bool, bool, bool, bool) {
 pub fn fen_to_board(fen: &str) -> Board {
     debug!(%fen, "fen_to_board");
 
-    // Split off optional flag fields: <grid> <stm> <castling> <ep> [...]
+    // Split off optional flag fields:
+    //   <grid> <stm> <castling> <ep> <train_tick> <ply>
+    // Plan 09 appends `tr=...` and `p=...`. Both are back-compatible: any
+    // FEN without them parses with the defaults (`EveryFullTurn`, 0).
     let mut parts = fen.split_whitespace();
     let grid_part = parts.next().unwrap_or("");
     let stm_part = parts.next();
     let castle_part = parts.next();
     let ep_part = parts.next();
+    let train_part = parts.next();
+    let ply_part = parts.next();
 
     let rows: Vec<&str> = grid_part.split('/').collect();
+    // Clamp height at 255 — `Coord::rank` is `u8`, so beyond-255 rows
+    // can't be addressed, and `Board::height()` would silently truncate
+    // to a wrapped value that desyncs from `grid.len()`. Reject the
+    // overflow rather than build a state subsequent callers can't use.
+    if rows.len() > 255 {
+        warn!(
+            len = rows.len(),
+            "FEN board has >255 rows; truncating to 255 (Coord uses u8)"
+        );
+    }
+    let row_limit = rows.len().min(255);
     let mut grid = vec![];
 
-    for row in rows {
-        grid.push(fen_row_to_squares(row));
+    for row in rows.into_iter().take(row_limit) {
+        let mut squares = fen_row_to_squares(row);
+        // Same clamp for row width.
+        if squares.len() > 255 {
+            warn!(
+                len = squares.len(),
+                "FEN row has >255 squares; truncating to 255"
+            );
+            squares.truncate(255);
+        }
+        grid.push(squares);
     }
 
     let side_to_move = match stm_part {
@@ -309,6 +421,11 @@ pub fn fen_to_board(fen: &str) -> Board {
         Some(s) => algebraic_to_coord(s, height, width),
     };
 
+    let train_tick_rate = train_part
+        .and_then(parse_train_tick_rate)
+        .unwrap_or(TrainTickRate::EveryFullTurn);
+    let ply_count = ply_part.and_then(parse_ply_count).unwrap_or(0);
+
     let flags = BoardFlags {
         side_to_move,
         white_can_castle_kingside: wk,
@@ -316,6 +433,8 @@ pub fn fen_to_board(fen: &str) -> Board {
         black_can_castle_kingside: bk,
         black_can_castle_queenside: bq,
         en_passant_target,
+        train_tick_rate,
+        ply_count,
     };
 
     Board { grid, flags }
@@ -368,6 +487,9 @@ pub fn square_to_fen(square: &Square) -> String {
             SquareType::PressurePlate { targets, fires_for } => {
                 parts.push(format!("TARGETS={}", format_id_list(targets)));
                 parts.push(format!("FIRES={}", format_pressure_trigger(fires_for)));
+            }
+            SquareType::Track { direction } => {
+                parts.push(format!("D={}", direction.as_str()));
             }
         }
     }
@@ -442,6 +564,9 @@ fn format_pressure_trigger(t: &PressureTrigger) -> String {
         PressureTrigger::AnyPiece => "ANY".to_string(),
         PressureTrigger::OnlyColor(Color::White) => "W".to_string(),
         PressureTrigger::OnlyColor(Color::Black) => "B".to_string(),
+        // A pressure plate scoped to Neutral pieces would fire only for
+        // trains. Encoded as "N" for symmetry.
+        PressureTrigger::OnlyColor(Color::Neutral) => "N".to_string(),
     }
 }
 
@@ -450,6 +575,7 @@ fn parse_pressure_trigger(v: &str) -> Option<PressureTrigger> {
         "ANY" => Some(PressureTrigger::AnyPiece),
         "W" => Some(PressureTrigger::OnlyColor(Color::White)),
         "B" => Some(PressureTrigger::OnlyColor(Color::Black)),
+        "N" => Some(PressureTrigger::OnlyColor(Color::Neutral)),
         _ => {
             warn!(v, "unknown pressure trigger");
             None
@@ -502,7 +628,9 @@ pub fn split_top_level(input: &str) -> Vec<String> {
 
     let mut parts = Vec::new();
     let mut buf = String::new();
-    let mut depth = 0usize;
+    // `i32` so an unbalanced `)` decrements below zero gracefully
+    // instead of underflowing `usize` and panicking in debug builds.
+    let mut depth: i32 = 0;
 
     for (i, ch) in input.chars().enumerate() {
         trace!(i, ?ch, depth, buf, "char");
@@ -513,7 +641,7 @@ pub fn split_top_level(input: &str) -> Vec<String> {
                 buf.push(ch);
             }
             ')' => {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 buf.push(ch);
             }
             ',' if depth == 0 => {
@@ -562,6 +690,7 @@ pub fn fen_to_square(fen: &str) -> Square {
         let mut targets: Option<Vec<SignalId>> = None;
         let mut open: Option<bool> = None;
         let mut fires: Option<PressureTrigger> = None;
+        let mut track_dir: Option<TrackDir> = None;
 
         // Split only at top-level commas (nested-safe)
         let fields = split_top_level(inner);
@@ -600,6 +729,10 @@ pub fn fen_to_square(fen: &str) -> Square {
                     }
                 },
                 "FIRES" => fires = parse_pressure_trigger(value),
+                "D" => match TrackDir::parse_tag(value) {
+                    Some(d) => track_dir = Some(d),
+                    None => warn!(value, "bad D field"),
+                },
                 "C" => match value {
                     "FROZEN" => conditions.push(SquareCondition::Frozen),
                     "BRAINROT" => conditions.push(SquareCondition::Brainrot),
@@ -617,11 +750,33 @@ pub fn fen_to_square(fen: &str) -> Square {
             Some("SWITCH") => SquareType::Switch {
                 targets: targets.unwrap_or_default(),
             },
-            Some("JUNCTION") => SquareType::Junction {
-                id: id.unwrap_or(0),
-                state: state.unwrap_or(0),
-                branches: branches.unwrap_or_default(),
-            },
+            Some("JUNCTION") => {
+                let branches = branches.unwrap_or_default();
+                // Clamp branch count to u8 — anything larger would
+                // overflow the `state` field and break the modulo-step
+                // in `activate_receiver`. Drop the tail with a warn.
+                let branches = if branches.len() > 255 {
+                    warn!(len = branches.len(), "junction has >255 branches; truncating");
+                    branches.into_iter().take(255).collect()
+                } else {
+                    branches
+                };
+                // Normalize `state` to `state % branches.len()` so two
+                // FENs (`STATE=0` and `STATE=branches.len()`) describe
+                // the same execution state, and `activate_receiver`
+                // never sees an out-of-range state.
+                let raw_state = state.unwrap_or(0);
+                let state = if branches.is_empty() {
+                    0
+                } else {
+                    ((raw_state as usize) % branches.len()) as u8
+                };
+                SquareType::Junction {
+                    id: id.unwrap_or(0),
+                    state,
+                    branches,
+                }
+            }
             Some("GATE") => SquareType::Gate {
                 id: id.unwrap_or(0),
                 open: open.unwrap_or(true),
@@ -629,6 +784,9 @@ pub fn fen_to_square(fen: &str) -> Square {
             Some("PLATE") => SquareType::PressurePlate {
                 targets: targets.unwrap_or_default(),
                 fires_for: fires.unwrap_or(PressureTrigger::AnyPiece),
+            },
+            Some("TRACK") => SquareType::Track {
+                direction: track_dir.unwrap_or(TrackDir::E),
             },
             Some(other) => {
                 warn!(other, "unknown square type");

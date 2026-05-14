@@ -19,12 +19,17 @@ impl Piece for Queen {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: see knight.rs — Neutral non-train pieces are degenerate.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         generate_glider_moves(board, from, &OMNI_DIRS, usize::MAX)
     }
     fn symbol(&self) -> String {
         match self.color {
             Color::White => 'Q'.to_string(),
             Color::Black => 'q'.to_string(),
+            Color::Neutral => 'Q'.to_string(),
         }
     }
 

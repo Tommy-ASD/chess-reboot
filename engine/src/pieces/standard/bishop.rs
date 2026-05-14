@@ -19,12 +19,18 @@ impl Piece for Bishop {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: see knight.rs comment — Neutral non-train pieces
+        // are degenerate; yield no moves.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         generate_glider_moves(board, from, &DIAGONAL_DIRS, usize::MAX)
     }
     fn symbol(&self) -> String {
         match self.color {
             Color::White => 'B'.to_string(),
             Color::Black => 'b'.to_string(),
+            Color::Neutral => 'B'.to_string(),
         }
     }
 

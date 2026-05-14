@@ -16,6 +16,21 @@ fn phase_to_radius(phase: u8) -> isize {
 }
 
 impl Board {
+    /// Recompute the board's Brainrot square-conditions from current
+    /// Skibidi positions, and apply the spec's neutralization rule.
+    ///
+    /// **Permanently mutates Skibidi phases.** If Skibidi A's aura
+    /// covers Skibidi B's tile, A is reset to phase 1 *on the board*
+    /// (not just for this call). The reset persists across future
+    /// recalcs — it is not recovered by A's aura disappearing or by
+    /// B being captured. The only way to raise A back above phase 1
+    /// is for A's owner to spend a move on a `PhaseShift`.
+    ///
+    /// Called from `apply_piece_post_effects` after every player move,
+    /// and from `apply_environment_reactions` after a train tick that
+    /// actually fired (since a tick could have captured a Skibidi).
+    /// The function is idempotent under repeated calls when no
+    /// neutralization is pending.
     pub fn recalc_brainrot(&mut self) {
         // Step 1: clear all existing Brainrot conditions.
         for row in &mut self.grid {

@@ -19,6 +19,7 @@ impl Pawn {
         match self.color {
             Color::White => 0,
             Color::Black => board.height().saturating_sub(1),
+            Color::Neutral => 0,
         }
     }
 
@@ -29,6 +30,7 @@ impl Pawn {
         match self.color {
             Color::White => board.height().saturating_sub(2),
             Color::Black => 1,
+            Color::Neutral => board.height().saturating_sub(2),
         }
     }
 
@@ -81,6 +83,7 @@ impl Piece for Pawn {
         let direction: isize = match self.color {
             Color::White => -1,
             Color::Black => 1,
+            Color::Neutral => return moves,
         };
 
         trace!(direction, "pawn move direction");
@@ -188,6 +191,7 @@ impl Piece for Pawn {
         match self.color {
             Color::White => 'P'.to_string(),
             Color::Black => 'p'.to_string(),
+            Color::Neutral => 'P'.to_string(),
         }
     }
 
@@ -202,6 +206,7 @@ impl Piece for Pawn {
         let direction: isize = match self.color {
             Color::White => -1,
             Color::Black => 1,
+            Color::Neutral => return Vec::new(),
         };
         let new_rank = from.rank as isize + direction;
         let mut out = Vec::new();
@@ -218,29 +223,40 @@ impl Piece for Pawn {
     }
 
     fn post_move_effects(
-        &mut self,
+        &self,
         _board_before: &Board,
         board_after: &mut Board,
         game_move: &GameMove,
     ) {
-        match &game_move.move_type {
-            MoveType::MoveTo(target) => {
-                // Double push: set en-passant target to the square between
-                // from and target. handle_post_move_effects resets
-                // en_passant_target to None *before* calling this, so any
-                // non-double-push correctly leaves it cleared.
-                let rank_diff =
-                    (target.rank as i32 - game_move.from.rank as i32).abs();
-                if rank_diff == 2 {
-                    let ep_rank =
-                        (target.rank as u16 + game_move.from.rank as u16) / 2;
-                    board_after.flags.en_passant_target = Some(Coord {
-                        file: target.file,
-                        rank: ep_rank as u8,
-                    });
-                }
+        // Double-push detection: rank-diff of 2. The mover's `from`
+        // is the pawn's pre-move square *unless* the pawn was a
+        // passenger exiting a carrier — in that case `from` is the
+        // carrier's tile and `target` is the inner MoveTo's target.
+        // Both cases share the same EP-target geometry (the square
+        // halfway between the two), so unwrap PIC{MoveTo} and reuse
+        // the same arithmetic.
+        let target = match &game_move.move_type {
+            MoveType::MoveTo(t) => Some(t),
+            MoveType::PieceInCarrier { move_type, .. } => match move_type.as_ref() {
+                MoveType::MoveTo(t) => Some(t),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(target) = target {
+            // apply_piece_post_effects resets en_passant_target to None
+            // *before* calling this, so any non-double-push correctly
+            // leaves it cleared.
+            let rank_diff =
+                (target.rank as i32 - game_move.from.rank as i32).abs();
+            if rank_diff == 2 {
+                let ep_rank =
+                    (target.rank as u16 + game_move.from.rank as u16) / 2;
+                board_after.flags.en_passant_target = Some(Coord {
+                    file: target.file,
+                    rank: ep_rank as u8,
+                });
             }
-            _ => {}
         }
     }
 

@@ -13,6 +13,7 @@ pub mod make_move;
 pub mod signal;
 pub mod square;
 mod tests;
+pub mod trains;
 
 pub type File = u8; // 0–7 for default boards
 pub type Rank = u8; // 0–7 for default boards
@@ -137,6 +138,14 @@ pub struct GameMove {
 
 pub type Direction = (isize, isize);
 
+/// How often trains advance one step along their tracks. Plan 09.
+#[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TrainTickRate {
+    EveryPly,
+    EveryFullTurn,
+    EveryNPly(u8),
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct BoardFlags {
     pub side_to_move: Color,
@@ -145,7 +154,12 @@ pub struct BoardFlags {
     pub black_can_castle_kingside: bool,
     pub black_can_castle_queenside: bool,
     pub en_passant_target: Option<Coord>,
-    // more fields we can figure out later
+    /// Plan 09: how often `maybe_advance_trains` actually ticks the trains.
+    pub train_tick_rate: TrainTickRate,
+    /// Plan 09: monotonic ply counter. Bumped at every successful move,
+    /// even when the trains don't advance this ply. Used by the tick-rate
+    /// gate. Resets only on board reset.
+    pub ply_count: u32,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -174,11 +188,18 @@ pub enum MoveError {
     /// `from` is in bounds but the square is empty.
     NoPieceAtSource { from: Coord },
     /// A piece is at `from` but it's the other side's turn.
+    ///
+    /// For `PieceInCarrier` moves the relevant colour is the
+    /// passenger's, not the carrier's, so `piece_color` reports the
+    /// passenger's colour and `passenger_symbol` (Some) carries the
+    /// passenger's own symbol for the rendered message. `piece_symbol`
+    /// always describes the piece sitting at `from` (the carrier).
     WrongTurn {
         from: Coord,
         piece_symbol: String,
         piece_color: Color,
         side_to_move: Color,
+        passenger_symbol: Option<String>,
     },
     /// The attempted move isn't in the piece's raw move set at all —
     /// e.g. trying to move a rook diagonally, or trying to land on a
@@ -236,9 +257,17 @@ impl MoveError {
                 piece_symbol,
                 piece_color,
                 side_to_move,
-            } => format!(
-                "It is {side_to_move}'s turn, but the piece at {from} ('{piece_symbol}') is {piece_color}."
-            ),
+                passenger_symbol,
+            } => match passenger_symbol {
+                Some(p) => format!(
+                    "It is {side_to_move}'s turn, but the passenger '{p}' \
+                     of the piece at {from} ('{piece_symbol}') is {piece_color}."
+                ),
+                None => format!(
+                    "It is {side_to_move}'s turn, but the piece at {from} \
+                     ('{piece_symbol}') is {piece_color}."
+                ),
+            },
             MoveError::PieceCannotMakeMove {
                 from,
                 piece_symbol,
@@ -355,6 +384,32 @@ impl Board {
         self.validate_move(game_move).is_ok()
     }
 
+    /// Resolve the *effective* mover color for a game move. For
+    /// `PieceInCarrier { piece_index, .. }` this is the passenger's
+    /// color (so a black king-passenger of a Neutral cart moves on
+    /// black's turn); for every other variant it's the top-level
+    /// piece's color. Returns `(color, optional_passenger_symbol)`
+    /// where the symbol is only set for PieceInCarrier (used by the
+    /// `WrongTurn` error to render a helpful message).
+    fn effective_mover_color(
+        &self,
+        source_piece: &PieceType,
+        game_move: &GameMove,
+    ) -> (Color, Option<String>) {
+        let piece_color = source_piece.get_color();
+        match &game_move.move_type {
+            MoveType::PieceInCarrier { piece_index, .. } => {
+                let passenger = source_piece
+                    .passengers()
+                    .and_then(|ps| ps.get(*piece_index as usize));
+                let color = passenger.map(|p| p.get_color()).unwrap_or(piece_color);
+                let sym = passenger.map(|p| p.symbol());
+                (color, sym)
+            }
+            _ => (piece_color, None),
+        }
+    }
+
     /// Single-pass legality check that produces a structured `MoveError`
     /// instead of a bool. The order of checks is deliberate so the most
     /// specific reason wins:
@@ -378,12 +433,22 @@ impl Board {
         let piece_color = piece.get_color();
         let piece_symbol = piece.symbol();
         let side_to_move = self.flags.side_to_move;
-        if piece_color != side_to_move {
+        // Plan 09: for PieceInCarrier moves, the side-to-move check
+        // applies to the *passenger* being moved, not the carrier
+        // itself. A neutral train cart carrying a black king must let
+        // black move that king out on black's turn; the cart's
+        // neutral colour is incidental. Colour-matched carriers
+        // (Bus) are unaffected since their colour equals their
+        // passengers' by construction (boarding is same-colour-only).
+        let (effective_color, passenger_symbol) =
+            self.effective_mover_color(piece, game_move);
+        if effective_color != side_to_move {
             return Err(MoveError::WrongTurn {
                 from: game_move.from.clone(),
                 piece_symbol,
-                piece_color,
+                piece_color: effective_color,
                 side_to_move,
+                passenger_symbol,
             });
         }
 
@@ -399,13 +464,25 @@ impl Board {
         }
 
         let mut hypothetical = self.clone();
-        match hypothetical.make_move_unchecked(game_move.clone()) {
+        // Plan 09: validate runs the apply through phase 2 (piece-level
+        // post-effects) but not phase 3 (train tick). If we let the
+        // tick run, a train could capture the mover's king during the
+        // hypothetical apply and `is_in_check` would then look for a
+        // king that doesn't exist, silently returning `false`.
+        match hypothetical.apply_move_for_validation(game_move.clone()) {
             Ok(()) => {
-                if hypothetical.is_in_check(piece_color) {
+                // King-safety check is per the *mover's* king. For a
+                // PieceInCarrier move out of a neutral cart the mover
+                // is the passenger, so use the effective colour here
+                // too — otherwise `is_in_check(Neutral)` short-
+                // circuits to false and we'd never catch a passenger
+                // exiting into a square that leaves their own king
+                // in check.
+                if hypothetical.is_in_check(effective_color) {
                     return Err(MoveError::WouldLeaveKingInCheck {
                         from: game_move.from.clone(),
                         piece_symbol,
-                        piece_color,
+                        piece_color: effective_color,
                         attempted: game_move.move_type.clone(),
                     });
                 }
@@ -427,13 +504,67 @@ impl Board {
     /// piece what squares it threatens, then look for `target` in the set.
     /// At 8×8 this is fine; revisit if board sizes grow.
     pub fn is_attacked_by(&self, target: &Coord, attacker: Color) -> bool {
+        // "Is this square attacked by the Neutral side?" is semantically
+        // meaningless — Neutral is unaligned and has no king. The Neutral
+        // *carriers'* threats are folded into both colors' queries below;
+        // a Neutral-as-attacker query has no caller in normal play, so
+        // short-circuit it rather than scanning for "self-attack" hits.
+        if attacker == Color::Neutral {
+            return false;
+        }
+
         for (coord, piece) in self.all_pieces() {
-            if piece.get_color() != attacker {
+            // Neutral pieces (trains) threaten every side — they're not
+            // aligned with `attacker`, but for the king-safety question
+            // ("would this square be attacked by something") their
+            // *own movement* threats always count. Passenger threats
+            // belong to the passenger's color, not the cart, and are
+            // iterated separately below.
+            let pc = piece.get_color();
+            if pc != attacker && pc != Color::Neutral {
                 continue;
             }
             for c in piece.attacks(self, &coord) {
-                if &c == target {
+                // A piece can list a tile in its `attacks` set without
+                // that being an actual capture — most notably train
+                // carts, which roll onto same-train neighbours via
+                // chain-following. `would_capture_at` is the per-
+                // piece predicate that filters those phantom hits.
+                if &c == target && piece.would_capture_at(self, &coord, target) {
                     return true;
+                }
+            }
+
+            // Neutral carrier passenger threats: a Black pawn riding a
+            // Neutral cart threatens for Black only. The cart's
+            // `attacks()` deliberately excludes passenger threats so
+            // this color filter is the single source of truth. For
+            // non-Neutral carriers (Bus) the passenger threats are
+            // already covered by the cart's own `attacks()` because
+            // Bus passengers share the Bus's color by invariant.
+            if pc == Color::Neutral {
+                if let Some(passengers) = piece.passengers() {
+                    for passenger in passengers {
+                        if passenger.get_color() != attacker {
+                            continue;
+                        }
+                        for c in passenger.attacks(self, &coord) {
+                            // Mirror the top-level loop's predicate
+                            // filter — the central "phantom attacks
+                            // are filtered here, not in each piece's
+                            // attacks()" contract holds for passengers
+                            // too. Today no passenger overrides
+                            // `would_capture_at` (passengers can't be
+                            // train carts), so this is a guard rather
+                            // than a behaviour change; landing it now
+                            // keeps the contract uniform.
+                            if &c == target
+                                && passenger.would_capture_at(self, &coord, target)
+                            {
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -444,17 +575,26 @@ impl Board {
     /// `None` for setups where the king is missing (tests, partial boards) —
     /// callers should treat the absence as "not in check" rather than panic.
     ///
-    /// Descends into `Bus` passengers: a passenger king's effective square
-    /// is the Bus's square, since capturing the Bus also captures every
-    /// piece inside. Without this, `is_in_check(color)` silently returns
-    /// `false` for a king parked inside a Bus and the game can never end.
+    /// Descends into every carrier (Bus, Locomotive, Carriage). A passenger
+    /// king's effective square is the carrier's square, since capturing the
+    /// carrier also captures every piece inside. Without this descent,
+    /// `is_in_check(color)` silently returns `false` for a king parked in
+    /// a carrier and the game can never end.
     pub fn find_king(&self, color: Color) -> Option<Coord> {
+        // Searching for the Neutral king is meaningless — no such piece
+        // exists. Short-circuit so callers don't have to special-case it.
+        if color == Color::Neutral {
+            return None;
+        }
         for (coord, piece) in self.all_pieces() {
             if king_of_color(&piece, color) {
                 return Some(coord);
             }
-            if let PieceType::Bus(bus) = &piece {
-                if bus.pieces.iter().any(|p| king_of_color(p, color)) {
+            // Descend into every carrier (Bus, Locomotive, Carriage). A king
+            // riding inside is captured if the carrier is captured / crushed,
+            // so its effective square is the carrier's tile.
+            if let Some(passengers) = piece.passengers() {
+                if passengers.iter().any(|p| king_of_color(p, color)) {
                     return Some(coord);
                 }
             }
@@ -477,15 +617,23 @@ impl Board {
     /// per candidate move; correct but not fast — see plan 02's notes.
     pub fn legal_moves(&self, from: &Coord) -> Vec<GameMove> {
         let raw = self.get_moves(from);
-        let moving_color = match self.get_square_at(from).and_then(|s| s.piece.as_ref()) {
-            Some(p) => p.get_color(),
+        let source_piece = match self.get_square_at(from).and_then(|s| s.piece.as_ref()) {
+            Some(p) => p.clone(),
             None => return Vec::new(),
         };
         raw.into_iter()
             .filter(|m| {
                 let mut hypothetical = self.clone();
-                match hypothetical.make_move_unchecked(m.clone()) {
-                    Ok(()) => !hypothetical.is_in_check(moving_color),
+                // Same reason as `validate_move`: don't run the train
+                // tick in the hypothetical, or a train could capture
+                // the king mid-evaluation and hide a `WouldLeave-
+                // KingInCheck` from us. For PieceInCarrier moves, the
+                // king-safety check applies to the *passenger's*
+                // side, not the carrier's Neutral colour — see
+                // `effective_mover_color`.
+                let (mover_color, _) = self.effective_mover_color(&source_piece, m);
+                match hypothetical.apply_move_for_validation(m.clone()) {
+                    Ok(()) => !hypothetical.is_in_check(mover_color),
                     Err(_) => false,
                 }
             })
@@ -497,11 +645,21 @@ impl Board {
     /// distinguish-stalemate-from-brainrot heuristic lands.
     pub fn status(&self) -> GameStatus {
         let to_move = self.flags.side_to_move;
-        let any_legal = self
-            .all_pieces()
-            .iter()
-            .filter(|(_, p)| p.get_color() == to_move)
-            .any(|(coord, _)| !self.legal_moves(coord).is_empty());
+        // Same-color pieces are the primary source of legal moves. But
+        // a Neutral cart carrying a passenger of `to_move` also has
+        // legal `PieceInCarrier` moves on `to_move`'s turn (via
+        // `passenger_moves`), and skipping the cart would mis-declare
+        // stalemate/checkmate when the side's only remaining pieces
+        // are riding a neutral train. `find_king` already descends
+        // into carriers; do the same here for symmetry.
+        let any_legal = self.all_pieces().iter().any(|(coord, p)| {
+            let counts = p.get_color() == to_move
+                || (p.get_color() == Color::Neutral
+                    && p.passengers().is_some_and(|ps| {
+                        ps.iter().any(|q| q.get_color() == to_move)
+                    }));
+            counts && !self.legal_moves(coord).is_empty()
+        });
 
         if any_legal {
             if self.is_in_check(to_move) {

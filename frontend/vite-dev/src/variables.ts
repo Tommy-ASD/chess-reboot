@@ -11,7 +11,11 @@ export type SquareType =
     | "SWITCH"
     | "JUNCTION"
     | "GATE"
-    | "PLATE";
+    | "PLATE"
+    /// Plan 09: a track tile. Trains follow the chain of TRACK tiles along
+    /// each tile's stored direction (or its opposite for Reverse-heading
+    /// trains). Walkable for non-train pieces too.
+    | "TRACK";
 
 export type Square = {
     piece: string | null;        // "P", "q", "G(W=...)" etc

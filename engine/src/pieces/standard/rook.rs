@@ -19,12 +19,17 @@ impl Piece for Rook {
         self.color = color;
     }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Plan 09: see knight.rs — Neutral non-train pieces are degenerate.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         generate_glider_moves(board, from, &STRAIGHT_DIRS, usize::MAX)
     }
     fn symbol(&self) -> String {
         match self.color {
             Color::White => 'R'.to_string(),
             Color::Black => 'r'.to_string(),
+            Color::Neutral => 'R'.to_string(),
         }
     }
 
@@ -33,7 +38,7 @@ impl Piece for Rook {
     }
 
     fn post_move_effects(
-        &mut self,
+        &self,
         board_before: &Board,
         board_after: &mut Board,
         game_move: &GameMove,
@@ -68,6 +73,7 @@ impl Piece for Rook {
                     }
                 }
             }
+            Color::Neutral => {}
         }
     }
 

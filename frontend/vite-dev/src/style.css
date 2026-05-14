@@ -291,6 +291,91 @@ button {
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
   position: relative;
   z-index: 2;
+  /* Train carts apply `transform: rotate(...)` inline; animate it so a
+     train turning a corner spins smoothly instead of jumping. Non-cart
+     pieces never set the transform, so this is inert for them. */
+  transition: transform var(--t, 180ms ease);
+  transform-origin: center;
+}
+
+/* -------------------------------------------------- */
+/* Carrier passenger overlay                          */
+/* -------------------------------------------------- */
+
+/* Passenger sprites drawn on top of a carrier (Bus / Locomotive /
+   Carriage) so the user can see who's riding. Lives above the cart
+   sprite but is a sibling element, not a child — so the cart's
+   rotation transform doesn't apply, and the passenger sprite stays
+   upright when the cart turns. */
+.carrier-passengers {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.carrier-passenger {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55));
+}
+
+.carrier-passenger-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  line-height: 1;
+  color: #2d2620;
+  text-shadow:
+    0 0 2px rgba(255, 255, 255, 0.85),
+    0 1px 1.5px rgba(0, 0, 0, 0.55);
+}
+
+/* Per-count sizing: a single passenger gets the most real estate; as
+   more passengers stack on the cart they shrink and tile into a 2×2
+   or 2×3 grid via the flex-wrap. The glyph font-size scales with the
+   cell width via cqw so it matches at any board zoom. */
+.carrier-passengers[data-count="1"] .carrier-passenger {
+  width: 44%;
+  height: 44%;
+}
+.carrier-passengers[data-count="1"] .carrier-passenger-glyph {
+  font-size: calc(30cqw / var(--cols));
+}
+
+.carrier-passengers[data-count="2"] .carrier-passenger {
+  width: 36%;
+  height: 36%;
+}
+.carrier-passengers[data-count="2"] .carrier-passenger-glyph {
+  font-size: calc(24cqw / var(--cols));
+}
+
+.carrier-passengers[data-count="3"] .carrier-passenger,
+.carrier-passengers[data-count="4"] .carrier-passenger {
+  width: 32%;
+  height: 32%;
+}
+.carrier-passengers[data-count="3"] .carrier-passenger-glyph,
+.carrier-passengers[data-count="4"] .carrier-passenger-glyph {
+  font-size: calc(20cqw / var(--cols));
+}
+
+.carrier-passengers[data-count="5"] .carrier-passenger,
+.carrier-passengers[data-count="6"] .carrier-passenger {
+  width: 26%;
+  height: 26%;
+}
+.carrier-passengers[data-count="5"] .carrier-passenger-glyph,
+.carrier-passengers[data-count="6"] .carrier-passenger-glyph {
+  font-size: calc(16cqw / var(--cols));
 }
 
 /* -------------------------------------------------- */
@@ -324,6 +409,21 @@ button {
   inset: 12%;
   pointer-events: none;
   z-index: 0;
+}
+
+/* Plan 09: track icons need to reach the cell border so adjacent rails
+   connect cleanly across tiles. The 24×24 viewBox already draws rails
+   to its edges; we just stretch the SVG to fill the whole cell. */
+.square.type-track .square-icon {
+  inset: 0;
+}
+
+.square.type-track .square-icon svg {
+  /* Track SVG uses `preserveAspectRatio="none"` so the rail stretches
+     to match the cell's aspect ratio. Without this override the SVG
+     would shrink and rails wouldn't meet at the border. */
+  width: 100%;
+  height: 100%;
 }
 
 .square .square-icon svg {
@@ -361,6 +461,18 @@ button {
 .square.type-plate {
   box-shadow: inset 0 0 0 2px rgba(170, 130, 255, 0.7);
   color: rgba(170, 130, 255, 0.95);
+}
+
+.square.type-track {
+  /* Wood-tone tint for the rail bed — keeps tracks readable even when
+     the cell is the same chequer color as the surrounding board. */
+  box-shadow: inset 0 0 0 2px rgba(200, 170, 110, 0.7);
+  color: rgba(200, 170, 110, 0.95);
+  background-image:
+    linear-gradient(
+      var(--track-bed-tint, rgba(160, 110, 60, 0.18)),
+      var(--track-bed-tint, rgba(160, 110, 60, 0.18))
+    );
 }
 
 /* Editor-only: a square currently selected for inspection / wiring. */
@@ -1092,6 +1204,53 @@ button {
 #ep-target {
   width: 80px;
   text-transform: lowercase;
+}
+
+/* Train state controls — single row label + input pair. The select for
+   tick-mode and the number inputs for N / ply count all share this. */
+.train-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-bottom: 6px;
+}
+
+.train-row > span {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.train-row select,
+.train-row input[type="number"] {
+  flex: 1;
+  max-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", Consolas, Menlo, monospace;
+  color: var(--text);
+  margin: 0;
+}
+
+.train-row select:focus,
+.train-row input[type="number"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.train-row input[type="number"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 #presets {

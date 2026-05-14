@@ -110,6 +110,11 @@ pub struct Locomotive {
     pub train_id: u32,
     pub heading: TrainHeading,
     pub passengers: Vec<PieceType>,
+    /// Direction the cart entered its current tile through. None on
+    /// the very first tick; the engine then falls back to a "pick the
+    /// unique non-cart neighbor" heuristic. Round-trips through FEN
+    /// as the `L=N|S|E|W` field on LOCO.
+    pub last_dir: Option<TrackDir>,
 }
 
 #[derive(Clone, PartialEq, Debug, Copy)]
@@ -125,7 +130,7 @@ impl Piece for Locomotive {
     fn can_carry_piece(&self) -> bool { true }
 
     /// Locomotives don't emit player-driven moves. Movement happens via
-    /// `Board::advance_trains` during `handle_post_move_effects`.
+    /// `Board::advance_trains` during `apply_environment_reactions`.
     /// Passengers do emit `PieceInCarrier` moves — mirrors Bus.
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         // Same passenger-move-generation pattern as Bus::initial_moves —
@@ -136,10 +141,14 @@ impl Piece for Locomotive {
     }
 
     fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
-        let mut out: Vec<Coord> = self.passengers.iter()
-            .flat_map(|p| p.attacks(board, from))
-            .collect();
-        // The train itself "attacks" the tile it will occupy next tick.
+        // **As implemented** (plan 02 implementation-notes): this
+        // sketch's union of passenger + next-tick threats was split.
+        // `Locomotive::attacks` / `Carriage::attacks` return *only*
+        // the cart's own next-tick tile. Passenger threats are
+        // iterated by `Board::is_attacked_by` with a per-passenger
+        // color filter so a Black passenger pawn doesn't fake a
+        // self-check on the Black king.
+        let mut out: Vec<Coord> = Vec::new();
         if let Some(next) = board.next_train_tile(from, self.heading) {
             out.push(next);
         }
@@ -184,9 +193,11 @@ pub struct Carriage {
 }
 ```
 
-`attacks()` returns passenger threats + the cart's next-tick tile (which
-equals the tile the cart in front is currently on — see "Tick logic"
-below). Same shape as `Locomotive::attacks` otherwise.
+`attacks()` returns *only* the cart's next-tick tile (the tile the cart in
+front is currently on — see "Tick logic" below). Passenger threats live in
+`Board::is_attacked_by`, which iterates Neutral-carrier passengers separately
+with a per-passenger color filter so a Black passenger threatens only for
+Black. Same shape as `Locomotive::attacks` otherwise.
 
 ### `engine/src/pieces/piecetype.rs`
 
@@ -254,6 +265,14 @@ use crate::pieces::fairy::locomotive::TrainHeading;
 use crate::board::square::TrackDir;
 
 impl Board {
+    /// **As implemented:** the entry point is `next_train_step(from, heading,
+    /// last_dir) -> Option<(Coord, TrackDir)>`, returning both the next tile
+    /// and the direction the cart entered it through (which becomes the
+    /// loco's `last_dir` on the next tick). `next_train_tile` is a thin
+    /// coord-only wrapper kept for the existing call sites in tests. The
+    /// `last_dir` argument is what enables minecart-style neighbor-aware
+    /// curve resolution. The sketch below is from before that refactor.
+    ///
     /// Resolve the next track tile given the current tile + a heading.
     /// Returns None if the current tile isn't a Track (or Junction), or
     /// if the resulting tile is off-board / not a track tile (derailment).
@@ -283,14 +302,31 @@ impl Board {
         }
     }
 
-    /// Called from `handle_post_move_effects`. Checks the tick rate and
-    /// the ply counter to decide whether to advance.
-    pub fn maybe_advance_trains(&mut self) {
-        self.flags.ply_count += 1;
+    /// Called from `apply_environment_reactions` (phase 3 of
+    /// make_move; see `engine/src/board/make_move.rs`). Checks the
+    /// tick rate and the ply counter to decide whether to advance.
+    ///
+    /// What landed (in this iteration) differs from the original
+    /// sketch:
+    ///   - `saturating_add(1)` instead of `+= 1`, with a one-line
+    ///     warn at u32::MAX so a runaway test catches it.
+    ///   - `(n as u32).max(1)` clamp for `EveryNPly`, defending
+    ///     against a 0-ply rate the FEN parser would otherwise
+    ///     accept; the parser also rejects `tr=0ply` directly.
+    ///   - Returns `bool` instead of `()` — `true` iff the rate
+    ///     gate fired and the trains actually advanced. The caller
+    ///     (`apply_environment_reactions`) uses this to gate a
+    ///     downstream `recalc_brainrot` so a no-tick move doesn't
+    ///     pay for an unnecessary O(N²) recalc.
+    pub fn maybe_advance_trains(&mut self) -> bool {
+        self.flags.ply_count = self.flags.ply_count.saturating_add(1);
         let should_tick = match self.flags.train_tick_rate {
             TrainTickRate::EveryPly => true,
             TrainTickRate::EveryFullTurn => self.flags.ply_count % 2 == 0,
-            TrainTickRate::EveryNPly(n) => self.flags.ply_count % (n as u32) == 0,
+            TrainTickRate::EveryNPly(n) => {
+                let n = (n as u32).max(1);
+                self.flags.ply_count % n == 0
+            }
         };
         if should_tick {
             self.advance_trains();
@@ -328,8 +364,37 @@ key correctness moves:
   know whether train A wants to enter tile X until you've also asked
   train B. Build a `Vec<TrainAdvance>` of proposed moves, scan for
   conflicts, then apply.
+- **Foreign-cart check**: a moving train's head can't land on a tile
+  occupied by another train's cart unless that tile is being *vacated*
+  this same tick by its current occupant. Without this, a stalled
+  foreign cart on the landing tile would be silently overwritten by
+  the commit pass. The trailing-train case (A follows B east, B's
+  caboose vacates the tile A wants) is allowed by computing
+  `vacating_tiles` from the surviving advances. The foreign-cart
+  filter + two-train collision pass both *drop* trains from
+  `advances`, which changes `vacating_tiles`, so the two passes run
+  to fixed point — re-check until no more trains get blocked.
+- **Three-phase commit** is needed because per-train commit
+  (interleaved take + place) is unsound under trailing-train ordering:
+  if A's `sq.piece = Some(cart)` fires before B's `sq.piece.take()`,
+  A overwrites B's caboose, then B steals A's loco. Split into:
+  (1) take all moving carts out of their old squares, (2) apply
+  captures + ep-clear heuristic, (3) place every cart on its new
+  tile. After phase 1 every vacated tile is empty regardless of
+  iteration order; phase 3 lands cleanly. See `advance_trains`.
 
 ### Collision handlers
+
+**v1 status: deferred.** The trait chain below is *not* implemented.
+The equivalent v1 behavior is hard-coded in
+`engine/src/board/trains.rs::advance_trains`:
+- `own_cart_collision` check stands in for the locomotive's
+  `on_run_over_target` returning `Stop` when the target is a cart of
+  the same train.
+- The unconditional capture in the commit phase is the default
+  `Capture` outcome for any non-cart victim.
+- Per-piece overrides (`Piece::on_being_run_over`) don't exist; if
+  added later, fold them into the per-train decision loop.
 
 A chain of hooks called in order. Each returns a `CollisionOutcome`:
 
@@ -393,15 +458,19 @@ crushing zone than allow it.
 
 ### `engine/src/board/make_move.rs`
 
-In `handle_post_move_effects`, after `recalc_brainrot`:
+As of this iteration, the post-move pipeline is split into:
+- **`apply_piece_post_effects`** — clears the en-passant target, runs
+  each piece's `post_move_effects`, fires pressure plates, then
+  `recalc_brainrot`.
+- **`apply_environment_reactions`** — calls `maybe_advance_trains`,
+  then flips `side_to_move`. Skipped on `validate_move`'s clone so
+  king-safety isn't masked by a hypothetical train tick.
 
-```rust
-self.maybe_advance_trains();
-```
+So `maybe_advance_trains` lives in `apply_environment_reactions`,
+not the old `handle_post_move_effects`.
 
-Order is important: brainrot first (so any post-move brainrot zone
-applies to passenger move-gen on next turn), then trains. The two are
-independent for v1 but a defined order keeps tests deterministic.
+Order is still: brainrot first (so any post-move brainrot zone applies
+to passenger move-gen on next turn), then trains.
 
 ### FEN
 
@@ -553,6 +622,17 @@ In `engine/src/board/tests.rs`:
    its king-passenger's side. This is a one-tick safety net; if no
    movement satisfies the constraint, the train stops. Detail this
    when wiring step 6 (king-safety integration).
+
+   **Current behavior (this iteration):** the recommendation is NOT
+   implemented. Two related behaviors are pinned by tests as the
+   *current* (about-to-be-changed) state:
+   - The train tick does NOT consult king-safety before advancing.
+   - `MoveIntoCarrier` (when an enemy boards a Neutral cart) silently
+     removes opposite-color passengers, including a king. Pinned by
+     `test_king_passenger_captured_when_enemy_boards_cart`.
+   When the safety-net recommendation lands, both behaviors change
+   and the pinning test will need to flip from "king removed" to
+   "move illegal" / "train stops."
 
 ## Build order
 

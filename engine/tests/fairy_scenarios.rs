@@ -55,7 +55,7 @@ fn skibidi_phase_shift_freezes_pieces_in_radius() {
 }
 
 fn empty_board() -> Board {
-    use engine::board::{BoardFlags, square::Square};
+    use engine::board::{BoardFlags, TrainTickRate, square::Square};
     Board {
         grid: vec![vec![Square::new(); 8]; 8],
         flags: BoardFlags {
@@ -65,6 +65,8 @@ fn empty_board() -> Board {
             black_can_castle_kingside: false,
             black_can_castle_queenside: false,
             en_passant_target: None,
+            train_tick_rate: TrainTickRate::EveryFullTurn,
+            ply_count: 0,
         },
     }
 }

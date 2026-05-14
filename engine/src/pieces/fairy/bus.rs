@@ -34,11 +34,20 @@ impl Bus {
     pub fn from_symbol(symbol: &str) -> Option<PieceType> {
         trace!(symbol, "parsing Bus");
 
-        let first = symbol.chars().next()?;
-        let color = match first {
-            'B' => Color::White,
-            'b' => Color::Black,
-            _ => return None,
+        // Engine convention: all-uppercase prefix = White, all-lowercase
+        // = Black. Mixed case ("Bus(...)", "bUS(...)") is invalid — the
+        // top-level dispatcher (`PieceType::symbol_to_piece`) lowercases
+        // for keyword match, so reading the *raw* first char alone would
+        // silently assign White to any prefix starting with `B`. Anchor
+        // on the full prefix-before-`(` to avoid the silent conversion.
+        let prefix = symbol.split('(').next().unwrap_or("");
+        let color = match prefix {
+            "BUS" => Color::White,
+            "bus" => Color::Black,
+            _ => {
+                warn!(prefix, "Bus prefix must be 'BUS' or 'bus' exactly");
+                return None;
+            }
         };
 
         let Some(start) = symbol.find('(') else {
@@ -56,8 +65,16 @@ impl Bus {
 
         for field in split_top_level(inside) {
             let mut kv = field.splitn(2, '=');
-            let key = kv.next()?.trim();
-            let val = kv.next()?.trim();
+            // Tolerate stray empty segments (`,,`) and bare keys (`X`) by
+            // dropping that field with a warn — a single malformed segment
+            // must NOT abort the whole Bus parse and silently delete every
+            // already-parsed field.
+            let key = kv.next().unwrap_or("").trim();
+            let val = kv.next().unwrap_or("").trim();
+            if key.is_empty() {
+                warn!(field, "empty Bus field; skipping");
+                continue;
+            }
 
             trace!(field, key, val, "handling bus field");
 
@@ -73,6 +90,38 @@ impl Bus {
                         let opt_inner_piece = PieceType::symbol_to_piece(&piece_sym);
                         trace!(piece_sym, ?opt_inner_piece, "parsed inner piece");
                         if let Some(inner_piece) = opt_inner_piece {
+                            // Reject nested carriers: the carrier
+                            // filter (piecetype.rs) refuses to
+                            // *produce* a move that boards one
+                            // carrier into another, so accepting it
+                            // from a hand-rolled FEN would leave the
+                            // engine in a state it can't otherwise
+                            // reach. Drop the passenger with a warn.
+                            if inner_piece.can_carry_piece() {
+                                warn!(
+                                    piece_sym,
+                                    "rejecting nested carrier passenger in Bus"
+                                );
+                                continue;
+                            }
+                            // Bus invariant: passengers share the Bus's
+                            // colour. The boarding filter enforces this
+                            // in legal play, so a mismatched-colour
+                            // passenger can only land here from a
+                            // hand-rolled FEN. `Bus::attacks` filters
+                            // mismatched colours out (round-11 fix); we
+                            // surface the malformed input here so it's
+                            // loud instead of silent.
+                            let passenger_color = inner_piece.get_color();
+                            if passenger_color != color {
+                                warn!(
+                                    piece_sym,
+                                    ?color,
+                                    ?passenger_color,
+                                    "Bus passenger colour mismatches Bus colour; \
+                                     attacks will filter it out but the FEN is malformed"
+                                );
+                            }
                             pieces.push(inner_piece);
                         }
                     }
@@ -100,8 +149,18 @@ impl Piece for Bus {
     fn can_carry_piece(&self) -> bool {
         true
     }
+    fn passengers(&self) -> Option<&[PieceType]> {
+        Some(&self.pieces)
+    }
+    fn passengers_mut(&mut self) -> Option<&mut Vec<PieceType>> {
+        Some(&mut self.pieces)
+    }
     fn initial_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
         trace!("bus initial_moves");
+        // Plan 09: Neutral non-train pieces yield no moves.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
         let mut moves = Vec::new();
         // Bus moves like a rook: orthogonal sliding, no captures. The filter
         // in `PieceType::get_moves` rewrites landings on a friendly carrier to
@@ -157,6 +216,18 @@ impl Piece for Bus {
             board_clone.set_piece_at(from, piece.clone());
             let inner_piece_moves = board_clone.get_moves(from);
             for game_move in inner_piece_moves {
+                // Whitelist inner move types that `relocate_pieces`' PIC
+                // arm actually handles: only `MoveTo` and
+                // `MoveIntoCarrier`. Anything else (Promotion, Castle,
+                // EnPassant, ThrowSwitch, PhaseShift, nested
+                // PieceInCarrier) would pass `get_moves` and then fail
+                // at apply time. Mirrors the locomotive filter.
+                if !matches!(
+                    game_move.move_type,
+                    MoveType::MoveTo(_) | MoveType::MoveIntoCarrier(_)
+                ) {
+                    continue;
+                }
                 moves.push(GameMove {
                     from: from.clone(),
                     move_type: MoveType::PieceInCarrier {
@@ -173,6 +244,7 @@ impl Piece for Bus {
         let mut sym = match self.color {
             Color::White => "BUS".to_string(),
             Color::Black => "bus".to_string(),
+            Color::Neutral => "BUS".to_string(),
         };
 
         if !self.pieces.is_empty() {
@@ -198,8 +270,26 @@ impl Piece for Bus {
     /// enemy square — those threats *do* matter for king safety. We compute
     /// each passenger's attacks as if it were standing on the Bus's square.
     fn attacks(&self, board: &Board, from: &Coord) -> Vec<Coord> {
+        // Plan 09 S1: a Neutral Bus is a degenerate state (Bus is
+        // always White or Black). Skip passenger attacks to be
+        // consistent with the other S1 guards.
+        if self.color == Color::Neutral {
+            return Vec::new();
+        }
+        // Filter passengers by colour. Bus's invariant is "same-colour
+        // passengers only" (the boarding filter at piecetype.rs and
+        // the round-3 capture-on-board rules together enforce it for
+        // legal moves), but a hand-rolled FEN can produce a Bus with
+        // mismatched-colour passengers. `is_attacked_by`'s rule says
+        // "non-Neutral carriers must return colour-correct attacks";
+        // a wrong-colour passenger inside a coloured Bus would
+        // otherwise leak phantom threats for the wrong side. Filter
+        // here so the contract holds regardless of FEN provenance.
         let mut out = Vec::new();
         for passenger in &self.pieces {
+            if passenger.get_color() != self.color {
+                continue;
+            }
             out.extend(passenger.attacks(board, from));
         }
         out

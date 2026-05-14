@@ -33,6 +33,12 @@ pub enum SquareType {
         targets: Vec<SignalId>,
         fires_for: PressureTrigger,
     },
+    /// Plan 09: a piece of train track. Trains sitting on this tile leave
+    /// in the `direction` (or its opposite, for Reverse-heading trains)
+    /// on their next tick. Curves are expressed as direction changes
+    /// between adjacent Track tiles. Non-train pieces can also walk over
+    /// Track squares — they're walkable like Standard.
+    Track { direction: TrackDir },
 }
 
 /// Cardinal direction for tracks and junction branches. Diagonals are
@@ -67,6 +73,28 @@ impl TrackDir {
             _ => None,
         }
     }
+
+    /// `(df, dr)` step vector to add to a Coord (file, rank). Rank 0 is
+    /// the *top* of the grid (FEN convention), so North decreases rank.
+    pub fn delta(&self) -> (isize, isize) {
+        match self {
+            TrackDir::N => (0, -1),
+            TrackDir::S => (0, 1),
+            TrackDir::E => (1, 0),
+            TrackDir::W => (-1, 0),
+        }
+    }
+
+    /// 180° flip. Used by Reverse-heading trains so they walk a track
+    /// backwards along the *same* tiles a Forward-heading train would.
+    pub fn opposite(&self) -> Self {
+        match self {
+            TrackDir::N => TrackDir::S,
+            TrackDir::S => TrackDir::N,
+            TrackDir::E => TrackDir::W,
+            TrackDir::W => TrackDir::E,
+        }
+    }
 }
 
 /// What triggers a `PressurePlate` to fire when a piece settles on it.
@@ -89,6 +117,7 @@ impl SquareType {
             SquareType::Junction { .. } => "JUNCTION",
             SquareType::Gate { .. } => "GATE",
             SquareType::PressurePlate { .. } => "PLATE",
+            SquareType::Track { .. } => "TRACK",
         }
     }
 
@@ -102,7 +131,8 @@ impl SquareType {
             SquareType::Standard
             | SquareType::Switch { .. }
             | SquareType::Junction { .. }
-            | SquareType::PressurePlate { .. } => true,
+            | SquareType::PressurePlate { .. }
+            | SquareType::Track { .. } => true,
             SquareType::Gate { open, .. } => *open,
             SquareType::Turret | SquareType::Vent => false,
         }

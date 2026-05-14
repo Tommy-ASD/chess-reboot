@@ -36,11 +36,58 @@ fn standard_start() -> Board {
     fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -")
 }
 
+/// Small board with a closed-loop train on the right side and idle
+/// kings in opposite corners. Each player has only the king (plus a
+/// rook for castling sanity) — most "picks" will be king shuffles
+/// while the train ticks autonomously every full turn.
+///
+/// Layout (rank, file):
+///   rank 7: K . . . . . . k    (white K at (0,7), black k at (7,7))
+///   ranks 0-3: empty
+///   ranks 4-5, files 4-5: 2×2 Track loop with a Locomotive at (4,4)
+///                          facing E and a Carriage at (5,4) chain_idx=1
+///
+/// The property test then exercises Property 1 (FEN round-trip) +
+/// Property 4 (move-changes-state) across the train tick. Without
+/// the round-3 through round-6 train work, this random play would
+/// surface a bug — corrupted FEN, lost cart, phantom check, etc.
+fn train_start() -> Board {
+    // 8×8 board. Kings on opposite top-row corners; 2×2 closed loop
+    // tiles slightly below. The engine indexes `grid[rank][file]`
+    // with `grid[0]` corresponding to the FEN's *first* (topmost) row,
+    // so the FEN below places:
+    //   grid[0] = K6k        — white K at (file=0, rank=0), black k at (file=7, rank=0)
+    //   grid[1..=2] = 8/8    — empty
+    //   grid[3] = track row  — loco tile at (4,3) NW, plain at (5,3) NE
+    //   grid[4] = track row  — cart at (4,4) SW, plain at (5,4) SE
+    //   grid[5..=7] = 8/8/8  — empty
+    //
+    // Loco at (4,3) facing east with last_dir=S (came from SW). Cart at
+    // (4,4) chain_index 1. neighbor_track_dirs forms the 2×2 closed
+    // loop; the train circulates NW→NE→SE→SW→NW indefinitely. Kings
+    // start far enough away that legal_moves seldom routes them into
+    // the loop, but the random walk can find the train so the
+    // property test allows a -1 piece-count delta.
+    fen_to_board(
+        "K6k/8/8/4(T=TRACK,D=E,P=LOCO(ID=1,H=F,L=S))(T=TRACK,D=E)2/4(T=TRACK,D=E,P=CART(ID=1,I=1))(T=TRACK,D=E)2/8/8/8 w - - tr=full p=0",
+    )
+}
+
 /// Collects every move legal_moves offers for the side to move.
+/// Mirrors `Board::status()`'s descent: a Neutral cart carrying a
+/// `side_to_move`-colour passenger contributes legal `PieceInCarrier`
+/// exit moves and must be included, otherwise the property net is
+/// strictly weaker than the engine's `status()` invariant.
 fn collect_all_legal(board: &Board) -> Vec<GameMove> {
+    use engine::pieces::{Color, Piece};
     let mut out = Vec::new();
     for (coord, piece) in board.all_pieces() {
-        if piece.get_color() != board.flags.side_to_move {
+        let counts = piece.get_color() == board.flags.side_to_move
+            || (piece.get_color() == Color::Neutral
+                && piece.passengers().is_some_and(|ps| {
+                    ps.iter().any(|q| q.get_color() == board.flags.side_to_move)
+                }));
+        if !counts {
             continue;
         }
         out.extend(board.legal_moves(&coord));
@@ -103,6 +150,87 @@ proptest! {
         prop_assert!(
             iters_performed > 0,
             "test must execute at least one inner iteration"
+        );
+    }
+
+    /// Same four properties, but driving a board with an active train
+    /// loop. Each player has only a king on a corner; almost every
+    /// step ticks the train. Without the round-3–round-6 train work
+    /// this property would surface train-related regressions (lost
+    /// carts, phantom check, head-swap, etc.) within a few picks.
+    ///
+    /// Property 1 (FEN round-trip) is the most informative here —
+    /// last_dir, ply_count, train_tick_rate, all the cart payloads
+    /// must serialise+parse cleanly after every tick.
+    ///
+    /// Property 3 (piece-count delta) is relaxed to allow {0, -1}:
+    /// a train tick can capture a non-cart piece (a king that walked
+    /// into the train's path), making the per-step delta -1 even on
+    /// a king-shuffle move. Note king-safety blocks moves *into*
+    /// `would_capture_at` next-tick tiles, but a multi-tick approach
+    /// can still result in a future train hit — the random play
+    /// occasionally finds these scenarios, and we want the FEN
+    /// round-trip to still hold.
+    #[test]
+    fn fen_roundtrip_and_invariants_under_random_play_with_train(
+        picks in prop::collection::vec(any::<u32>(), 1..40)
+    ) {
+        let mut board = train_start();
+        let mut iters_performed = 0usize;
+        for &pick in &picks {
+            let legal = collect_all_legal(&board);
+            if legal.is_empty() {
+                break;
+            }
+            iters_performed += 1;
+
+            let idx = (pick as usize) % legal.len();
+            let chosen = legal[idx].clone();
+
+            let pieces_before = board.all_pieces().len();
+            let board_before = board.clone();
+
+            let mut after = board.clone();
+            after.make_move(chosen)
+                .expect("legal_moves output must apply via make_move");
+
+            prop_assert_ne!(
+                &after, &board_before,
+                "make_move on a legal move must not be a no-op"
+            );
+
+            // Piece-count delta accounting:
+            //   0: ordinary move (king-shuffle, no train capture).
+            //  -1: chosen move captures a piece (regular take), OR a
+            //      train tick captured a piece that wandered into
+            //      its path. Exactly one capture, either source.
+            //  +1: passenger-exit via `PieceInCarrier{MoveTo}` —
+            //      the passenger becomes a top-level piece while the
+            //      cart stays. `all_pieces()` counts only top-level
+            //      entries, so the count rises by one.
+            //  -2: chosen move captures *and* the subsequent train
+            //      tick captures another piece on its new head tile.
+            //      Reachable in train fixtures only — `train_start`
+            //      has one train so two captures per move is the
+            //      worst case; an N-train fixture would need a wider
+            //      lower bound.
+            let pieces_after = after.all_pieces().len();
+            let delta = pieces_after as isize - pieces_before as isize;
+            prop_assert!(
+                (-2..=1).contains(&delta),
+                "piece count delta must be in [-2, 1]; got {delta}"
+            );
+
+            // Property 1: FEN round-trip is exact after train tick.
+            let fen = board_to_fen(&after);
+            let recovered = fen_to_board(&fen);
+            prop_assert_eq!(&recovered, &after, "FEN round-trip mismatch after train tick");
+
+            board = after;
+        }
+        prop_assert!(
+            iters_performed > 0,
+            "train property test must execute at least one inner iteration"
         );
     }
 }

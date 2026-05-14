@@ -167,3 +167,27 @@ identical to MoveTo.
 Cheapest order: **promotion → en passant → castling**. Castling depends on
 plan 02 (attack detection) for the "no path attacked" rule. Promotion and
 en passant don't, so they can land first.
+
+## Implementation notes (post-landing)
+
+All three landed via dedicated `MoveType` variants per the recommendation:
+
+- **Promotion** — `MoveType::Promotion { target, into }` with the four
+  standard targets (Q/R/B/N). `relocate_pieces` writes the new piece at
+  `target`. Capture-promotion onto a Neutral cart is dropped at the filter
+  so the cart-invincibility invariant holds.
+- **En passant** — `MoveType::EnPassant { target, captured }` with the
+  captured-pawn coord explicit. Phase 2 unconditionally clears
+  `en_passant_target`; the pawn's `post_move_effects` re-sets it on a
+  double push. The train tick has a heuristic ep-clear (`trains.rs`) for
+  the case where a train captures the just-double-pushed pawn.
+- **Castling** — `MoveType::Castle { side: CastleSide }`. King and rook
+  relocate atomically; King's `post_move_effects` clears both rights for
+  the moving colour. The dispatch was extended to also fire the King's
+  hook on `MoveIntoCarrier` so a king-into-bus correctly loses castling
+  rights.
+
+Regression tests: `test_castle_kingside_executes`,
+`test_promotion_replaces_pawn_with_queen`,
+`test_en_passant_capture_executes`,
+`test_king_into_bus_clears_castle_rights`.
