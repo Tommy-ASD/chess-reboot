@@ -68,8 +68,18 @@ impl Skibidi {
             match key {
                 "PHASE" => {
                     trace!(val, "parsed Skibidi phase");
+                    // Skibidi spec: phase ∈ 1..=4. Round-3 audit
+                    // surfaced that the parser previously accepted
+                    // any u8 — `phase_to_radius` falls through to 0
+                    // for out-of-range, but a future per-phase
+                    // ability lookup would otherwise read garbage.
+                    // Clamp at parse to enforce the invariant.
                     match val.parse::<u8>() {
-                        Ok(ok) => phase = ok,
+                        Ok(ok) if (1..=4).contains(&ok) => phase = ok,
+                        Ok(out) => warn!(
+                            out,
+                            "Skibidi phase out of range 1..=4; defaulting to 1"
+                        ),
                         Err(_) => warn!(val, "invalid phase for Skibidi"),
                     };
                 }

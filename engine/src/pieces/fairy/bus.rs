@@ -104,6 +104,22 @@ impl Bus {
                                 );
                                 continue;
                             }
+                            // Bus invariant: capacity-5. The boarding
+                            // filter enforces this for legal play, but
+                            // a hand-rolled FEN can describe a Bus with
+                            // more than 5 passengers. Drop overflow
+                            // with a warn so the over-cap state never
+                            // enters the engine — future pieces that
+                            // split or duplicate Buses can then trust
+                            // `bus.pieces.len() <= 5` as a hard
+                            // invariant.
+                            if pieces.len() >= 5 {
+                                warn!(
+                                    piece_sym,
+                                    "Bus over capacity-5 in FEN; dropping overflow passenger"
+                                );
+                                continue;
+                            }
                             // Bus invariant: passengers share the Bus's
                             // colour. The boarding filter enforces this
                             // in legal play, so a mismatched-colour

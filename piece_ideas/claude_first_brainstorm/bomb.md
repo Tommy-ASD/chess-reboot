@@ -139,11 +139,22 @@ distraction asset.
 ## New features required
 
 - `Piece::Bomb` with no state.
-- Hook: `on_self_capture(captured_piece, capture_context)` —
-  generic for Goblin + Bomb. Bomb implementation: enumerate 8
-  neighbours + own square, call the same piece-removal routine
-  used for normal capture on each occupant. Each removal
-  triggers its own death hooks.
+- A `BombCapture` struct implementing
+  `engine/src/movement/stack/capture.rs::CaptureModifier`, registered
+  with the `CaptureStack` (see `default_capture_stack`). The plan-10
+  refactor settled on external `CaptureModifier` registration rather
+  than a `Piece::on_capture` trait method — both because
+  `CaptureModifier` returns declarative `BoardOp`s (more loggable than
+  a `&self` mutation) and because handlers need captor info, not just
+  victim. The `BombCapture::apply` body matches on
+  `event.victim`'s `PieceType::Bomb(_)` variant, enumerates the 8
+  neighbours around `event.victim_coord` (NOT `event.captor_coord` —
+  AOE centers on the bomb's old square), and emits a
+  `BoardOp::Compose([RemovePiece, RemovePiece, ...])`. The dispatcher
+  applies the ops on the post-relocation board. Each removed piece
+  does NOT recursively fire its own capture event in v1 — chained
+  detonation is an open question. (See `GoblinDropVictimCapture` in
+  the same file for the canonical example of a CaptureModifier.)
 - Decide cascade behavior (see open questions).
 - Tests: Bomb captured by Knight, capturer dies; Bomb captured
   by long-range piece, only the immediate-radius dies;

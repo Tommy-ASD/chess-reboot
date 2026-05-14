@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use tracing::{trace, warn};
 
@@ -7,7 +7,26 @@ use tracing::{trace, warn};
 /// After taking a piece, the goblin moves like a king until it reaches it's home square.
 /// Once it reaches the home square, the "kidnapped" piece is changes color to that of who took it.
 /// If the goblin is taken by an enemy piece while it has a piece kidnapped,
-/// the kidnapped piece is placed where the goblin was located, and the taking piece can move again
+/// the kidnapped piece is placed where the captor came *from* (the
+/// goblin's old square is taken by the captor; the captor's origin
+/// is the only free square in the capture).
+///
+/// Two cases lose the kidnap victim silently — both have
+/// `captor_origin = None` per `ResolutionEvent::Capture` semantics:
+/// - PIC captures (passenger emerging from a carrier — no outer-
+///   board origin).
+/// - Train run-over (R4 audit F1): a Kidnapping Goblin sitting on
+///   a track tile, run over by a locomotive, loses its victim. The
+///   train head's previous tile is now occupied by carriage 1, so
+///   there is no clean drop site.
+///
+/// Both match the plan-09 Q7 silent-passenger-removal precedent and
+/// are pinned by tests in `engine/src/board/tests.rs`.
+///
+/// The "taking piece can move again" half of the spec (plan-04
+/// mechanic 2) is NOT implemented in this refactor. Tracked as a
+/// follow-up; needs `extra_moves: u8` on `BoardFlags` + gated side-
+/// flip in `apply_environment_reactions`.
 use crate::{
     board::{
         Board, Coord, GameMove, MoveType,
@@ -21,7 +40,7 @@ use crate::{
 pub enum GoblinState {
     Free, // hasn't kidnapped any piece
     Kidnapping {
-        piece: Rc<PieceType>, // the piece being carried
+        piece: Arc<PieceType>, // the piece being carried (Arc so PieceType is Send+Sync for the movement stack)
     },
 }
 
@@ -333,11 +352,22 @@ impl Piece for Goblin {
                             // exposed payload would miss kings inside
                             // a captured Bus). `is_in_check` and
                             // `status()` would silently lose the
-                            // king. Reject both shapes:
+                            // king. Reject these shapes:
                             //   1. captured_piece IS a king
                             //   2. captured_piece is a carrier (Bus /
                             //      Loco / Carriage) whose passengers
                             //      *could* include a king
+                            //   3. captured_piece is itself a Goblin —
+                            //      nesting a Kidnapping Goblin's full
+                            //      state inside our state would
+                            //      double-count the inner payload
+                            //      (capture handler drops the inner
+                            //      payload separately; the new captor
+                            //      shouldn't try to re-kidnap a
+                            //      already-Kidnapping victim, and
+                            //      "Goblin kidnaps a Free Goblin" has
+                            //      no spec-defined home-arrival
+                            //      semantics).
                             // For case 2 we conservatively reject any
                             // carrier rather than walking passengers —
                             // kidnapping a Bus/cart is also nonsensical
@@ -345,6 +375,7 @@ impl Piece for Goblin {
                             // doesn't define what a converted Bus
                             // would be).
                             if matches!(captured_piece, PieceType::King(_))
+                                || matches!(captured_piece, PieceType::Goblin(_))
                                 || captured_piece.can_carry_piece()
                             {
                                 trace!(

@@ -215,4 +215,14 @@ fn capture_promotion_clears_castle_right() {
         }
         other => panic!("expected white queen at a8, got {other:?}"),
     }
+    // Pawn must have vacated b7 — guards against a silent no-op
+    // promotion path that would leave the castle flag cleared
+    // (correct) but the pawn still standing (wrong).
+    let at_b7 = board
+        .get_square_at(&Coord { file: 1, rank: 1 })
+        .and_then(|s| s.piece.clone());
+    assert!(
+        at_b7.is_none(),
+        "promoting pawn must vacate b7; found {at_b7:?}"
+    );
 }

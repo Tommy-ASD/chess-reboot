@@ -148,6 +148,7 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 | `p=<n>` | Plies elapsed (for `EveryNPly` gate alignment) | `p=42` |
 | `variants=<id>,<id>,…` | Active rule variants (plan 11; default empty = standard chess) | `variants=duck_chess` |
 | `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11; default `piece`) | `duck_phase=placing` |
+| `lm=(C=…,F=…,K=…[,T=…][,V=…],P=…)` | Last-move snapshot (plan 10; default absent = no prior move). `C` is mover color (W/B/N), `F` is from coord, `K` is move kind (MOVE / MIC / PROMO / CASTLE / EP / PS / TS / PIC), `T` is to coord (omitted for ThrowSwitch / PhaseShift), `V` is captured-piece symbol (omitted on non-captures), `P` is primary piece symbol (post-promotion for Promote moves) | `lm=(C=W,F=4-6,K=MOVE,T=4-5,P=P)` |
 
 Canonical implementer: `engine/src/board/fen.rs`. Frontend parser:
 `frontend/vite-dev/src/fen.ts`.

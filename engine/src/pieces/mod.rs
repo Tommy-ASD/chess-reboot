@@ -128,9 +128,14 @@ pub trait Piece {
     /// capture). King-safety checks AND captures both call this so a
     /// "phantom" attack doesn't put a king in spurious check.
     ///
-    /// Plan 10 will fold this into the movement-stack registry; for
-    /// now it's a per-piece hook to keep the train-specific
-    /// conditionals out of `is_attacked_by`.
+    /// Post-Plan-10, the canonical filtering for train-style chain-
+    /// following lives in `movement/stack/train_modifiers.rs`
+    /// (`TrainCartCaptureFilter`, `TwoTrainCollisionFilter`). The
+    /// existing piece-level overrides — `Locomotive`, `Carriage`
+    /// (both for train chain-following), `Goblin` (suppresses threats
+    /// when `Kidnapping`), and `Monkey` (Neutral cart passenger
+    /// projection rules) — remain as defence-in-depth for callers
+    /// that don't route through the stack.
     fn would_capture_at(&self, _board: &Board, _from: &Coord, _target: &Coord) -> bool {
         true
     }

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::{
     board::GameMove,
@@ -78,9 +78,9 @@ impl PieceType {
     }
 }
 
-impl From<Rc<PieceType>> for PieceType {
-    fn from(rc: Rc<PieceType>) -> Self {
-        rc.as_ref().clone()
+impl From<Arc<PieceType>> for PieceType {
+    fn from(arc: Arc<PieceType>) -> Self {
+        arc.as_ref().clone()
     }
 }
 

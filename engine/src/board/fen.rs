@@ -2,7 +2,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     board::{
-        Board, BoardFlags, Coord, SignalId, TrainTickRate,
+        Board, BoardFlags, Coord, LastMove, LastMoveKind, SignalId, TrainTickRate,
         square::{PressureTrigger, Square, SquareCondition, SquareType, TrackDir},
     },
     pieces::{Color, piecetype::PieceType},
@@ -220,7 +220,14 @@ pub fn board_to_fen(board: &Board) -> String {
     };
     let tr = format_train_tick_rate(&board.flags.train_tick_rate);
     let p = format!("p={}", board.flags.ply_count);
-    format!("{grid} {stm} {castling} {ep} {tr} {p}")
+    let lm = board
+        .flags
+        .last_move
+        .as_ref()
+        .map(format_last_move)
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default();
+    format!("{grid} {stm} {castling} {ep} {tr} {p}{lm}")
 }
 
 fn format_train_tick_rate(rate: &TrainTickRate) -> String {
@@ -285,6 +292,155 @@ fn parse_ply_count(s: &str) -> Option<u32> {
         warn!(s, "could not parse ply-count field; defaulting to 0");
     }
     parsed
+}
+
+/// Plan 10 step 2: serialise `LastMove` as a compact FEN field.
+/// Format: `lm=(C=<W|B|N>,F=<file>-<rank>,K=<kind>[,T=<file>-<rank>][,V=<symbol>],P=<symbol>)`.
+///
+/// Fields are stable and explicitly tagged; field order is canonical
+/// (C, F, K, T, V, P) but the parser is order-agnostic. Round-trip is
+/// exact for all `LastMove` fields.
+fn format_last_move(lm: &LastMove) -> String {
+    let c = match lm.mover_color {
+        Color::White => "W",
+        Color::Black => "B",
+        Color::Neutral => "N",
+    };
+    let f = format!("{}-{}", lm.from.file, lm.from.rank);
+    let k = format_last_move_kind(lm.kind);
+    let mut parts: Vec<String> = vec![format!("C={c}"), format!("F={f}"), format!("K={k}")];
+    if let Some(to) = &lm.to {
+        parts.push(format!("T={}-{}", to.file, to.rank));
+    }
+    if let Some(v) = &lm.captured_symbol {
+        parts.push(format!("V={v}"));
+    }
+    parts.push(format!("P={}", lm.primary_symbol));
+    format!("lm=({})", parts.join(","))
+}
+
+fn format_last_move_kind(kind: LastMoveKind) -> &'static str {
+    match kind {
+        LastMoveKind::Move => "MOVE",
+        LastMoveKind::MoveIntoCarrier => "MIC",
+        LastMoveKind::Promote => "PROMO",
+        LastMoveKind::Castle => "CASTLE",
+        LastMoveKind::EnPassant => "EP",
+        LastMoveKind::PhaseShift => "PS",
+        LastMoveKind::ThrowSwitch => "TS",
+        LastMoveKind::PieceInCarrier => "PIC",
+    }
+}
+
+fn parse_last_move_kind(s: &str) -> Option<LastMoveKind> {
+    match s {
+        "MOVE" => Some(LastMoveKind::Move),
+        "MIC" => Some(LastMoveKind::MoveIntoCarrier),
+        "PROMO" => Some(LastMoveKind::Promote),
+        "CASTLE" => Some(LastMoveKind::Castle),
+        "EP" => Some(LastMoveKind::EnPassant),
+        "PS" => Some(LastMoveKind::PhaseShift),
+        "TS" => Some(LastMoveKind::ThrowSwitch),
+        "PIC" => Some(LastMoveKind::PieceInCarrier),
+        _ => None,
+    }
+}
+
+fn parse_coord_pair(s: &str) -> Option<Coord> {
+    let (f, r) = s.split_once('-')?;
+    let file: u8 = f.parse().ok()?;
+    let rank: u8 = r.parse().ok()?;
+    Some(Coord { file, rank })
+}
+
+/// Inverse of `format_last_move`. Lenient: returns `None` on any
+/// parse error (callers default to `None` in that case).
+///
+/// **Hardening (round-3 audit):**
+/// - Empty `P=` / `V=` values are rejected (Some("") would propagate
+///   downstream into consumers that may not handle it).
+/// - Duplicate keys are first-wins; subsequent duplicates are warned
+///   and ignored (avoids order-dependent results where `C=W,C=foo`
+///   silently dropped the field but `C=foo,C=W` accepted it).
+/// - Internal paren-depth must balance (catches `P=G(H=0` where the
+///   outer `strip_suffix(')')` masked an internal half-paren).
+fn parse_last_move(s: &str) -> Option<LastMove> {
+    let body = s.strip_prefix("lm=")?;
+    let inner = body.strip_prefix('(').and_then(|b| b.strip_suffix(')'))?;
+
+    // Depth-balance check: reject inputs whose internal parens don't
+    // close cleanly. Prevents `P=G(H=0` from being accepted as a
+    // single field with an embedded half-paren.
+    let mut depth: i32 = 0;
+    for ch in inner.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    warn!(s, "lm= contains a stray ')'; rejecting");
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        warn!(s, "lm= internal parens don't balance; rejecting");
+        return None;
+    }
+
+    let mut mover_color: Option<Color> = None;
+    let mut from: Option<Coord> = None;
+    let mut to: Option<Coord> = None;
+    let mut captured_symbol: Option<String> = None;
+    let mut primary_symbol: Option<String> = None;
+    let mut kind: Option<LastMoveKind> = None;
+    for part in split_top_level(inner) {
+        let (k, v) = part.split_once('=').unwrap_or(("", part.as_str()));
+        match k {
+            "C" if mover_color.is_none() => {
+                mover_color = match v {
+                    "W" => Some(Color::White),
+                    "B" => Some(Color::Black),
+                    "N" => Some(Color::Neutral),
+                    other => {
+                        warn!(other, "unknown lm.C color tag");
+                        None
+                    }
+                };
+            }
+            "F" if from.is_none() => from = parse_coord_pair(v),
+            "T" if to.is_none() => to = parse_coord_pair(v),
+            "V" if captured_symbol.is_none() => {
+                if v.is_empty() {
+                    warn!("empty lm.V value; ignoring");
+                } else {
+                    captured_symbol = Some(v.to_string());
+                }
+            }
+            "P" if primary_symbol.is_none() => {
+                if v.is_empty() {
+                    warn!("empty lm.P value; ignoring");
+                } else {
+                    primary_symbol = Some(v.to_string());
+                }
+            }
+            "K" if kind.is_none() => kind = parse_last_move_kind(v),
+            "C" | "F" | "T" | "V" | "P" | "K" => {
+                warn!(k, "duplicate lm key; first-wins, ignoring later occurrence");
+            }
+            other => warn!(other, "unknown lm key"),
+        }
+    }
+    Some(LastMove {
+        mover_color: mover_color?,
+        from: from?,
+        to,
+        captured_symbol,
+        primary_symbol: primary_symbol?,
+        kind: kind?,
+    })
 }
 
 /// Parse an algebraic square ("e3") into a Coord. Needs the board height
@@ -367,6 +523,10 @@ pub fn fen_to_board(fen: &str) -> Board {
     let ep_part = parts.next();
     let train_part = parts.next();
     let ply_part = parts.next();
+    // Plan 10 step 2: `lm=(...)` is the most recent move's snapshot.
+    // Lenient parse — any malformed payload coerces to None, matching
+    // the rest of the trailing-field convention.
+    let lm_part = parts.next();
 
     let rows: Vec<&str> = grid_part.split('/').collect();
     // Clamp height at 255 — `Coord::rank` is `u8`, so beyond-255 rows
@@ -425,6 +585,7 @@ pub fn fen_to_board(fen: &str) -> Board {
         .and_then(parse_train_tick_rate)
         .unwrap_or(TrainTickRate::EveryFullTurn);
     let ply_count = ply_part.and_then(parse_ply_count).unwrap_or(0);
+    let last_move = lm_part.and_then(parse_last_move);
 
     let flags = BoardFlags {
         side_to_move,
@@ -435,6 +596,7 @@ pub fn fen_to_board(fen: &str) -> Board {
         en_passant_target,
         train_tick_rate,
         ply_count,
+        last_move,
     };
 
     Board { grid, flags }

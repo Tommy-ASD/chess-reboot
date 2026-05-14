@@ -54,10 +54,21 @@ impl King {
             Color::Neutral => return moves,
         };
 
+        // The rook must sit on a walkable square — otherwise a stranded
+        // rook (corner Gate closed by a signal, or FEN setup) gets
+        // "rescued" by castling, teleporting off the unwalkable tile.
+        // Mirrors the source-walkability rule that keeps stranded
+        // pieces from generating their own moves.
         let rook_is_friendly =
             |board: &Board, sq: &Coord| -> bool {
+                let Some(s) = board.get_square_at(sq) else {
+                    return false;
+                };
+                if !s.square_type.is_walkable() {
+                    return false;
+                }
                 matches!(
-                    board.get_square_at(sq).and_then(|s| s.piece.as_ref()),
+                    s.piece.as_ref(),
                     Some(PieceType::Rook(r)) if r.color == self.color
                 )
             };

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    board::square::{Square, SquareCondition, SquareType},
+    board::square::Square,
     pieces::{Color, piecetype::PieceType},
 };
 
@@ -146,6 +146,59 @@ pub enum TrainTickRate {
     EveryNPly(u8),
 }
 
+/// Plan 10 step 2 — snapshot of the previous move. Populated at the end
+/// of every `make_move` (in `apply_environment_reactions`, before the
+/// side flip). Read by pieces that react to history: Mirror replays the
+/// shape; Echo-spatial applies the from→to delta to a friendly piece;
+/// Boy Who Followed Geese chases the most recent mover.
+///
+/// Kept deliberately lean — five round-trippable fields. The lightweight
+/// `kind` discriminator lets a future Mirror-style piece know whether
+/// the move was a Castle / Promotion / PhaseShift without needing the
+/// full `MoveType`. Full-fidelity move replay (i.e. preserving the
+/// Promotion target piece) is intentionally out of scope; if a piece
+/// needs that, it should consume the move at make-time, not read it
+/// back from `BoardFlags`.
+#[derive(PartialEq, Debug, Clone)]
+pub struct LastMove {
+    pub mover_color: Color,
+    pub from: Coord,
+    /// Where the moving piece ended up. `None` for ThrowSwitch /
+    /// PhaseShift (which don't relocate the piece). For Castle, the
+    /// king's destination square (so Mirror/Echo can read a meaningful
+    /// from→to vector); the rook's relocation is implicit.
+    pub to: Option<Coord>,
+    /// FEN symbol of the piece that was captured by this move, if any.
+    /// Stored as a `String` (not `PieceType`) so the FEN encoding stays
+    /// flat — round-trip preserves the symbol, not the full piece state.
+    pub captured_symbol: Option<String>,
+    /// FEN symbol of the piece that moved (post-promotion if the move
+    /// was a Promotion). Captures the *piece kind* without preserving
+    /// per-piece state.
+    pub primary_symbol: String,
+    /// Lightweight discriminator for what *kind* of move this was.
+    /// Round-trippable. Pieces that branch on move-shape (Mirror skips
+    /// Castle/PhaseShift; Echo replays Move/Promote deltas) read this
+    /// instead of reconstructing the full `MoveType`.
+    pub kind: LastMoveKind,
+}
+
+/// Round-trippable discriminator for the kind of move recorded in
+/// `LastMove`. One variant per `MoveType` variant, plus a catch-all
+/// for nested PieceInCarrier shapes that don't have a unique geometry
+/// to expose.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum LastMoveKind {
+    Move,
+    MoveIntoCarrier,
+    Promote,
+    Castle,
+    EnPassant,
+    PhaseShift,
+    ThrowSwitch,
+    PieceInCarrier,
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct BoardFlags {
     pub side_to_move: Color,
@@ -160,6 +213,16 @@ pub struct BoardFlags {
     /// even when the trains don't advance this ply. Used by the tick-rate
     /// gate. Resets only on board reset.
     pub ply_count: u32,
+    /// Plan 10 step 2: snapshot of the move that produced this board
+    /// state. `None` on freshly-constructed boards. Set inside
+    /// `apply_environment_reactions_with` (called from
+    /// `apply_environment_reactions`) BEFORE the `PostMover` phase
+    /// runs — so PostMover handlers (Boy Who Followed Geese, future
+    /// reactive pieces) read the fresh value, not a stale prior-turn
+    /// entry. Still ordered before the side flip, so on the
+    /// opponent's next turn this field describes the opponent's last
+    /// move (which is what the consuming pieces want).
+    pub last_move: Option<LastMove>,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -344,37 +407,30 @@ impl Board {
         }
     }
 
+    /// True if `coord` is in bounds AND its square type is walkable
+    /// (Standard / Switch / Junction / Track / PressurePlate / open Gate).
+    /// Out-of-bounds → false. Unwalkable types (Block, Turret, Vent,
+    /// closed Gate) → false.
+    pub fn is_walkable_at(&self, coord: &Coord) -> bool {
+        self.get_square_at(coord)
+            .map(|sq| sq.square_type.is_walkable())
+            .unwrap_or(false)
+    }
+
     /// Get all possible moves for the piece at `from`.
+    ///
+    /// **Plan 10 step 8:** delegates to the movement stack's
+    /// `resolve_moves`. The full pipeline runs:
+    /// - `PieceMovesModifier` (30) emits raw candidates from
+    ///   `PieceType::get_moves`.
+    /// - `SquareConditionFilter` (110) drops Brainrot/Frozen sources.
+    /// - `WalkabilityFilter` (120) drops unwalkable targets.
+    /// - `SwitchTileAugment` (130) appends a `ThrowSwitch` candidate
+    ///   when the source is a `Switch` tile.
+    /// - Train-threat modifiers and (future) king-safety filter sit
+    ///   on the threat side and don't touch this path.
     pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
-        let Some(square) = self.get_square_at(from) else {
-            return vec![];
-        };
-        if square.conditions.contains(&SquareCondition::Brainrot)
-            || square.conditions.contains(&SquareCondition::Frozen)
-        {
-            return vec![];
-        }
-        let Some(piece) = &square.piece else {
-            return vec![];
-        };
-
-        let mut moves = piece.get_moves(self, from);
-
-        // Square-driven additions: a piece standing on a Switch tile can
-        // throw that switch. This is independent of the piece's own
-        // movement, so we add it after the piece-level move generation.
-        // `Piece::can_throw_switch()` lets specific pieces opt out (the
-        // default is `true`).
-        if matches!(square.square_type, SquareType::Switch { .. }) && piece.can_throw_switch() {
-            moves.push(GameMove {
-                from: from.clone(),
-                move_type: MoveType::ThrowSwitch {
-                    switch: from.clone(),
-                },
-            });
-        }
-
-        moves
+        crate::movement::stack::default_stack().resolve_moves(self, from)
     }
 
     /// Takes a from and to coordinate and returns true if the move is valid.
@@ -391,7 +447,7 @@ impl Board {
     /// piece's color. Returns `(color, optional_passenger_symbol)`
     /// where the symbol is only set for PieceInCarrier (used by the
     /// `WrongTurn` error to render a helpful message).
-    fn effective_mover_color(
+    pub(crate) fn effective_mover_color(
         &self,
         source_piece: &PieceType,
         game_move: &GameMove,
@@ -500,75 +556,22 @@ impl Board {
     /// detection (`target = king square`, `attacker = enemy color`) and
     /// castle-path safety.
     ///
-    /// Implementation is O(N·M) — for each piece of `attacker`, ask the
-    /// piece what squares it threatens, then look for `target` in the set.
-    /// At 8×8 this is fine; revisit if board sizes grow.
+    /// **Plan 10 step 3:** delegates to the movement stack's
+    /// `resolve_threats`. The legacy iteration logic (with the
+    /// `would_capture_at` filter and Neutral-passenger descent) now
+    /// lives in `LegacyPieceAttacksModifier` at priority 50; step 4
+    /// will split it into per-piece modifiers in the 0..99 band.
     pub fn is_attacked_by(&self, target: &Coord, attacker: Color) -> bool {
         // "Is this square attacked by the Neutral side?" is semantically
-        // meaningless — Neutral is unaligned and has no king. The Neutral
-        // *carriers'* threats are folded into both colors' queries below;
-        // a Neutral-as-attacker query has no caller in normal play, so
-        // short-circuit it rather than scanning for "self-attack" hits.
+        // meaningless — Neutral is unaligned and has no king. Keep the
+        // short-circuit at the API boundary so callers don't pay the
+        // stack-invocation cost for a Neutral query.
         if attacker == Color::Neutral {
             return false;
         }
-
-        for (coord, piece) in self.all_pieces() {
-            // Neutral pieces (trains) threaten every side — they're not
-            // aligned with `attacker`, but for the king-safety question
-            // ("would this square be attacked by something") their
-            // *own movement* threats always count. Passenger threats
-            // belong to the passenger's color, not the cart, and are
-            // iterated separately below.
-            let pc = piece.get_color();
-            if pc != attacker && pc != Color::Neutral {
-                continue;
-            }
-            for c in piece.attacks(self, &coord) {
-                // A piece can list a tile in its `attacks` set without
-                // that being an actual capture — most notably train
-                // carts, which roll onto same-train neighbours via
-                // chain-following. `would_capture_at` is the per-
-                // piece predicate that filters those phantom hits.
-                if &c == target && piece.would_capture_at(self, &coord, target) {
-                    return true;
-                }
-            }
-
-            // Neutral carrier passenger threats: a Black pawn riding a
-            // Neutral cart threatens for Black only. The cart's
-            // `attacks()` deliberately excludes passenger threats so
-            // this color filter is the single source of truth. For
-            // non-Neutral carriers (Bus) the passenger threats are
-            // already covered by the cart's own `attacks()` because
-            // Bus passengers share the Bus's color by invariant.
-            if pc == Color::Neutral {
-                if let Some(passengers) = piece.passengers() {
-                    for passenger in passengers {
-                        if passenger.get_color() != attacker {
-                            continue;
-                        }
-                        for c in passenger.attacks(self, &coord) {
-                            // Mirror the top-level loop's predicate
-                            // filter — the central "phantom attacks
-                            // are filtered here, not in each piece's
-                            // attacks()" contract holds for passengers
-                            // too. Today no passenger overrides
-                            // `would_capture_at` (passengers can't be
-                            // train carts), so this is a guard rather
-                            // than a behaviour change; landing it now
-                            // keeps the contract uniform.
-                            if &c == target
-                                && passenger.would_capture_at(self, &coord, target)
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        false
+        !crate::movement::stack::default_stack()
+            .resolve_threats(self, target, attacker)
+            .is_empty()
     }
 
     /// Locate the king of `color`, if one exists on the board. Returns
@@ -586,8 +589,8 @@ impl Board {
         if color == Color::Neutral {
             return None;
         }
-        for (coord, piece) in self.all_pieces() {
-            if king_of_color(&piece, color) {
+        for (coord, piece) in self.iter_pieces() {
+            if king_of_color(piece, color) {
                 return Some(coord);
             }
             // Descend into every carrier (Bus, Locomotive, Carriage). A king
@@ -611,33 +614,17 @@ impl Board {
         }
     }
 
-    /// Subset of `get_moves(from)` after dropping any move that would leave
-    /// the moving side's own king in check (or fail apply for any other
-    /// reason). Implements pin/discovered-check filtering by clone-and-try
-    /// per candidate move; correct but not fast — see plan 02's notes.
+    /// Subset of `get_moves(from)` after dropping any move that would
+    /// leave the moving side's own king in check (or fail apply for
+    /// any other reason).
+    ///
+    /// **Plan 10 step 9:** delegates to the movement stack's
+    /// `resolve_legal_moves`, which runs the full stack including
+    /// the king-safety modifier at priority 300. Same correctness
+    /// guarantee as the legacy inline filter; Duck Chess (plan 11)
+    /// will opt out by reading the variant flag inside the modifier.
     pub fn legal_moves(&self, from: &Coord) -> Vec<GameMove> {
-        let raw = self.get_moves(from);
-        let source_piece = match self.get_square_at(from).and_then(|s| s.piece.as_ref()) {
-            Some(p) => p.clone(),
-            None => return Vec::new(),
-        };
-        raw.into_iter()
-            .filter(|m| {
-                let mut hypothetical = self.clone();
-                // Same reason as `validate_move`: don't run the train
-                // tick in the hypothetical, or a train could capture
-                // the king mid-evaluation and hide a `WouldLeave-
-                // KingInCheck` from us. For PieceInCarrier moves, the
-                // king-safety check applies to the *passenger's*
-                // side, not the carrier's Neutral colour — see
-                // `effective_mover_color`.
-                let (mover_color, _) = self.effective_mover_color(&source_piece, m);
-                match hypothetical.apply_move_for_validation(m.clone()) {
-                    Ok(()) => !hypothetical.is_in_check(mover_color),
-                    Err(_) => false,
-                }
-            })
-            .collect()
+        crate::movement::stack::default_stack().resolve_legal_moves(self, from)
     }
 
     /// Overall status from the perspective of `side_to_move`. `BrainrotWin`
@@ -652,14 +639,22 @@ impl Board {
         // stalemate/checkmate when the side's only remaining pieces
         // are riding a neutral train. `find_king` already descends
         // into carriers; do the same here for symmetry.
-        let any_legal = self.all_pieces().iter().any(|(coord, p)| {
-            let counts = p.get_color() == to_move
-                || (p.get_color() == Color::Neutral
-                    && p.passengers().is_some_and(|ps| {
-                        ps.iter().any(|q| q.get_color() == to_move)
-                    }));
-            counts && !self.legal_moves(coord).is_empty()
-        });
+        // Collect coords first to avoid holding the iterator borrow
+        // across `legal_moves(coord)` calls (which take `&self`).
+        let coords_to_check: Vec<Coord> = self
+            .iter_pieces()
+            .filter(|(_, p)| {
+                p.get_color() == to_move
+                    || (p.get_color() == Color::Neutral
+                        && p.passengers().is_some_and(|ps| {
+                            ps.iter().any(|q| q.get_color() == to_move)
+                        }))
+            })
+            .map(|(c, _)| c)
+            .collect();
+        let any_legal = coords_to_check
+            .iter()
+            .any(|coord| !self.legal_moves(coord).is_empty());
 
         if any_legal {
             if self.is_in_check(to_move) {
@@ -679,23 +674,60 @@ impl Board {
     }
 
     pub fn all_pieces(&self) -> Vec<(Coord, PieceType)> {
-        let mut out = Vec::new();
+        // Owned-clone variant retained for callers that need the
+        // pieces beyond the borrow scope (e.g. `make_move`'s
+        // pre-relocation snapshots, tests). For hot-path iteration
+        // see `iter_pieces`.
+        self.iter_pieces()
+            .map(|(c, p)| (c, p.clone()))
+            .collect()
+    }
 
-        for (rank, row) in self.grid.iter().enumerate() {
-            for (file, square) in row.iter().enumerate() {
-                if let Some(piece) = &square.piece {
-                    out.push((
+    /// Zero-allocation iterator over the board's occupied squares.
+    /// Yields `(Coord, &PieceType)`. Use this for read-only scans
+    /// (threat-set generation, modifier iteration, `find_king`,
+    /// `status`'s legal-move probe). `all_pieces()` is the owned-
+    /// clone variant; reach for that only when the borrow scope
+    /// can't reach the consumer.
+    ///
+    /// Round-2 audit: introducing this saved ~14 Vec allocations
+    /// and ~14×N piece clones per `is_attacked_by` call (one per
+    /// piece-attack modifier). Perf-critical for `legal_moves`,
+    /// which probes king-safety per candidate.
+    ///
+    /// **Borrow scope:** the returned iterator holds an immutable
+    /// borrow of `&self`. Collect the items (e.g. into `Vec<Coord>`)
+    /// before calling methods that need a fresh borrow such as
+    /// `legal_moves` or `make_move`. See `status()` for the pattern.
+    ///
+    /// **Invariant:** `Coord` uses `u8` for file and rank, so this
+    /// iterator silently wraps for boards larger than 255 rows or
+    /// columns. The FEN parser clamps to 255; direct `Board { grid }`
+    /// construction is responsible for honouring the limit. A
+    /// `debug_assert!` guards the invariant in dev builds.
+    pub fn iter_pieces(&self) -> impl Iterator<Item = (Coord, &PieceType)> + '_ {
+        debug_assert!(
+            self.grid.len() <= 255,
+            "iter_pieces: grid height {} exceeds u8 Coord limit",
+            self.grid.len()
+        );
+        debug_assert!(
+            self.grid.iter().all(|row| row.len() <= 255),
+            "iter_pieces: at least one row exceeds the u8 Coord limit"
+        );
+        self.grid.iter().enumerate().flat_map(|(rank, row)| {
+            row.iter().enumerate().filter_map(move |(file, square)| {
+                square.piece.as_ref().map(|p| {
+                    (
                         Coord {
                             file: file as u8,
                             rank: rank as u8,
                         },
-                        piece.clone(),
-                    ));
-                }
-            }
-        }
-
-        out
+                        p,
+                    )
+                })
+            })
+        })
     }
 
     /// Returns true if (file, rank) is inside the board grid.

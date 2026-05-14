@@ -14,9 +14,10 @@ use tracing::{debug, trace};
 
 use crate::{
     board::{
-        Board, Coord, TrainTickRate,
+        Board, Coord, MoveType, TrainTickRate,
         square::{SquareType, TrackDir},
     },
+    movement::stack::capture::{ResolutionEvent, default_capture_stack},
     pieces::{
         fairy::locomotive::TrainHeading,
         piecetype::PieceType,
@@ -241,14 +242,6 @@ impl Board {
         }
     }
 
-    /// Convenience wrapper: legacy coord-only result for callers that
-    /// don't need the new `last_dir`. Used in places where we just want
-    /// "where would this train go next from a cold start" — e.g.
-    /// previewing attack tiles before the loco has ticked.
-    pub fn next_train_tile(&self, from: &Coord, heading: TrainHeading) -> Option<Coord> {
-        self.next_train_step(from, heading, None).map(|(c, _)| c)
-    }
-
     /// Plan 09 entry point. Bumps the ply counter and ticks trains when
     /// the configured rate calls for it. Called from
     /// `apply_environment_reactions` (phase 3 of make_move) after
@@ -307,8 +300,8 @@ impl Board {
     /// with the brainrot semantics for the passenger as a piece).
     pub fn advance_trains(&mut self) {
         let mut carts: Vec<CartSnapshot> = Vec::new();
-        for (coord, piece) in self.all_pieces() {
-            match &piece {
+        for (coord, piece) in self.iter_pieces() {
+            match piece {
                 PieceType::Locomotive(loco) => carts.push(CartSnapshot {
                     coord,
                     train_id: loco.train_id,
@@ -624,34 +617,48 @@ impl Board {
             snapshots.push((adv, moving_carts));
         }
 
-        // Commit phase 2: captures + ep-clear.
+        // Commit phase 2: captures + ep-clear + corner-rook castle
+        // revoke + pending capture-stack events.
         //
-        // (Note: "phase" here refers to the *commit* sub-phases
-        // inside this function — 1/2/3 = clear / capture / place.
-        // It is distinct from `make_move`'s 3-phase pipeline at the
-        // call-site level — relocate / piece-effects / environment.)
+        // "Phase" here refers to the *commit* sub-phases inside this
+        // function — 1/2/3 = clear / capture / place. Distinct from
+        // `make_move`'s pipeline (relocate / piece-effects / env).
         //
         // If the captured tile is *the* pawn whose double-push
-        // established `flags.en_passant_target` this same move,
-        // null the ep target — otherwise the next turn's opposing
-        // pawn could en-passant-capture an already-gone pawn,
-        // gaining a diagonal move with no actual capture. At this
-        // point `side_to_move` is still the mover (the side-flip
-        // is the last step in `apply_environment_reactions`). If ep
-        // is set, the *outer* `apply_piece_post_effects` step just
-        // set it via the pawn's own `post_move_effects`, which only
-        // fires for a same-side double-push. So the pawn lives at
-        //   white: (ep.file, ep.rank - 1)  -- pawn moves toward rank 0
-        //   black: (ep.file, ep.rank + 1)  -- pawn moves toward rank N
-        for (adv, _) in &snapshots {
+        // established `flags.en_passant_target` this same move, null
+        // the ep target — otherwise the next turn's opposing pawn
+        // could en-passant-capture an already-gone pawn, gaining a
+        // diagonal move with no actual capture. `side_to_move` is
+        // still the mover here (the flip is the last step in
+        // `apply_environment_reactions`); the outer
+        // `apply_piece_post_effects` just set ep via the pawn's own
+        // `post_move_effects`, which fires only for a same-side
+        // double-push. So the pawn lives at
+        //   white: (ep.file, ep.rank - 1)  -- moves toward rank 0
+        //   black: (ep.file, ep.rank + 1)  -- moves toward rank N
+        //
+        // Snapshot each victim before clearing so (a) the corner-rook
+        // castle revoke can see the captured rook (otherwise a train
+        // rolling onto a1/h1/a8/h8 leaves castle rights stale), and
+        // (b) the capture stack can fire after placement (so a
+        // Kidnapping Goblin run over by a train doesn't bypass
+        // GoblinDropVictimCapture).
+        let mut pending_captures: Vec<(Coord, PieceType, PieceType)> = Vec::new();
+        for (adv, moving_carts) in &snapshots {
             for victim in &adv.captures {
-                if let Some(pawn) = &double_pusher_coord {
-                    if victim == pawn {
-                        self.flags.en_passant_target = None;
-                    }
+                if double_pusher_coord.as_ref() == Some(victim) {
+                    self.flags.en_passant_target = None;
                 }
-                if let Some(sq) = self.get_square_mut(victim) {
-                    sq.piece = None;
+                let victim_piece = self
+                    .get_square_mut(victim)
+                    .and_then(|sq| sq.piece.take());
+                if let Some(v) = &victim_piece {
+                    self.maybe_clear_castle_on_rook_capture(victim, v);
+                }
+                if let (Some(captor), Some(v)) =
+                    (moving_carts.first().cloned(), victim_piece)
+                {
+                    pending_captures.push((victim.clone(), captor, v));
                 }
             }
         }
@@ -685,6 +692,39 @@ impl Board {
                 all_landings.push(new_pos.clone());
             }
         }
+
+        // Phase 4: fire the capture stack now that trains are placed.
+        // Mirrors make_move's relocate → fire_capture_stack order.
+        // `captor_origin = None` because the train head has no clean
+        // origin tile — its previous tile is now occupied by carriage 1,
+        // so the GoblinDropVictimCapture handler's "drop kidnap victim
+        // on captor_origin" rule cannot apply (silent loss matches the
+        // documented PIC-capture precedent). `captor_coord = victim_coord`
+        // because the head landed on the victim's tile.
+        // `move_type = MoveTo(victim_coord)` is a synthesized hint; no
+        // current handler distinguishes this from a player MoveTo
+        // capture.
+        //
+        // Forward-compat note: a handler emitting `BoardOp::RemovePiece`
+        // on `captor_coord` would delete the just-placed locomotive,
+        // desyncing the train chain tracked by `iter_pieces()`. No
+        // currently-registered handler does this — add a debug guard
+        // when the first BoardOp-emitting handler for train captures
+        // lands.
+        for (victim_coord, captor, victim) in pending_captures {
+            let event = ResolutionEvent::Capture {
+                captor_coord: victim_coord.clone(),
+                captor_origin: None,
+                captor,
+                victim_coord: victim_coord.clone(),
+                victim,
+                move_type: MoveType::MoveTo(victim_coord),
+            };
+            for op in default_capture_stack().resolve_capture(self, &event) {
+                op.apply(self);
+            }
+        }
+
         for landing in all_landings {
             self.maybe_fire_pressure_plate(&landing);
         }

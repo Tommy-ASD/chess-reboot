@@ -67,6 +67,7 @@ fn empty_board() -> Board {
             en_passant_target: None,
             train_tick_rate: TrainTickRate::EveryFullTurn,
             ply_count: 0,
+            last_move: None,
         },
     }
 }

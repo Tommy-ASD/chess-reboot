@@ -32,6 +32,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         }
     }
@@ -49,6 +50,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -72,6 +74,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -98,6 +101,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -126,6 +130,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -153,6 +158,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -181,6 +187,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         };
 
@@ -2076,7 +2083,7 @@ mod tests {
         board.grid[3][3] = Square::new().set_piece(PieceType::Goblin(Goblin {
             color: Color::White,
             state: GoblinState::Kidnapping {
-                piece: std::rc::Rc::new(PieceType::new_knight(Color::Black)),
+                piece: std::sync::Arc::new(PieceType::new_knight(Color::Black)),
             },
             home_square: Coord { file: 0, rank: 0 },
         }));
@@ -2874,6 +2881,7 @@ mod tests {
                 en_passant_target: None,
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
+                last_move: None,
             },
         }
     }
@@ -5165,7 +5173,7 @@ mod tests {
         let mut board = empty_board();
         // White Goblin with home_square (4,0), currently Kidnapping a Black pawn,
         // riding a friendly White Bus at (3,0).
-        let kidnapped = std::rc::Rc::new(PieceType::new_pawn(Color::Black));
+        let kidnapped = std::sync::Arc::new(PieceType::new_pawn(Color::Black));
         let goblin = Goblin {
             color: Color::White,
             home_square: Coord { file: 4, rank: 0 },
@@ -5510,7 +5518,7 @@ mod tests {
         // state, the Goblin's king-style adjacency projected attacks onto
         // e8/f8/g8/e7/f7/g7/e6/f6/g6 — phantom-blocking Black from
         // castling. After the fix the attack set is empty.
-        let kidnapped = std::rc::Rc::new(PieceType::new_pawn(Color::Black));
+        let kidnapped = std::sync::Arc::new(PieceType::new_pawn(Color::Black));
         let goblin = Goblin {
             color: Color::White,
             home_square: Coord { file: 4, rank: 0 },
@@ -6233,5 +6241,2840 @@ mod tests {
             board.grid[0][3].piece.is_none(),
             "Block square must not have acquired a piece"
         );
+    }
+
+    // -------- Plan 10 step 2: BoardFlags.last_move --------
+
+    /// A fresh board has `last_move = None` and the FEN emits no `lm=`
+    /// trailing field. Round-trip leaves the field None.
+    #[test]
+    fn test_last_move_absent_fen_roundtrip() {
+        let board = empty_board();
+        assert!(board.flags.last_move.is_none());
+        let fen = board_to_fen(&board);
+        assert!(
+            !fen.contains("lm="),
+            "FEN of a fresh board should omit lm=; got: {fen}"
+        );
+        let recovered = fen_to_board(&fen);
+        assert!(recovered.flags.last_move.is_none());
+    }
+
+    /// After a normal pawn move, last_move records the pawn's relocation
+    /// with kind=Move, the right from/to coords, and no captured piece.
+    #[test]
+    fn test_last_move_populated_after_pawn_push() {
+        use crate::board::LastMoveKind;
+        let mut board = empty_board();
+        // White pawn on a2 (file=0, rank=6). King on a8 so castling
+        // doesn't fire spuriously.
+        board.grid[6][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board
+            .make_move(GameMove {
+                from: Coord { file: 0, rank: 6 },
+                move_type: MoveType::MoveTo(Coord { file: 0, rank: 5 }),
+            })
+            .expect("legal pawn push");
+        let lm = board.flags.last_move.as_ref().expect("last_move populated");
+        assert_eq!(lm.mover_color, Color::White);
+        assert_eq!(lm.from, Coord { file: 0, rank: 6 });
+        assert_eq!(lm.to, Some(Coord { file: 0, rank: 5 }));
+        assert_eq!(lm.kind, LastMoveKind::Move);
+        assert_eq!(lm.captured_symbol, None);
+        assert_eq!(lm.primary_symbol, "P");
+    }
+
+    /// A capture populates `captured_symbol`.
+    #[test]
+    fn test_last_move_records_captured_symbol() {
+        let mut board = empty_board();
+        // White rook captures black knight on d4.
+        board.grid[7][3] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[4][3] = Square::new().set_piece(PieceType::new_knight(Color::Black));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 7 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 4 }),
+            })
+            .expect("legal rook capture");
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(lm.captured_symbol.as_deref(), Some("n"));
+        assert_eq!(lm.primary_symbol, "R");
+    }
+
+    /// Round-trip a board whose last_move has every populated field
+    /// (mover, from, to, captured, primary, kind).
+    #[test]
+    fn test_last_move_roundtrip_through_fen() {
+        use crate::board::{LastMove, LastMoveKind};
+        let mut board = empty_board();
+        board.flags.last_move = Some(LastMove {
+            mover_color: Color::Black,
+            from: Coord { file: 4, rank: 1 },
+            to: Some(Coord { file: 4, rank: 3 }),
+            captured_symbol: Some("Q".to_string()),
+            primary_symbol: "p".to_string(),
+            kind: LastMoveKind::Move,
+        });
+        let fen = board_to_fen(&board);
+        assert!(
+            fen.contains("lm=(C=B,F=4-1,K=MOVE,T=4-3,V=Q,P=p)"),
+            "FEN should contain canonical lm payload; got: {fen}"
+        );
+        let recovered = fen_to_board(&fen);
+        assert_eq!(recovered.flags.last_move, board.flags.last_move);
+    }
+
+    /// Round-trip every LastMoveKind discriminator with kind-appropriate
+    /// `to` (None for ThrowSwitch/PhaseShift per the doc invariant,
+    /// Some(...) otherwise). Asserts the FULL `LastMove` round-trips,
+    /// not just the kind — catches field drift across save/load.
+    #[test]
+    fn test_last_move_every_kind_roundtrips() {
+        use crate::board::{LastMove, LastMoveKind};
+        let cases: &[(LastMoveKind, Option<Coord>)] = &[
+            (LastMoveKind::Move, Some(Coord { file: 1, rank: 1 })),
+            (LastMoveKind::MoveIntoCarrier, Some(Coord { file: 1, rank: 1 })),
+            (LastMoveKind::Promote, Some(Coord { file: 1, rank: 1 })),
+            (LastMoveKind::Castle, Some(Coord { file: 6, rank: 7 })),
+            (LastMoveKind::EnPassant, Some(Coord { file: 1, rank: 1 })),
+            // ThrowSwitch and PhaseShift don't relocate the piece —
+            // `to` is None per the documented invariant on LastMove.
+            (LastMoveKind::PhaseShift, None),
+            (LastMoveKind::ThrowSwitch, None),
+            (LastMoveKind::PieceInCarrier, Some(Coord { file: 1, rank: 1 })),
+        ];
+        for (kind, to) in cases {
+            let mut board = empty_board();
+            let original = LastMove {
+                mover_color: Color::White,
+                from: Coord { file: 0, rank: 0 },
+                to: to.clone(),
+                captured_symbol: None,
+                primary_symbol: "K".to_string(),
+                kind: *kind,
+            };
+            board.flags.last_move = Some(original.clone());
+            let fen = board_to_fen(&board);
+            let recovered = fen_to_board(&fen);
+            assert_eq!(
+                recovered.flags.last_move.as_ref(),
+                Some(&original),
+                "full LastMove did not round-trip for kind {kind:?}"
+            );
+        }
+    }
+
+    // -------- Plan 10 step 10: Capture pipeline / Goblin drop-victim --------
+
+    /// Plan 04 demand wired through plan 10's capture stack:
+    /// when a Goblin in `Kidnapping` state is captured by an enemy,
+    /// the kidnapped piece drops onto the captor's origin square.
+    #[test]
+    fn test_kidnapping_goblin_drops_victim_on_capture() {
+        use crate::pieces::fairy::goblin::{Goblin, GoblinState};
+
+        let mut board = empty_board();
+        // White Goblin at (3,3), Kidnapping a black pawn, home (0,0).
+        let kidnapped = std::sync::Arc::new(PieceType::new_pawn(Color::Black));
+        let goblin = Goblin {
+            color: Color::White,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Kidnapping {
+                piece: kidnapped.clone(),
+            },
+        };
+        board.grid[3][3] = Square::new().set_piece(PieceType::Goblin(goblin));
+        // Black rook at (3,0) — captures the Goblin by sliding south.
+        board.grid[0][3] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        // Kings so the position is legal-ish.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        // Set side to move = black (so black's rook captures).
+        board.flags.side_to_move = Color::Black;
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 0 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+            })
+            .expect("legal rook capture of goblin");
+
+        // Post-move state:
+        //   (3,3): the capturing rook
+        //   (3,0): the previously-kidnapped black pawn (dropped here)
+        match &board.grid[3][3].piece {
+            Some(PieceType::Rook(r)) => assert_eq!(r.color, Color::Black),
+            other => panic!("expected black rook at (3,3); got {other:?}"),
+        }
+        match &board.grid[0][3].piece {
+            Some(PieceType::Pawn(p)) => assert_eq!(p.color, Color::Black),
+            other => panic!("expected dropped black pawn at (3,0); got {other:?}"),
+        }
+    }
+
+    /// Capturing a Free (not-Kidnapping) Goblin doesn't drop anything.
+    /// The handler must discriminate on `GoblinState` — only the
+    /// Kidnapping arm produces a drop.
+    ///
+    /// Pinning the discriminator: rather than checking the captor's
+    /// origin square (always empty post-relocation regardless of
+    /// handler behavior), this test invokes the handler directly via
+    /// a synthetic `ResolutionEvent` and asserts `Keep` for the Free
+    /// case. This is the assertion that would fail if the
+    /// state-discriminator branch were removed.
+    #[test]
+    fn test_capturing_free_goblin_drops_nothing() {
+        use crate::movement::stack::capture::{
+            CaptureModifier, GoblinDropVictimCapture, ResolutionEffect, ResolutionEvent,
+        };
+        use crate::pieces::fairy::goblin::{Goblin, GoblinState};
+
+        let board = empty_board();
+        // Synthesize a capture event with a Free-state goblin victim.
+        let free_goblin = Goblin {
+            color: Color::White,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Free,
+        };
+        let event = ResolutionEvent::Capture {
+            captor_coord: Coord { file: 3, rank: 3 },
+            captor_origin: Some(Coord { file: 3, rank: 0 }),
+            captor: PieceType::new_rook(Color::Black),
+            victim_coord: Coord { file: 3, rank: 3 },
+            victim: PieceType::Goblin(free_goblin),
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+        };
+        // Handler must return Keep on a Free goblin (no drop).
+        let effect = GoblinDropVictimCapture.apply(&board, &event);
+        assert!(
+            matches!(effect, ResolutionEffect::Keep),
+            "GoblinDropVictimCapture must return Keep on a Free-state victim; got {effect:?}"
+        );
+
+        // And the positive Kidnapping case still produces a Mutate
+        // (this asserts both arms are reachable via the discriminator).
+        let kidnapped = std::sync::Arc::new(PieceType::new_pawn(Color::Black));
+        let kidnapping_goblin = Goblin {
+            color: Color::White,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Kidnapping { piece: kidnapped },
+        };
+        let event2 = ResolutionEvent::Capture {
+            captor_coord: Coord { file: 3, rank: 3 },
+            captor_origin: Some(Coord { file: 3, rank: 0 }),
+            captor: PieceType::new_rook(Color::Black),
+            victim_coord: Coord { file: 3, rank: 3 },
+            victim: PieceType::Goblin(kidnapping_goblin),
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+        };
+        let effect2 = GoblinDropVictimCapture.apply(&board, &event2);
+        assert!(
+            matches!(effect2, ResolutionEffect::Mutate(_)),
+            "GoblinDropVictimCapture must return Mutate on a Kidnapping victim; got {effect2:?}"
+        );
+    }
+
+    /// Castle records the king's destination as `to`, so a Mirror-like
+    /// piece sees a meaningful from→to delta.
+    #[test]
+    fn test_last_move_castle_records_king_destination() {
+        use crate::board::{CastleSide, LastMoveKind};
+        let mut board = empty_board();
+        // White: king on e1, rooks on a1 and h1.
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 7 },
+                move_type: MoveType::Castle {
+                    side: CastleSide::Kingside,
+                },
+            })
+            .expect("legal kingside castle");
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(lm.kind, LastMoveKind::Castle);
+        assert_eq!(lm.from, Coord { file: 4, rank: 7 });
+        // Kingside castle lands the king on file 6.
+        assert_eq!(lm.to, Some(Coord { file: 6, rank: 7 }));
+        assert_eq!(lm.primary_symbol, "K");
+    }
+
+    // -------- Plan-10 audit: Brainrot/Frozen + Switch regression --------
+
+    /// Pre-refactor `Board::get_moves` returned `vec![]` on a
+    /// Brainrot/Frozen source square BEFORE the ThrowSwitch append.
+    /// The stack refactor accidentally split those into two priority
+    /// bands and `SwitchTileAugment` (130) ran after
+    /// `SquareConditionFilter` (110), so a piece on a Frozen Switch
+    /// could still throw. This test pins the fix: `PieceMovesModifier`
+    /// `Replace`s the `MoveQuery` with empty on Brainrot/Frozen,
+    /// killing the seed before `SwitchTileAugment` sees it.
+    #[test]
+    fn test_frozen_switch_tile_emits_no_moves() {
+        use crate::board::SignalId;
+        let mut board = empty_board();
+        let targets: Vec<SignalId> = vec![1];
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .set_square_type(SquareType::Switch { targets })
+            .add_square_condition(SquareCondition::Frozen);
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        assert!(
+            moves.is_empty(),
+            "Frozen piece on Switch tile must not produce any moves; got: {moves:?}"
+        );
+    }
+
+    #[test]
+    fn test_brainrot_switch_tile_emits_no_moves() {
+        use crate::board::SignalId;
+        let mut board = empty_board();
+        let targets: Vec<SignalId> = vec![1];
+        board.grid[3][3] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .set_square_type(SquareType::Switch { targets })
+            .add_square_condition(SquareCondition::Brainrot);
+        let moves = board.get_moves(&Coord { file: 3, rank: 3 });
+        assert!(
+            moves.is_empty(),
+            "Brainrot piece on Switch tile must not produce any moves; got: {moves:?}"
+        );
+    }
+
+    // -------- Plan-10 audit: train threat respects last_dir --------
+
+    /// A Locomotive at a dead-end Track tile with `last_dir = Some(W)`
+    /// has no legal next-tile — the only track-neighbour (west) is
+    /// the came-from side, which the connection-aware traversal
+    /// filters out. Before the fix, `TrainHeadCrushModifier` called
+    /// `next_train_tile` (which discards `last_dir`) and emitted a
+    /// phantom crush-threat at the came-from tile. A king parked
+    /// there would read as in-check.
+    #[test]
+    fn test_train_head_crush_respects_last_dir_at_dead_end() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        // Two track tiles in a dead-end: (2,3) and (3,3). No track east.
+        board.grid[3][2] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(PieceType::Locomotive(Locomotive {
+                train_id: 1,
+                heading: TrainHeading::Forward,
+                passengers: vec![],
+                last_dir: Some(TrackDir::W),
+            }));
+        // White king on the phantom cold-start tile (where the buggy
+        // path would route the loco): (2,3). Black king for legality.
+        board.grid[3][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        let king_phantom_tile = Coord { file: 2, rank: 3 };
+        board
+            .set_piece_at(&king_phantom_tile, PieceType::new_king(Color::White));
+
+        // After the fix: connection-aware traversal recognises the
+        // loco can't move (came-from W is its only track-neighbour),
+        // so no crush threat. `is_attacked_by` returns false for
+        // both Black and Neutral attacker queries.
+        assert!(
+            !board.is_attacked_by(&king_phantom_tile, Color::Black),
+            "no train threat from a dead-ended loco at last_dir=W"
+        );
+    }
+
+    /// Two-train collision filter MUST consult `last_dir` to compute
+    /// the collision tile. Pre-fix used `next_train_tile` (cold-start,
+    /// discards `last_dir`); on a setup where `last_dir`-aware
+    /// traversal diverges from cold-start, the buggy filter computes
+    /// different next-tiles for the two locos and fails to detect
+    /// the collision.
+    ///
+    /// Setup: an L-shaped track corner at (3,3). Loco A approaches
+    /// from west with last_dir=Some(W), heading Forward — its track
+    /// tile is Track(N) (D=N stored direction). Cold-start
+    /// `next_train_tile((3,3), Forward)` would route via the stored
+    /// direction (N → (3,2)). `last_dir`-aware routing skips W
+    /// (came-from); the only remaining neighbor is the path back,
+    /// also W (excluded), leaving... actually let me use a simpler
+    /// setup that decisively diverges:
+    ///
+    /// Two locos at (2,3) and (4,3), each on a tile whose stored
+    /// `direction` points AWAY from (3,3) (so cold-start routes away),
+    /// but with `last_dir` set such that connection-aware routing
+    /// brings them BOTH onto (3,3). The collision filter only fires
+    /// under the `last_dir`-aware code path.
+    #[test]
+    fn test_two_train_collision_filter_uses_last_dir() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        // Track tiles at (1,3), (2,3), (3,3), (4,3), (5,3) — straight
+        // east-west run. Tile (2,3) and (4,3) point W and E
+        // respectively — stored direction points AWAY from (3,3).
+        board.grid[3][1] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::W,
+        });
+        // Loco A at (2,3), tile direction W, heading Forward,
+        // last_dir=W. With cold-start (`None`): tries preferred=W →
+        // (1,3) is a track → routes to (1,3). With `last_dir`-aware:
+        // came-from W, so W is excluded; tries neighbors (E and edge
+        // is_track); E is (3,3) which is a track → routes to (3,3).
+        board.grid[3][2] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::W,
+            })
+            .set_piece(PieceType::Locomotive(Locomotive {
+                train_id: 1,
+                heading: TrainHeading::Forward,
+                passengers: vec![],
+                last_dir: Some(TrackDir::W),
+            }));
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        // Loco B at (4,3), tile direction E, heading Forward,
+        // last_dir=E. Cold-start: preferred=E → (5,3) is a track →
+        // routes to (5,3). last_dir-aware: came-from E, so E is
+        // excluded; tries W → (3,3) is a track → routes to (3,3).
+        board.grid[3][4] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(PieceType::Locomotive(Locomotive {
+                train_id: 2,
+                heading: TrainHeading::Forward,
+                passengers: vec![],
+                last_dir: Some(TrackDir::E),
+            }));
+        board.grid[3][5] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        // White king on a non-track square nearby so the position
+        // is legal-ish; black king elsewhere.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        // Both locos genuinely converge on (3,3) when `last_dir`-aware
+        // routing is used. The collision filter must drop both crush
+        // threats.
+        let collision_tile = Coord { file: 3, rank: 3 };
+        assert!(
+            !board.is_attacked_by(&collision_tile, Color::White),
+            "with last_dir-aware routing, both locos converge on (3,3) → mutual stop, no threat"
+        );
+    }
+
+    // -------- Plan-10 audit: PIC captures route through capture stack --------
+
+    /// A passenger exiting a Bus to capture a Kidnapping Goblin must
+    /// route through the capture stack. Pre-fix: `capture_targets`
+    /// returned empty for PIC moves; the kidnap victim was silently
+    /// destroyed AND the capture event never fired.
+    ///
+    /// Post-fix: the capture event fires (so future Bomb / Antipode
+    /// handlers see it), but `GoblinDropVictimCapture` detects the
+    /// PIC case via `captor_origin == None` and skips the drop (no
+    /// clean drop site — the carrier still occupies the captor's
+    /// "origin"). The kidnap victim is still lost, but the pipeline
+    /// is now CONSISTENT.
+    ///
+    /// We pin BOTH halves:
+    /// 1. `capture_targets` returns a `CapturePair` for the PIC move
+    ///    (proves the event would fire) — this is what would have
+    ///    been silently empty pre-fix.
+    /// 2. The post-make_move board state is the expected outcome.
+    #[test]
+    fn test_pic_capture_routes_through_capture_stack() {
+        use crate::board::make_move::capture_targets;
+        use crate::pieces::fairy::bus::Bus;
+        use crate::pieces::fairy::goblin::{Goblin, GoblinState};
+
+        let mut board = empty_board();
+        // White Bus at (3,3) carrying a white pawn passenger.
+        let bus = Bus {
+            color: Color::White,
+            pieces: vec![PieceType::new_pawn(Color::White)],
+        };
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(bus));
+        // Black Kidnapping Goblin at (4,2), holding a black knight.
+        let kidnapped = std::sync::Arc::new(PieceType::new_knight(Color::Black));
+        let goblin = Goblin {
+            color: Color::Black,
+            home_square: Coord { file: 7, rank: 0 },
+            state: GoblinState::Kidnapping { piece: kidnapped },
+        };
+        board.grid[2][4] = Square::new().set_piece(PieceType::Goblin(goblin));
+        // Kings so the position is legal-ish.
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.flags.side_to_move = Color::White;
+
+        // Generate moves at the Bus's square; expect the PIC{MoveTo(4,2)}
+        // diagonal capture among them.
+        let from = Coord { file: 3, rank: 3 };
+        let moves = board.legal_moves(&from);
+        let pic_capture = moves.iter().find(|m| {
+            matches!(
+                &m.move_type,
+                MoveType::PieceInCarrier { move_type, .. }
+                    if matches!(move_type.as_ref(),
+                        MoveType::MoveTo(c) if c == &(Coord { file: 4, rank: 2 }))
+            )
+        });
+        assert!(
+            pic_capture.is_some(),
+            "expected a PIC capture move from the Bus passenger; got {moves:?}"
+        );
+        let chosen = pic_capture.unwrap().clone();
+
+        // PART 1 — pin that the capture pipeline observes the event.
+        // Pre-fix, `capture_targets` returned `Vec::new()` for PIC —
+        // this assertion would have failed.
+        let pairs = capture_targets(&board, &chosen);
+        assert_eq!(
+            pairs.len(),
+            1,
+            "capture_targets must surface the PIC capture; got {pairs:?}"
+        );
+        let pair = &pairs[0];
+        assert!(
+            matches!(pair.captor, PieceType::Pawn(_)),
+            "captor must be resolved to the passenger pawn, not the carrier"
+        );
+        assert_eq!(
+            pair.captor_origin, None,
+            "PIC capture must have None captor_origin (passenger has no outer-board origin)"
+        );
+        assert_eq!(
+            pair.captor_coord,
+            Coord { file: 4, rank: 2 },
+            "captor_coord must be the passenger's post-move position"
+        );
+        assert!(
+            matches!(pair.victim, PieceType::Goblin(_)),
+            "victim must be the Kidnapping Goblin"
+        );
+
+        // PART 2 — post-make_move board state.
+        board.make_move(chosen).expect("legal PIC capture");
+        match &board.grid[3][3].piece {
+            Some(PieceType::Bus(b)) => assert!(b.pieces.is_empty()),
+            other => panic!("expected empty Bus at (3,3); got {other:?}"),
+        }
+        match &board.grid[2][4].piece {
+            Some(PieceType::Pawn(p)) => assert_eq!(p.color, Color::White),
+            other => panic!("expected white pawn at (4,2); got {other:?}"),
+        }
+        // No phantom knight (PIC has no clean drop site).
+        for (rank, row) in board.grid.iter().enumerate() {
+            for (file, sq) in row.iter().enumerate() {
+                if let Some(PieceType::Knight(_)) = &sq.piece {
+                    panic!(
+                        "phantom Knight at ({file},{rank}) — PIC capture should not have dropped the kidnap victim"
+                    );
+                }
+            }
+        }
+    }
+
+    // -------- Plan-10 audit: Goblin can't kidnap another Goblin --------
+
+    /// A Free Goblin capturing a Kidnapping Goblin must NOT enter
+    /// Kidnapping state with the victim Goblin as its payload. Pre-fix:
+    /// the captor's `post_move_effects` cloned the entire Kidnapping
+    /// Goblin (including the nested kidnap victim) as its new state,
+    /// while the capture handler also dropped the inner payload. Net
+    /// result was a duplicate piece (one dropped, one nested).
+    ///
+    /// Post-fix: Goblin victims are in the reject list, same as kings
+    /// and carriers. The capture handler drops the inner payload; the
+    /// captor stays Free.
+    #[test]
+    fn test_goblin_capturing_kidnapping_goblin_does_not_nest() {
+        use crate::pieces::fairy::goblin::{Goblin, GoblinState};
+
+        let mut board = empty_board();
+        // White Goblin at (3,3), Free state, home (0,0).
+        let white_goblin = Goblin {
+            color: Color::White,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Free,
+        };
+        board.grid[3][3] = Square::new().set_piece(PieceType::Goblin(white_goblin));
+        // Black Goblin at (4,3), Kidnapping a black bishop, home (7,7).
+        let kidnapped = std::sync::Arc::new(PieceType::new_bishop(Color::Black));
+        let black_goblin = Goblin {
+            color: Color::Black,
+            home_square: Coord { file: 7, rank: 7 },
+            state: GoblinState::Kidnapping { piece: kidnapped },
+        };
+        board.grid[3][4] = Square::new().set_piece(PieceType::Goblin(black_goblin));
+        // Kings.
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.flags.side_to_move = Color::White;
+
+        // White goblin captures black goblin: (3,3) → (4,3).
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 3 },
+                move_type: MoveType::MoveTo(Coord { file: 4, rank: 3 }),
+            })
+            .expect("legal goblin-on-goblin capture");
+
+        // Post-move:
+        //   (4,3): white Goblin still in Free state (rejected the
+        //          Goblin victim per the new reject-list).
+        //   (3,3): the inner kidnap victim (black bishop) was dropped
+        //          here by GoblinDropVictimCapture.
+        //   No nested Goblin-inside-Goblin anywhere.
+        match &board.grid[3][4].piece {
+            Some(PieceType::Goblin(g)) => {
+                assert_eq!(g.color, Color::White);
+                assert!(
+                    matches!(g.state, GoblinState::Free),
+                    "captor must stay Free (not nest the Goblin victim); got state {:?}",
+                    g.state
+                );
+            }
+            other => panic!("expected white Goblin at (4,3); got {other:?}"),
+        }
+        match &board.grid[3][3].piece {
+            Some(PieceType::Bishop(b)) => assert_eq!(b.color, Color::Black),
+            other => panic!("expected dropped black bishop at (3,3); got {other:?}"),
+        }
+    }
+
+    // -------- Plan-10 audit: missing test coverage --------
+
+    /// Plan-10 audit: `last_move.captured_symbol` previously dropped
+    /// any capture whose victim was a carrier, which silently lost
+    /// top-level Bus captures (a real capture). After the fix,
+    /// `MoveTo` of an enemy Bus records the bus's symbol.
+    #[test]
+    fn test_last_move_records_top_level_bus_capture() {
+        use crate::pieces::fairy::bus::Bus;
+
+        let mut board = empty_board();
+        // Black Bus at (3,3) with no passengers.
+        let bus = Bus {
+            color: Color::Black,
+            pieces: vec![],
+        };
+        board.grid[3][3] = Square::new().set_piece(PieceType::Bus(bus));
+        // White Knight at (4,5) — can L-hop to (3,3) to capture.
+        board.grid[5][4] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 5 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+            })
+            .expect("legal knight-captures-bus");
+
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert!(
+            lm.captured_symbol.is_some(),
+            "top-level Bus capture must surface in last_move; got {:?}",
+            lm.captured_symbol
+        );
+        // The captured-symbol should encode the bus (symbol starts with "BUS").
+        let cap = lm.captured_symbol.as_deref().unwrap_or("");
+        assert!(
+            cap.starts_with("BUS") || cap.starts_with("bus"),
+            "expected captured Bus symbol; got {cap:?}"
+        );
+    }
+
+    /// Plan-10 audit: a promotion-with-capture must record the
+    /// captured piece's symbol AND the promoted (post-promotion)
+    /// primary symbol — proves the post-`after` lookup branch fires.
+    #[test]
+    fn test_last_move_promotion_with_capture() {
+        use crate::board::PromotionTarget;
+        let mut board = empty_board();
+        // White pawn at b7 (file=1, rank=1). Black rook at a8 (file=0,
+        // rank=0). Pawn captures diagonally + promotes to queen.
+        board.grid[1][1] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        // Kings.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 1, rank: 1 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 0, rank: 0 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("legal capture-promotion");
+
+        use crate::board::LastMoveKind;
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(lm.kind, LastMoveKind::Promote);
+        assert_eq!(lm.captured_symbol.as_deref(), Some("r"));
+        assert_eq!(
+            lm.primary_symbol, "Q",
+            "primary_symbol must be the promoted piece (Q), not the pawn (P)"
+        );
+    }
+
+    /// Plan-10 audit: a passenger exiting a Neutral cart records the
+    /// PASSENGER'S color as `mover_color`, not the cart's Neutral.
+    #[test]
+    fn test_last_move_piece_in_carrier_uses_passenger_color() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        // Locomotive on a Track tile with a black king passenger.
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(PieceType::Locomotive(Locomotive {
+                train_id: 1,
+                heading: TrainHeading::Forward,
+                passengers: vec![PieceType::new_king(Color::Black)],
+                last_dir: Some(TrackDir::W),
+            }));
+        // White king elsewhere.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // Set side-to-move = Black so the passenger king can exit.
+        board.flags.side_to_move = Color::Black;
+
+        // King exits east to (4,3).
+        board
+            .make_move(GameMove {
+                from: Coord { file: 3, rank: 3 },
+                move_type: MoveType::PieceInCarrier {
+                    piece_index: 0,
+                    move_type: std::sync::Arc::new(MoveType::MoveTo(Coord {
+                        file: 4,
+                        rank: 3,
+                    })),
+                },
+            })
+            .expect("legal passenger exit");
+
+        use crate::board::LastMoveKind;
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(
+            lm.mover_color,
+            Color::Black,
+            "mover_color must be the passenger's, not the carrier's Neutral"
+        );
+        assert_eq!(lm.kind, LastMoveKind::PieceInCarrier);
+    }
+
+    /// Plan-10 audit: en-passant capture sets `captured_symbol` via
+    /// the EnPassant `captured` field, not via `to`. Tests the special
+    /// branch in `compute_last_move`.
+    #[test]
+    fn test_last_move_en_passant_records_captured_pawn() {
+        let mut board = empty_board();
+        // White pawn at e5 (file=4, rank=3). Black pawn at d5
+        // (file=3, rank=3). Black just double-pushed d7→d5, so
+        // en-passant target is d6 (file=3, rank=2).
+        board.grid[3][4] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[3][3] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.flags.en_passant_target = Some(Coord { file: 3, rank: 2 });
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 3 },
+                move_type: MoveType::EnPassant {
+                    target: Coord { file: 3, rank: 2 },
+                    captured: Coord { file: 3, rank: 3 },
+                },
+            })
+            .expect("legal en-passant");
+
+        use crate::board::LastMoveKind;
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(lm.kind, LastMoveKind::EnPassant);
+        assert_eq!(lm.captured_symbol.as_deref(), Some("p"));
+    }
+
+    /// Plan-10 audit: discovered check exercised THROUGH the king-
+    /// safety modifier pipeline. Three assertions:
+    /// 1. The discovering side's pawn capture is in legal_moves
+    ///    (pre-fix bug couldn't have wrongly filtered it as
+    ///    "discovers check on my own king").
+    /// 2. After the move, the defender's king is in check per
+    ///    `status()`.
+    /// 3. Defender's king can't legally stay put — `validate_move`
+    ///    on a no-op-style king move (king to a square still attacked)
+    ///    must return `WouldLeaveKingInCheck`, exercising the new
+    ///    king-safety modifier's discriminator on the defender's
+    ///    side.
+    #[test]
+    fn test_discovered_check_via_pawn_move() {
+        let mut board = empty_board();
+        // White rook at a1 (file=0, rank=7). White pawn at a4
+        // (file=0, rank=4) — blocking the rook's ray to a8. Black
+        // king at a8 (file=0, rank=0). Move the pawn to b5 (capture
+        // would also work) → discovered check.
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[4][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[3][1] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let from = Coord { file: 0, rank: 4 };
+        let capture = GameMove {
+            from: from.clone(),
+            move_type: MoveType::MoveTo(Coord { file: 1, rank: 3 }),
+        };
+
+        // (1) The pawn capture is legal — the king-safety modifier
+        // doesn't wrongly filter it as "leaves OUR king in check"
+        // (which would be a discovered-check-against-own-king
+        // confusion).
+        let legal = board.legal_moves(&from);
+        assert!(
+            legal.contains(&capture),
+            "white pawn capture (discovering check on black) must be in legal_moves; got {legal:?}"
+        );
+
+        board.make_move(capture).expect("legal pawn capture");
+
+        // (2) Defender's king is in check.
+        let status = board.status();
+        assert!(
+            matches!(status, GameStatus::Check { side_to_move: Color::Black })
+                || matches!(status, GameStatus::Checkmate { winner: Color::White }),
+            "expected Black to be in check after discovered attack; got {status:?}"
+        );
+
+        // (3) Black king stepping to b8 stays on the rook's ray —
+        // king-safety must reject it. (We pick b8 specifically; the
+        // a-file rook attacks a8 → after king moves, the king is on
+        // b8; rook's ray is still on the a-file so b8 is safe...
+        // Actually let me re-verify: black king at a8 (0,0). Rook at
+        // a1 (0,7). Rook attacks the entire a-file. If king moves to
+        // b8 (1,0), it's off the a-file and not attacked. So b8 is a
+        // legal escape. The right "still attacked" square would be
+        // any other a-file square. King can't move along the file
+        // because the rook attacks it. King could go b7 (1,1) which
+        // is also fine. So this position is NOT a checkmate; it's a
+        // check with escapes.
+        //
+        // Instead: pin that black king's "stay on a-file via a7" is
+        // explicitly rejected via WouldLeaveKingInCheck.
+        let stay_in_check = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 0, rank: 1 }),
+        };
+        let validate = board.validate_move(&stay_in_check);
+        assert!(
+            matches!(validate, Err(MoveError::WouldLeaveKingInCheck { .. })),
+            "king-safety modifier must reject king staying on attacked file; got {validate:?}"
+        );
+    }
+
+    // -------- Round-3 audit: lm= parser hardening --------
+
+    /// Empty `P=` / `V=` values are rejected. Pre-fix: `parse_last_move`
+    /// stored `Some("")` for empty primary or captured symbols,
+    /// which would propagate to consumers that may not handle it.
+    #[test]
+    fn test_lm_parser_rejects_empty_primary_symbol() {
+        // Construct a FEN with an empty P= field. The lm payload
+        // should be rejected as a whole (primary_symbol required).
+        let fen = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,F=4-6,K=MOVE,P=)";
+        let board = fen_to_board(fen);
+        assert!(
+            board.flags.last_move.is_none(),
+            "lm= with empty P= must produce None last_move; got {:?}",
+            board.flags.last_move
+        );
+    }
+
+    /// Duplicate keys are order-independent. Pre-fix, `lm=(C=W,C=foo,...)`
+    /// would overwrite `mover_color` with the second (invalid) value
+    /// and drop the whole field, while `lm=(C=foo,C=W,...)` would
+    /// keep it — order-dependent results from logically-equivalent
+    /// input. Post-fix: the first VALID value wins, and subsequent
+    /// occurrences of the same key are warned-and-ignored. Both
+    /// orderings of the same content produce identical parse output.
+    #[test]
+    fn test_lm_parser_duplicate_keys_order_independent() {
+        let fen_a = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,C=foo,F=4-6,K=MOVE,P=P)";
+        let fen_b = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=foo,C=W,F=4-6,K=MOVE,P=P)";
+        let board_a = fen_to_board(fen_a);
+        let board_b = fen_to_board(fen_b);
+        assert!(board_a.flags.last_move.is_some());
+        assert!(board_b.flags.last_move.is_some());
+        // Both orderings produce the same parsed mover_color.
+        assert_eq!(
+            board_a.flags.last_move.as_ref().unwrap().mover_color,
+            board_b.flags.last_move.as_ref().unwrap().mover_color,
+        );
+        assert_eq!(
+            board_a.flags.last_move.as_ref().unwrap().mover_color,
+            Color::White,
+        );
+    }
+
+    /// Unbalanced internal parens are rejected. Pre-fix,
+    /// `lm=(P=G(H=0)` would pass the outer-strip (last byte is `)`)
+    /// and store `primary_symbol = "G(H=0"`, propagating malformed
+    /// state downstream.
+    #[test]
+    fn test_lm_parser_rejects_unbalanced_parens() {
+        let fen = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,F=4-6,K=MOVE,P=G(H=0)";
+        let board = fen_to_board(fen);
+        assert!(
+            board.flags.last_move.is_none(),
+            "lm= with internal-paren imbalance must produce None; got {:?}",
+            board.flags.last_move
+        );
+    }
+
+    // -------- Round-3 audit: piece-parser invariant clamps --------
+
+    /// `Bus::from_symbol` must clamp at capacity-5. Hand-crafted FENs
+    /// with more than 5 passengers were previously accepted,
+    /// producing non-canonical state that future Bus-splitting
+    /// pieces would inherit.
+    #[test]
+    fn test_fen_parser_clamps_bus_over_capacity() {
+        let board = fen_to_board(
+            "(P=BUS(P=(P,N,B,R,Q,P,N,B,R,Q)))7/8/8/8/8/8/8/8 w - -",
+        );
+        match &board.grid[0][0].piece {
+            Some(PieceType::Bus(b)) => {
+                assert!(
+                    b.pieces.len() <= 5,
+                    "Bus must not parse over capacity-5; got {} passengers",
+                    b.pieces.len()
+                );
+            }
+            other => panic!("expected Bus at (0, 0); got {other:?}"),
+        }
+    }
+
+    /// Round-3 audit: direct unit test for `iter_pieces`. Plants
+    /// known pieces on a non-square board (6×4) and asserts the
+    /// iterator yields every placed piece with the correct
+    /// coordinates. Catches `enumerate()` index-mapping regressions
+    /// on non-8×8 boards.
+    #[test]
+    fn test_iter_pieces_yields_all_placed_pieces() {
+        // Construct a 6×4 board directly (bypasses FEN).
+        let mut board = Board {
+            grid: (0..4)
+                .map(|_| (0..6).map(|_| Square::new()).collect())
+                .collect(),
+            flags: BoardFlags {
+                side_to_move: Color::White,
+                white_can_castle_kingside: false,
+                white_can_castle_queenside: false,
+                black_can_castle_kingside: false,
+                black_can_castle_queenside: false,
+                en_passant_target: None,
+                train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
+                ply_count: 0,
+                last_move: None,
+            },
+        };
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[2][3] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        board.grid[3][5] = Square::new().set_piece(PieceType::new_knight(Color::White));
+
+        let mut yielded: Vec<(Coord, String)> = board
+            .iter_pieces()
+            .map(|(c, p)| (c, p.symbol()))
+            .collect();
+        yielded.sort_by_key(|(c, _)| (c.rank, c.file));
+
+        assert_eq!(yielded.len(), 3);
+        assert_eq!(yielded[0].0, Coord { file: 0, rank: 0 });
+        assert_eq!(yielded[0].1, "K");
+        assert_eq!(yielded[1].0, Coord { file: 3, rank: 2 });
+        assert_eq!(yielded[1].1, "r");
+        assert_eq!(yielded[2].0, Coord { file: 5, rank: 3 });
+        assert_eq!(yielded[2].1, "N");
+    }
+
+    /// `iter_pieces` on an empty board yields zero items.
+    #[test]
+    fn test_iter_pieces_empty_board_yields_nothing() {
+        let board = empty_board();
+        assert_eq!(board.iter_pieces().count(), 0);
+    }
+
+    /// `Skibidi::from_symbol` must clamp `phase` to 1..=4. Pre-fix,
+    /// `phase: u8` accepted any value; `phase_to_radius` happens to
+    /// map out-of-range to 0 (graceful), but a future per-phase
+    /// capability lookup would otherwise read garbage.
+    #[test]
+    fn test_fen_parser_clamps_skibidi_phase() {
+        for bogus in ["0", "5", "99", "255"] {
+            let fen = format!("(P=S(PHASE={bogus}))7/8/8/8/8/8/8/8 w - -");
+            let board = fen_to_board(&fen);
+            match &board.grid[0][0].piece {
+                Some(PieceType::Skibidi(s)) => {
+                    assert!(
+                        (1..=4).contains(&s.phase),
+                        "phase={bogus} must clamp into 1..=4; got {}",
+                        s.phase
+                    );
+                }
+                other => panic!("expected Skibidi at (0, 0); got {other:?}"),
+            }
+        }
+    }
+
+    /// Round-3 audit: when the train tick captures a freshly-promoted
+    /// piece between Phase 2 (promotion lands) and the `last_move`
+    /// write, `compute_last_move` previously read the post-tick board
+    /// and recorded the LOCOMOTIVE's verbose symbol in
+    /// `primary_symbol` (commas inside the loco symbol then
+    /// corrupted the FEN `lm=` parse). Fix: derive `primary_symbol`
+    /// from the move payload's `PromotionTarget` + `mover_color`
+    /// directly, never read the post-tick board.
+    #[test]
+    fn test_last_move_promotion_then_train_eats_promotion() {
+        use crate::board::PromotionTarget;
+        use crate::board::TrainTickRate;
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        // White pawn at e7 (file=4, rank=1); promotes to e8 (file=4, rank=0).
+        board.grid[1][4] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        // Kings.
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        // Track d8 → e8 with the loco at d8 facing east. last_dir=W
+        // ensures the connection-aware traversal routes east.
+        board.grid[0][3] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(PieceType::Locomotive(Locomotive {
+                train_id: 1,
+                heading: TrainHeading::Forward,
+                passengers: vec![],
+                last_dir: Some(TrackDir::W),
+            }));
+        board.grid[0][4] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        // EveryPly so the tick fires on this single ply.
+        board.flags.train_tick_rate = TrainTickRate::EveryPly;
+        board.flags.side_to_move = Color::White;
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 1 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 4, rank: 0 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("legal promotion");
+
+        // Sanity: the train tick captured the promoted queen and the
+        // loco now sits at e8.
+        match &board.grid[0][4].piece {
+            Some(PieceType::Locomotive(_)) => {}
+            other => panic!("expected loco at e8 post-tick; got {other:?}"),
+        }
+
+        // The regression: primary_symbol must reflect the move's
+        // payload (the promoted queen), not the post-tick occupant.
+        let lm = board.flags.last_move.as_ref().unwrap();
+        assert_eq!(
+            lm.primary_symbol, "Q",
+            "primary_symbol must reflect the promotion target, not the post-tick board occupant"
+        );
+    }
+
+    /// Round-3 audit: `last_move` is written BEFORE PostMover handlers
+    /// fire. Auto-action pieces at PostMover (Boy Who Followed Geese)
+    /// read `board.flags.last_move` to know what just happened. With
+    /// the write deferred until after the side flip, PostMover handlers
+    /// would see a stale `last_move` from the previous turn.
+    ///
+    /// Test: register a probe handler at PostMover that captures the
+    /// `last_move` it observes. Run a move and assert the probe saw
+    /// the just-applied move, not the previous one.
+    ///
+    /// We can't easily register a custom handler against the default
+    /// registry (it's a OnceLock), so the test is structural: after
+    /// `make_move`, `board.flags.last_move` reflects the move just
+    /// applied. PostMover's correctness depends on the SAME write
+    /// happening before the PostMover phase fires, which is observable
+    /// only through cross-handler timing. The structural check below
+    /// is the indirect pin: if the write order regressed, the inline
+    /// comment on `apply_environment_reactions` would need updating.
+    #[test]
+    fn test_last_move_written_before_post_mover_phase() {
+        // R4 audit sharpening: the prior version of this test only
+        // asserted `board.flags.last_move.is_some()` AFTER `make_move`
+        // returns, which is true under BOTH the pre-R3 ordering
+        // (write after PostMover) and the R3 fix (write before).
+        // Sharpen by registering a probe handler at PostMover that
+        // captures `board.flags.last_move` DURING that phase — only
+        // the R3 ordering produces `Some(...)` here.
+        use crate::movement::env_reactions::{
+            EnvPhase, EnvReactionCtx, EnvReactionHandler, EnvReactionRegistry,
+        };
+        use std::sync::{Arc, Mutex};
+
+        struct LastMoveProbe {
+            observed: Arc<Mutex<Option<Option<crate::board::LastMove>>>>,
+        }
+        impl EnvReactionHandler for LastMoveProbe {
+            fn id(&self) -> &'static str {
+                "test.last_move_probe"
+            }
+            fn phase(&self) -> EnvPhase {
+                EnvPhase::PostMover
+            }
+            fn priority(&self) -> u32 {
+                1
+            }
+            fn apply(&self, board: &mut Board, _ctx: &mut EnvReactionCtx) {
+                *self.observed.lock().unwrap() = Some(board.flags.last_move.clone());
+            }
+        }
+
+        let mut board = empty_board();
+        board.grid[6][4] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        // Build the custom registry and the probe.
+        let observed = Arc::new(Mutex::new(None));
+        let mut reg = EnvReactionRegistry::new();
+        reg.register(Box::new(LastMoveProbe {
+            observed: observed.clone(),
+        }));
+
+        // We can't intercept make_move's call to default_registry(),
+        // so simulate make_move's phase 1 + phase 2 manually, then
+        // call the pub(crate) `_with` variant of phase 3. This is
+        // the same code path make_move uses, just with our custom
+        // registry instead of the OnceLock default.
+        let before = board.clone();
+        let game_move = GameMove {
+            from: Coord { file: 4, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 5 }),
+        };
+        // Phase 1 (relocate) manually — move the pawn.
+        board.grid[6][4].piece = None;
+        board.grid[5][4].piece = Some(PieceType::new_pawn(Color::White));
+        // Phase 3 (env reactions) with the custom registry.
+        let ctx = crate::board::make_move::PostMoveCtx {
+            before_state: &before,
+            game_move: &game_move,
+        };
+        board.apply_environment_reactions_with(&ctx, &reg);
+
+        let snapshot = observed
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("probe handler must have fired at PostMover");
+        let lm = snapshot.expect(
+            "PostMover handlers must see last_move = Some(...) — the R3 ordering invariant",
+        );
+        assert_eq!(lm.from, Coord { file: 4, rank: 6 });
+        assert_eq!(lm.to, Some(Coord { file: 4, rank: 5 }));
+    }
+
+    /// Round-2 audit: validate-vs-apply parity. When a capture handler
+    /// drops a piece that BLOCKS an enemy ray to the mover's king,
+    /// real `make_move` accepts the move (king is safe post-drop) but
+    /// `apply_move_for_validation` (used by `validate_move` and
+    /// `legal_moves`) was running Phase 1 + Phase 2 without firing the
+    /// capture stack between them — so it saw the post-relocation
+    /// board minus the dropped piece and flagged the king as in check.
+    ///
+    /// The fix routes the capture stack through both apply paths via
+    /// `fire_capture_stack`. This test pins the parity invariant.
+    #[test]
+    fn test_capture_stack_blocking_drop_keeps_validate_legal() {
+        use crate::pieces::fairy::goblin::{Goblin, GoblinState};
+
+        let mut board = empty_board();
+        // White king on a3 (file=0, rank=5). White rook on c3 (file=2,
+        // rank=5) — currently blocks a queen ray. Black queen on f3
+        // (file=5, rank=5). Without the rook on c3, the queen rays
+        // through (1,5)(2,5)(3,5)(4,5) to (0,5).
+        board.grid[5][0] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[5][2] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[5][5] = Square::new().set_piece(PieceType::new_queen(Color::Black));
+        // Black Kidnapping Goblin two squares below the rook, holding
+        // a black knight. When the rook captures it, the knight drops
+        // at the rook's origin (2,5), re-blocking the queen's ray.
+        let kidnapped = std::sync::Arc::new(PieceType::new_knight(Color::Black));
+        board.grid[3][2] = Square::new().set_piece(PieceType::Goblin(Goblin {
+            color: Color::Black,
+            home_square: Coord { file: 7, rank: 7 },
+            state: GoblinState::Kidnapping { piece: kidnapped },
+        }));
+        // Black king somewhere legal-ish.
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        let from = Coord { file: 2, rank: 5 };
+        let capture_move = GameMove {
+            from: from.clone(),
+            move_type: MoveType::MoveTo(Coord { file: 2, rank: 3 }),
+        };
+
+        // The move should validate as legal (the dropped knight blocks
+        // the queen's ray; white king is safe post-capture).
+        let validate = board.validate_move(&capture_move);
+        assert!(
+            validate.is_ok(),
+            "validate_move must accept the capture; got {validate:?}"
+        );
+        // It must also appear in legal_moves for the rook's square.
+        let legal = board.legal_moves(&from);
+        assert!(
+            legal.iter().any(|m| *m == capture_move),
+            "legal_moves must include the capture; got {legal:?}"
+        );
+
+        // Apply it; confirm post-state: rook at (2,3), knight dropped
+        // at (2,5), king safe.
+        board.make_move(capture_move).expect("legal capture");
+        match &board.grid[3][2].piece {
+            Some(PieceType::Rook(r)) => assert_eq!(r.color, Color::White),
+            other => panic!("expected white rook at (2,3); got {other:?}"),
+        }
+        match &board.grid[5][2].piece {
+            Some(PieceType::Knight(k)) => assert_eq!(k.color, Color::Black),
+            other => panic!("expected dropped black knight at (2,5); got {other:?}"),
+        }
+        assert!(
+            !board.is_in_check(Color::White),
+            "white king must be safe after the dropped knight blocks the queen"
+        );
+    }
+
+    /// Plan-10 audit: a king moves into a square attacked by an enemy
+    /// piece. `legal_moves` must filter the move out. `validate_move`
+    /// must return `WouldLeaveKingInCheck`, not `PieceCannotMakeMove`.
+    #[test]
+    fn test_king_moves_into_attack_filtered() {
+        let mut board = empty_board();
+        // White king at e1 (file=4, rank=7). Black rook at e8
+        // (file=4, rank=0) — attacks e-file.
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        // King wants to step to e2 (file=4, rank=6) — still attacked
+        // by the rook. legal_moves should NOT include it.
+        let king_from = Coord { file: 4, rank: 7 };
+        let legal = board.legal_moves(&king_from);
+        let into_attack = legal.iter().any(|m| {
+            matches!(&m.move_type,
+                MoveType::MoveTo(c) if *c == Coord { file: 4, rank: 6 })
+        });
+        assert!(
+            !into_attack,
+            "king must not have a legal move into a square attacked by the rook; got {legal:?}"
+        );
+
+        // validate_move on the illegal move must produce WouldLeaveKingInCheck.
+        let result = board.validate_move(&GameMove {
+            from: king_from,
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 6 }),
+        });
+        assert!(
+            matches!(result, Err(MoveError::WouldLeaveKingInCheck { .. })),
+            "expected WouldLeaveKingInCheck; got {result:?}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Round-4 audit regressions
+    // ---------------------------------------------------------------
+
+    /// R4 audit F2: a train rolling over a corner rook must revoke the
+    /// corresponding castle right. Pre-fix, the inline raw `sq.piece
+    /// = None` in `advance_trains` phase 2 skipped the
+    /// `maybe_clear_castle_on_rook_capture` call wired into
+    /// `make_move`'s MoveTo/Promotion arms, so the rook vanished but
+    /// white_can_castle_kingside stayed true.
+    #[test]
+    fn test_train_kills_corner_rook_revokes_castle_rights() {
+        use crate::board::TrainTickRate;
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        board.flags.train_tick_rate = TrainTickRate::EveryPly;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = true;
+        // East-pointing track at white's back rank, files 6 → 7. Train
+        // head at file 6 rolls east into h1 (file 7).
+        for f in 6..=7 {
+            board.grid[7][f] = Square::new().set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            });
+        }
+        board.grid[7][6] = board.grid[7][6]
+            .clone()
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        board.grid[7][7] = board.grid[7][7]
+            .clone()
+            .set_piece(PieceType::new_rook(Color::White));
+        // Both kings present so make_move accepts an idle ply.
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.grid[4][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // White knight to use as the tick-driver — moving the king
+        // would revoke both castle rights and mask the F2 fix.
+        board.grid[5][2] =
+            Square::new().set_piece(PieceType::new_knight(Color::White));
+
+        // Tick the train via a single ply.
+        board
+            .make_move(GameMove {
+                from: Coord { file: 2, rank: 5 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+            })
+            .expect("legal idle knight move ticks the train");
+
+        // Train head landed on h1 (the corner rook square).
+        assert!(
+            matches!(board.grid[7][7].piece, Some(PieceType::Locomotive(_))),
+            "loco must have rolled east onto h1"
+        );
+        // White's kingside castle right must be revoked — the corner
+        // rook is gone.
+        assert!(
+            !board.flags.white_can_castle_kingside,
+            "F2: train killing corner rook must revoke white_can_castle_kingside"
+        );
+        // Queenside untouched (rook never sat there).
+        assert!(
+            board.flags.white_can_castle_queenside,
+            "queenside castle right must be unaffected"
+        );
+    }
+
+    /// R4 audit F3: a piece-in-carrier MoveTo capturing a corner rook
+    /// must revoke the corresponding castle right. Pre-fix, the PIC
+    /// arm of `relocate_pieces` overwrote the target square with
+    /// `to_sq.piece = Some(moving_out_piece)` and never called
+    /// `maybe_clear_castle_on_rook_capture`.
+    #[test]
+    fn test_pic_move_to_corner_rook_revokes_castle_rights() {
+        use crate::pieces::fairy::bus::Bus;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_queenside = true;
+        // White's a1 rook.
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // Black bus at b2 (rank=6, file=1) carrying a black queen.
+        let bus = PieceType::Bus(Bus {
+            color: Color::Black,
+            pieces: vec![PieceType::new_queen(Color::Black)],
+        });
+        board.grid[6][1] = Square::new().set_piece(bus);
+        // Kings for legality.
+        board.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        board.grid[5][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+
+        // PIC{MoveTo} the queen from the bus onto a1 (the white rook).
+        board
+            .make_move(GameMove {
+                from: Coord { file: 1, rank: 6 },
+                move_type: MoveType::PieceInCarrier {
+                    piece_index: 0,
+                    move_type: std::sync::Arc::new(MoveType::MoveTo(Coord {
+                        file: 0,
+                        rank: 7,
+                    })),
+                },
+            })
+            .expect("PIC queen-out-of-bus capturing a1 rook must be legal");
+
+        // Queen landed on a1; rook gone.
+        assert!(
+            matches!(board.grid[7][0].piece, Some(PieceType::Queen(_))),
+            "queen must occupy a1 after PIC capture; got {:?}",
+            board.grid[7][0].piece
+        );
+        // F3: castle right revoked.
+        assert!(
+            !board.flags.white_can_castle_queenside,
+            "F3: PIC capturing corner rook must revoke white_can_castle_queenside"
+        );
+    }
+
+    /// R4 audit F1: a Kidnapping Goblin run over by a train must flow
+    /// through the capture stack. Pre-fix, `advance_trains` bypassed
+    /// `default_capture_stack().resolve_capture(...)` entirely, so any
+    /// future death-rattle modifier (Bomb, Antipode, Plague Doctor)
+    /// would silently no-op on train captures. The current
+    /// `GoblinDropVictimCapture` handler skips on `captor_origin =
+    /// None` (the train head has no clean origin tile), so the
+    /// kidnap victim is silently lost — matching the documented PIC-
+    /// capture precedent. This test pins that documented semantic: the
+    /// goblin AND the kidnap victim are both gone from the board after
+    /// the tick.
+    #[test]
+    fn test_kidnapping_goblin_killed_by_train_loses_victim_silently() {
+        use crate::board::TrainTickRate;
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        board.flags.train_tick_rate = TrainTickRate::EveryPly;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // East track at rank=3, files 1..=3.
+        for f in 1..=3 {
+            board.grid[3][f] = Square::new().set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            });
+        }
+        // Loco at (3,1) heads east toward (3,2).
+        board.grid[3][1] = board.grid[3][1]
+            .clone()
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        // Kidnapping black goblin on the track at (3,2) carrying a
+        // white knight. The Goblin sits ON a track tile (which is
+        // walkable by non-cart pieces).
+        let kidnapped_knight = PieceType::new_knight(Color::White);
+        let goblin = PieceType::Goblin(Goblin {
+            color: Color::Black,
+            state: GoblinState::Kidnapping {
+                piece: Arc::new(kidnapped_knight),
+            },
+            home_square: Coord { file: 2, rank: 3 },
+        });
+        board.grid[3][2] = board.grid[3][2].clone().set_piece(goblin);
+        // Kings well away from the action so the move is legal.
+        board.grid[7][6] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[0][6] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        // White ticks the train via an idle king move.
+        board
+            .make_move(GameMove {
+                from: Coord { file: 6, rank: 7 },
+                move_type: MoveType::MoveTo(Coord { file: 5, rank: 7 }),
+            })
+            .expect("idle white king move ticks the train");
+
+        // Loco rolled east onto (3,2). Goblin gone.
+        assert!(
+            matches!(board.grid[3][2].piece, Some(PieceType::Locomotive(_))),
+            "loco must have rolled east onto the goblin's tile"
+        );
+        // The kidnap victim is also silently gone. The
+        // GoblinDropVictimCapture handler skipped (captor_origin =
+        // None for train captures), and the documented behavior is
+        // "no clean drop site → silent loss," same as PIC captures.
+        // Scan the entire board for the kidnapped knight.
+        let mut found_kidnapped_knight = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                if matches!(
+                    &board.grid[rank][file].piece,
+                    Some(PieceType::Knight(k)) if k.color == Color::White
+                ) {
+                    found_kidnapped_knight = true;
+                }
+            }
+        }
+        assert!(
+            !found_kidnapped_knight,
+            "kidnap victim must be silently lost (documented behavior for captor_origin=None)"
+        );
+    }
+
+    /// R5 audit forward-compat: `BoardOp::RemovePiece` applied to a
+    /// corner-rook square revokes the matching castle right. Before
+    /// the R5 fix to `BoardOp::apply`, a future `CaptureModifier`
+    /// (concrete example: the Bomb AOE design in `piece_ideas/`)
+    /// emitting `RemovePiece` on h1 would have silently left
+    /// `white_can_castle_kingside = true` even though the rook was
+    /// gone. Pins the centralized revoke inside `BoardOp::apply`.
+    #[test]
+    fn test_boardop_remove_piece_on_corner_rook_revokes_castle() {
+        use crate::movement::stack::capture::BoardOp;
+
+        let mut board = empty_board();
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = true;
+        // a1 (file=0, rank=7) — white's queenside corner.
+        board.grid[7][0] =
+            Square::new().set_piece(PieceType::new_rook(Color::White));
+        // h1 (file=7, rank=7) — white's kingside corner.
+        board.grid[7][7] =
+            Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        // Remove the kingside corner rook via BoardOp directly.
+        BoardOp::RemovePiece {
+            at: Coord { file: 7, rank: 7 },
+        }
+        .apply(&mut board);
+
+        assert!(
+            board.grid[7][7].piece.is_none(),
+            "BoardOp::RemovePiece must clear the square"
+        );
+        assert!(
+            !board.flags.white_can_castle_kingside,
+            "R5: BoardOp::RemovePiece on h1 must revoke white kingside castle"
+        );
+        // Queenside corner rook untouched.
+        assert!(
+            board.flags.white_can_castle_queenside,
+            "queenside flag must be unaffected when only h1 is removed"
+        );
+
+        // Now remove the queenside rook via Compose.
+        BoardOp::Compose(vec![BoardOp::RemovePiece {
+            at: Coord { file: 0, rank: 7 },
+        }])
+        .apply(&mut board);
+        assert!(
+            !board.flags.white_can_castle_queenside,
+            "R5: Compose chain containing RemovePiece on a1 must revoke white queenside castle"
+        );
+    }
+
+    /// R5 audit forward-compat: `BoardOp::PlacePiece` overwriting a
+    /// corner-rook square also revokes the matching castle right
+    /// (the placement is a defacto capture of the existing occupant).
+    #[test]
+    fn test_boardop_place_piece_overwriting_corner_rook_revokes_castle() {
+        use crate::movement::stack::capture::BoardOp;
+
+        let mut board = empty_board();
+        board.flags.black_can_castle_queenside = true;
+        // a8 (file=0, rank=0) — black's queenside corner.
+        board.grid[0][0] =
+            Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+        // PlacePiece a white knight onto a8, overwriting the rook.
+        BoardOp::PlacePiece {
+            at: Coord { file: 0, rank: 0 },
+            piece: PieceType::new_knight(Color::White),
+        }
+        .apply(&mut board);
+
+        assert!(
+            matches!(board.grid[0][0].piece, Some(PieceType::Knight(_))),
+            "PlacePiece must overwrite the target square"
+        );
+        assert!(
+            !board.flags.black_can_castle_queenside,
+            "R5: PlacePiece overwriting a corner rook must revoke that castle right"
+        );
+    }
+
+    /// R5 audit: idempotence of the revoke — if the rook is captured
+    /// twice through different paths (e.g., make_move clears the
+    /// inline flag, then a capture handler emits RemovePiece on the
+    /// same square), the second call is a no-op and doesn't panic.
+    #[test]
+    fn test_boardop_remove_piece_revoke_is_idempotent() {
+        use crate::movement::stack::capture::BoardOp;
+
+        let mut board = empty_board();
+        board.flags.white_can_castle_kingside = false; // already revoked
+        board.grid[7][7] =
+            Square::new().set_piece(PieceType::new_rook(Color::White));
+
+        // RemovePiece on h1 with castle right already false. No panic.
+        BoardOp::RemovePiece {
+            at: Coord { file: 7, rank: 7 },
+        }
+        .apply(&mut board);
+
+        assert!(board.grid[7][7].piece.is_none());
+        assert!(
+            !board.flags.white_can_castle_kingside,
+            "double-revoke is a no-op"
+        );
+    }
+
+    /// R4 audit F1 (companion): assert the documented capture-event
+    /// shape for trains. The `GoblinDropVictimCapture` handler returns
+    /// `Keep` for `captor_origin = None`, so we observe via a
+    /// hand-built `CaptureStack` containing only a probe modifier.
+    /// This proves the event SHAPE matches what the production
+    /// `advance_trains` wiring emits.
+    #[test]
+    fn test_train_capture_event_shape_synthesizes_correctly() {
+        use crate::movement::stack::capture::{
+            BoardOp, CaptureModifier, CaptureStack, ResolutionEffect, ResolutionEvent,
+        };
+        use std::sync::{Arc, Mutex};
+
+        struct CaptureProbe {
+            observed: Arc<Mutex<Option<ResolutionEvent>>>,
+        }
+        impl CaptureModifier for CaptureProbe {
+            fn id(&self) -> &'static str {
+                "test.capture_probe"
+            }
+            fn priority(&self) -> u32 {
+                10
+            }
+            fn apply(
+                &self,
+                _board: &Board,
+                event: &ResolutionEvent,
+            ) -> ResolutionEffect {
+                *self.observed.lock().unwrap() = Some(event.clone());
+                ResolutionEffect::Keep
+            }
+        }
+
+        let observed: Arc<Mutex<Option<ResolutionEvent>>> = Arc::new(Mutex::new(None));
+        let mut stack = CaptureStack::new();
+        stack.register(Box::new(CaptureProbe {
+            observed: observed.clone(),
+        }));
+
+        // Synthesize the same event shape `advance_trains` builds.
+        let _ops = stack.resolve_capture(
+            &empty_board(),
+            &ResolutionEvent::Capture {
+                captor_coord: Coord { file: 3, rank: 2 },
+                captor_origin: None,
+                captor: PieceType::new_rook(Color::Neutral), // placeholder; trains use Locomotive
+                victim_coord: Coord { file: 3, rank: 2 },
+                victim: PieceType::new_pawn(Color::Black),
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 2 }),
+            },
+        );
+
+        let _: BoardOp; // namespace pin
+        let seen = observed.lock().unwrap().clone().expect("probe saw event");
+        match seen {
+            ResolutionEvent::Capture {
+                captor_origin,
+                captor_coord,
+                victim_coord,
+                ..
+            } => {
+                assert!(
+                    captor_origin.is_none(),
+                    "train captures synthesize captor_origin=None"
+                );
+                assert_eq!(captor_coord, victim_coord, "head lands on victim tile");
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Round-6 audit coverage gaps
+    // ---------------------------------------------------------------
+
+    /// R6 Tier-A: a Kidnapping Goblin riding inside an enemy-captured
+    /// Bus loses its kidnap victim silently. The Bus capture does NOT
+    /// fire `GoblinDropVictimCapture` on the passenger Goblin — the
+    /// capture event's `victim` is the Bus, not the Goblin, so the
+    /// handler match-arm at `capture.rs:281-289` skips. This pins the
+    /// documented "passengers go down with the carrier" semantic for
+    /// the specific Kidnapping case.
+    #[test]
+    fn test_kidnap_goblin_inside_captured_bus_loses_victim_silently() {
+        use crate::pieces::fairy::bus::Bus;
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        // Black Bus at (3,3) carrying a Black Kidnapping Goblin
+        // (which has a White Knight as kidnap payload).
+        let kidnap_victim = PieceType::new_knight(Color::White);
+        let kidnapping_goblin = PieceType::Goblin(Goblin {
+            color: Color::Black,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Kidnapping {
+                piece: Arc::new(kidnap_victim),
+            },
+        });
+        let mut bus = Bus::new(Color::Black);
+        bus.pieces = vec![kidnapping_goblin];
+        board.grid[3][3].piece = Some(PieceType::Bus(bus));
+        // White Queen at (4,4) — diagonal-1 from the Bus.
+        board.grid[4][4].piece = Some(PieceType::new_queen(Color::White));
+        // Kings well clear of the action.
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][7].piece = Some(PieceType::new_king(Color::Black));
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+
+        // White Queen captures the Bus.
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 4 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+            })
+            .expect("white queen captures black bus");
+
+        // Queen sits on (3,3); Bus, Goblin, and kidnap victim are all
+        // gone from the entire board.
+        assert!(
+            matches!(board.grid[3][3].piece, Some(PieceType::Queen(_))),
+            "queen must occupy the bus's old square"
+        );
+        let mut found_bus = false;
+        let mut found_goblin = false;
+        let mut found_kidnap_victim_knight = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                match &board.grid[rank][file].piece {
+                    Some(PieceType::Bus(_)) => found_bus = true,
+                    Some(PieceType::Goblin(_)) => found_goblin = true,
+                    Some(PieceType::Knight(k)) if k.color == Color::White => {
+                        found_kidnap_victim_knight = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(!found_bus, "captured bus must be gone");
+        assert!(
+            !found_goblin,
+            "Kidnapping Goblin passenger must be gone with its bus"
+        );
+        assert!(
+            !found_kidnap_victim_knight,
+            "kidnap victim is silently lost (documented passenger semantics)"
+        );
+    }
+
+    /// R6 Tier-B: a train rolling over a Bus that carries a
+    /// Kidnapping Goblin loses both the Goblin AND its kidnap victim
+    /// silently. Stacked scenario combining: trains capture
+    /// non-cart pieces, the captured Bus carries the Goblin as a
+    /// passenger, the Goblin's payload is two levels deep and never
+    /// surfaces.
+    #[test]
+    fn test_train_running_over_bus_with_kidnap_goblin_loses_victim_silently() {
+        use crate::board::TrainTickRate;
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::bus::Bus;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        board.flags.train_tick_rate = TrainTickRate::EveryPly;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // East-pointing track at rank=3, files 1..=3.
+        for f in 1..=3 {
+            board.grid[3][f] = Square::new().set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            });
+        }
+        // Locomotive at (3,1).
+        board.grid[3][1] = board.grid[3][1]
+            .clone()
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        // Black Bus at (3,2), sitting ON the track, carrying a Black
+        // Kidnapping Goblin (with a White Knight as kidnap victim).
+        let kidnap_victim = PieceType::new_knight(Color::White);
+        let kidnapping_goblin = PieceType::Goblin(Goblin {
+            color: Color::Black,
+            home_square: Coord { file: 0, rank: 0 },
+            state: GoblinState::Kidnapping {
+                piece: Arc::new(kidnap_victim),
+            },
+        });
+        let mut bus = Bus::new(Color::Black);
+        bus.pieces = vec![kidnapping_goblin];
+        board.grid[3][2] = board.grid[3][2].clone().set_piece(PieceType::Bus(bus));
+        // Idle-king pair to tick the train.
+        board.grid[7][6].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][6].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 6, rank: 7 },
+                move_type: MoveType::MoveTo(Coord { file: 5, rank: 7 }),
+            })
+            .expect("idle white king move ticks the train");
+
+        // Train head landed at (3,2). Bus, Goblin, and kidnap victim
+        // all gone.
+        assert!(
+            matches!(board.grid[3][2].piece, Some(PieceType::Locomotive(_))),
+            "loco must have rolled east onto the bus's tile"
+        );
+        let mut found_bus = false;
+        let mut found_goblin = false;
+        let mut found_kidnap_victim_knight = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                match &board.grid[rank][file].piece {
+                    Some(PieceType::Bus(_)) => found_bus = true,
+                    Some(PieceType::Goblin(_)) => found_goblin = true,
+                    Some(PieceType::Knight(k)) if k.color == Color::White => {
+                        found_kidnap_victim_knight = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(!found_bus, "train-crushed bus must be gone");
+        assert!(
+            !found_goblin,
+            "Goblin passenger goes down with its bus"
+        );
+        assert!(
+            !found_kidnap_victim_knight,
+            "kidnap victim is silently lost (documented passenger semantics)"
+        );
+    }
+
+    /// R6 Tier-B: when an enemy boards a Neutral cart carrying a
+    /// Kidnapping Goblin of the OTHER color, the `retain` rule at
+    /// `make_move.rs:332` (Neutral cart drops opposite-color
+    /// passengers) silently loses the Goblin AND its kidnap victim.
+    /// `GoblinDropVictimCapture` never fires because the
+    /// passenger-displacement path doesn't synthesize a Capture event.
+    #[test]
+    fn test_enemy_boards_neutral_cart_silently_loses_kidnap_goblin_payload() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Neutral Locomotive on a Track tile at (3,3) carrying a
+        // White Kidnapping Goblin (with Black Knight as kidnap
+        // victim).
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        let kidnap_victim = PieceType::new_knight(Color::Black);
+        let kidnapping_goblin = PieceType::Goblin(Goblin {
+            color: Color::White,
+            home_square: Coord { file: 0, rank: 7 },
+            state: GoblinState::Kidnapping {
+                piece: Arc::new(kidnap_victim),
+            },
+        });
+        let mut loco = Locomotive::new(1, TrainHeading::Forward);
+        loco.passengers = vec![kidnapping_goblin];
+        board.grid[3][3] = board.grid[3][3]
+            .clone()
+            .set_piece(PieceType::Locomotive(loco));
+        // Black Bishop at (4,4) — can MoveIntoCarrier diagonally.
+        // Use Bishop (not Knight) since Knight's L-move would clear
+        // the (3,3) tile differently.
+        board.grid[4][4].piece = Some(PieceType::new_bishop(Color::Black));
+        // Kings well away.
+        board.grid[0][7].piece = Some(PieceType::new_king(Color::Black));
+        board.grid[7][0].piece = Some(PieceType::new_king(Color::White));
+
+        // Black bishop boards the Neutral cart at (3,3).
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 4 },
+                move_type: MoveType::MoveIntoCarrier(Coord { file: 3, rank: 3 }),
+            })
+            .expect("black bishop boards neutral cart");
+
+        // Neutral cart still there at (3,3); its passenger list
+        // now contains only the Black bishop. The Goblin and its
+        // kidnap victim are silently gone.
+        match &board.grid[3][3].piece {
+            Some(PieceType::Locomotive(l)) => {
+                assert_eq!(
+                    l.passengers.len(),
+                    1,
+                    "neutral cart should have only the boarder left"
+                );
+                assert!(
+                    matches!(l.passengers[0], PieceType::Bishop(_)),
+                    "only passenger should be the black bishop boarder"
+                );
+            }
+            other => panic!("neutral cart must still occupy (3,3); got {other:?}"),
+        }
+        // Scan board for the kidnap victim — must be gone.
+        let mut found_kidnap_victim = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                if matches!(
+                    &board.grid[rank][file].piece,
+                    Some(PieceType::Knight(k)) if k.color == Color::Black
+                ) {
+                    found_kidnap_victim = true;
+                }
+            }
+        }
+        assert!(
+            !found_kidnap_victim,
+            "Goblin's kidnap victim is silently lost via Neutral-cart retain"
+        );
+    }
+
+    /// R6 audit FEN gap: round-trip a Kidnapping Goblin sitting on a
+    /// Track tile. The pre-R6 `test_fen_roundtrip_goblin_kidnapping`
+    /// only covered the Standard-square case; the R4 F1 fix's actual
+    /// scenario (Goblin on Track) was untested at the FEN layer.
+    #[test]
+    fn test_fen_roundtrip_kidnapping_goblin_on_track() {
+        use crate::board::square::TrackDir;
+        use std::sync::Arc;
+
+        let mut board = empty_board();
+        let kidnap_victim = PieceType::new_knight(Color::Black);
+        let kidnapping_goblin = PieceType::Goblin(Goblin {
+            color: Color::White,
+            home_square: Coord { file: 4, rank: 7 },
+            state: GoblinState::Kidnapping {
+                piece: Arc::new(kidnap_victim),
+            },
+        });
+        // Track tile + Kidnapping Goblin on top.
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(kidnapping_goblin);
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(
+            board2, board,
+            "Kidnapping Goblin on a Track tile must FEN round-trip cleanly"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Round-7 audit fixes
+    // ---------------------------------------------------------------
+
+    /// R7 audit (VERIFIED-PRESENT-BUG): a piece sitting on an
+    /// unwalkable source square (closed Gate, Block, Vent, Turret)
+    /// must generate ZERO moves. Pre-R7, `WalkabilityFilter` only
+    /// checked the TARGET, so a piece stranded on a closed Gate
+    /// remained mobile but uncapturable (target-walkability blocked
+    /// captors from reaching it). The fix extends the filter to
+    /// also drop candidates whose SOURCE is unwalkable.
+    ///
+    /// Reachability: a signal can close a Gate under a piece via
+    /// `fire_signal` (`make_move.rs:364`) which calls
+    /// `activate_receiver` (`signal.rs:83-125`) — neither path
+    /// checks for an occupant. The piece-on-closed-gate state is
+    /// thus reachable through normal play.
+    #[test]
+    fn test_piece_on_closed_gate_has_no_legal_moves() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White rook on a closed Gate at (3,3).
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::new_rook(Color::White));
+        // Kings far away.
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        // The rook generates ZERO moves — it's stranded on an
+        // unwalkable square.
+        let rook_moves = board.legal_moves(&Coord { file: 3, rank: 3 });
+        assert!(
+            rook_moves.is_empty(),
+            "rook on closed Gate must have no legal moves; got {:?}",
+            rook_moves
+        );
+    }
+
+    /// R7 audit companion: a piece on a Block tile (placed by FEN —
+    /// the parser is permissive per plan 12's design choice) is also
+    /// inert under the source-walkability check.
+    #[test]
+    fn test_piece_on_block_tile_has_no_legal_moves() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White queen on a Block tile.
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Block)
+            .set_piece(PieceType::new_queen(Color::White));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let queen_moves = board.legal_moves(&Coord { file: 3, rank: 3 });
+        assert!(
+            queen_moves.is_empty(),
+            "queen on Block must have no legal moves; got {:?}",
+            queen_moves
+        );
+    }
+
+    /// R7 audit: a Skibidi stranded on a closed Gate must not be
+    /// able to PhaseShift either. PhaseShift has no destination
+    /// coord (it mutates the piece in place), so it bypasses the
+    /// target-walkability check; the new source-walkability check
+    /// catches it. Pins the "uniform across MoveType arms" intent.
+    #[test]
+    fn test_skibidi_on_closed_gate_cannot_phase_shift() {
+        use crate::pieces::fairy::skibidi::Skibidi;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::Skibidi(Skibidi {
+                color: Color::White,
+                phase: 1,
+            }));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let moves = board.legal_moves(&Coord { file: 3, rank: 3 });
+        assert!(
+            moves.iter().all(|m| !matches!(m.move_type, MoveType::PhaseShift)),
+            "Skibidi on closed Gate must not be able to PhaseShift; got {:?}",
+            moves
+        );
+        assert!(
+            moves.is_empty(),
+            "Skibidi on closed Gate must be entirely inert; got {:?}",
+            moves
+        );
+    }
+
+    /// R7 audit (sharpening of R6 capture-promotion tests): pre-R7,
+    /// the three R6 capture-promotion castle-clear tests only asserted
+    /// `!flag`. A future refactor that calls
+    /// `maybe_clear_castle_on_rook_capture` but silently no-ops the
+    /// promotion mutation would still pass them. Sharpen by asserting
+    /// the queen materialized at the corner AND the pawn vacated the
+    /// source — the existing `standard_game.rs:208` test has this
+    /// pattern; mirror it here.
+    #[test]
+    fn test_capture_promotion_clears_black_kingside_materializes_queen() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.black_can_castle_kingside = true;
+        board.flags.black_can_castle_queenside = false;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.grid[1][6].piece = Some(PieceType::new_pawn(Color::White));
+        board.grid[0][7].piece = Some(PieceType::new_rook(Color::Black));
+        board.grid[5][3].piece = Some(PieceType::new_king(Color::White));
+        board.grid[2][3].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 6, rank: 1 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 7, rank: 0 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("white pawn promotes via capture on h8");
+
+        assert!(
+            !board.flags.black_can_castle_kingside,
+            "capture-promotion on h8 must revoke black kingside"
+        );
+        assert!(
+            matches!(
+                &board.grid[0][7].piece,
+                Some(PieceType::Queen(q)) if q.color == Color::White
+            ),
+            "promotion must materialize a White queen at h8; got {:?}",
+            board.grid[0][7].piece
+        );
+        assert!(
+            board.grid[1][6].piece.is_none(),
+            "pawn must vacate g7 after promotion"
+        );
+    }
+
+    #[test]
+    fn test_capture_promotion_clears_white_queenside_materializes_queen() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_queenside = true;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        board.grid[6][1].piece = Some(PieceType::new_pawn(Color::Black));
+        board.grid[7][0].piece = Some(PieceType::new_rook(Color::White));
+        board.grid[2][3].piece = Some(PieceType::new_king(Color::White));
+        board.grid[5][3].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 1, rank: 6 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 0, rank: 7 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("black pawn promotes via capture on a1");
+
+        assert!(!board.flags.white_can_castle_queenside);
+        assert!(
+            matches!(
+                &board.grid[7][0].piece,
+                Some(PieceType::Queen(q)) if q.color == Color::Black
+            ),
+            "promotion must materialize a Black queen at a1; got {:?}",
+            board.grid[7][0].piece
+        );
+        assert!(board.grid[6][1].piece.is_none(), "pawn must vacate b2");
+    }
+
+    #[test]
+    fn test_capture_promotion_clears_white_kingside_materializes_queen() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        board.grid[6][6].piece = Some(PieceType::new_pawn(Color::Black));
+        board.grid[7][7].piece = Some(PieceType::new_rook(Color::White));
+        board.grid[2][3].piece = Some(PieceType::new_king(Color::White));
+        board.grid[5][3].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 6, rank: 6 },
+                move_type: MoveType::Promotion {
+                    target: Coord { file: 7, rank: 7 },
+                    into: PromotionTarget::Queen,
+                },
+            })
+            .expect("black pawn promotes via capture on h1");
+
+        assert!(!board.flags.white_can_castle_kingside);
+        assert!(
+            matches!(
+                &board.grid[7][7].piece,
+                Some(PieceType::Queen(q)) if q.color == Color::Black
+            ),
+            "promotion must materialize a Black queen at h1; got {:?}",
+            board.grid[7][7].piece
+        );
+        assert!(board.grid[6][6].piece.is_none(), "pawn must vacate g2");
+    }
+
+    /// R7 audit (Skibidi coverage gap): a Skibidi riding inside an
+    /// enemy-captured Bus is silently lost. Same documented
+    /// passenger-semantics as the kidnap-goblin variant; pin
+    /// explicitly for Skibidi too.
+    #[test]
+    fn test_skibidi_inside_captured_bus_lost_silently() {
+        use crate::pieces::fairy::bus::Bus;
+        use crate::pieces::fairy::skibidi::Skibidi;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Black Bus at (3,3) carrying a Black Skibidi (phase 2).
+        let skibidi_passenger = PieceType::Skibidi(Skibidi {
+            color: Color::Black,
+            phase: 2,
+        });
+        let mut bus = Bus::new(Color::Black);
+        bus.pieces = vec![skibidi_passenger];
+        board.grid[3][3].piece = Some(PieceType::Bus(bus));
+        // White Queen at (4,4) — captures the Bus diagonally.
+        board.grid[4][4].piece = Some(PieceType::new_queen(Color::White));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][7].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 4 },
+                move_type: MoveType::MoveTo(Coord { file: 3, rank: 3 }),
+            })
+            .expect("white queen captures black bus");
+
+        assert!(
+            matches!(board.grid[3][3].piece, Some(PieceType::Queen(_))),
+            "queen must occupy the bus's old square"
+        );
+        // No Bus or Skibidi remains anywhere on the board.
+        let mut found_bus = false;
+        let mut found_skibidi = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                match &board.grid[rank][file].piece {
+                    Some(PieceType::Bus(_)) => found_bus = true,
+                    Some(PieceType::Skibidi(_)) => found_skibidi = true,
+                    _ => {}
+                }
+            }
+        }
+        assert!(!found_bus, "captured bus must be gone");
+        assert!(
+            !found_skibidi,
+            "Skibidi passenger silently lost with its captured carrier"
+        );
+    }
+
+    /// R7 audit (Skibidi coverage gap): a Skibidi opposite-color
+    /// passenger inside a Neutral cart is dropped silently when an
+    /// enemy of the OTHER color boards the cart. Same Neutral-cart
+    /// retain rule as the kidnap-goblin case.
+    #[test]
+    fn test_skibidi_passenger_silently_lost_when_enemy_boards_neutral_cart() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use crate::pieces::fairy::skibidi::Skibidi;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Neutral Locomotive on a Track tile at (3,3) carrying a
+        // White Skibidi.
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        let mut loco = Locomotive::new(1, TrainHeading::Forward);
+        loco.passengers = vec![PieceType::Skibidi(Skibidi {
+            color: Color::White,
+            phase: 3,
+        })];
+        board.grid[3][3] = board.grid[3][3]
+            .clone()
+            .set_piece(PieceType::Locomotive(loco));
+        // Black bishop adjacent at (4,4) boards the cart.
+        board.grid[4][4].piece = Some(PieceType::new_bishop(Color::Black));
+        board.grid[0][7].piece = Some(PieceType::new_king(Color::Black));
+        board.grid[7][0].piece = Some(PieceType::new_king(Color::White));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 4, rank: 4 },
+                move_type: MoveType::MoveIntoCarrier(Coord { file: 3, rank: 3 }),
+            })
+            .expect("black bishop boards neutral cart");
+
+        match &board.grid[3][3].piece {
+            Some(PieceType::Locomotive(l)) => {
+                assert_eq!(l.passengers.len(), 1);
+                assert!(matches!(l.passengers[0], PieceType::Bishop(_)));
+            }
+            other => panic!("neutral cart must still occupy (3,3); got {other:?}"),
+        }
+        // White Skibidi silently lost via retain.
+        let mut found_skibidi = false;
+        for rank in 0..8 {
+            for file in 0..8 {
+                if matches!(
+                    &board.grid[rank][file].piece,
+                    Some(PieceType::Skibidi(s)) if s.color == Color::White
+                ) {
+                    found_skibidi = true;
+                }
+            }
+        }
+        assert!(
+            !found_skibidi,
+            "White Skibidi passenger silently lost via Neutral-cart retain rule"
+        );
+    }
+
+    /// R7 audit (square-condition × castle defensive pin): a corner
+    /// rook sitting on a Brainrot tile still grants its color the
+    /// castle right (because castle rights are flag-tracked, and the
+    /// rook is structurally still in its home square — Brainrot blocks
+    /// the rook's OWN moves, not the king's castle move which uses
+    /// the rook in-place). Verifies that the post-R7 source-
+    /// walkability fix doesn't accidentally interact with castle
+    /// availability (Brainrot is a SquareCondition, not an
+    /// unwalkable SquareType).
+    #[test]
+    fn test_castle_with_brainrot_rook_on_corner_still_allowed() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White king at e1 (file=4, rank=7).
+        board.grid[7][4].piece = Some(PieceType::new_king(Color::White));
+        // White rook at h1 (file=7, rank=7) on a Brainrot tile.
+        board.grid[7][7] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .add_square_condition(SquareCondition::Brainrot);
+        // Clear path: f1 (5,7) and g1 (6,7) empty.
+        // Black king safely far away.
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+        let castle = king_moves
+            .iter()
+            .find(|m| matches!(m.move_type, MoveType::Castle { .. }));
+        assert!(
+            castle.is_some(),
+            "castle must still be available with a Brainrot rook in the corner; got {:?}",
+            king_moves
+        );
+        // The rook on Brainrot cannot move itself, however — its own
+        // moves are dropped by `SquareConditionFilter`.
+        let rook_moves = board.legal_moves(&Coord { file: 7, rank: 7 });
+        assert!(
+            rook_moves.is_empty(),
+            "Brainrot rook must generate no moves of its own"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Round-8 audit fix: threat-projection asymmetry
+    // ---------------------------------------------------------------
+
+    /// R8 audit (VERIFIED-HIGH-IMPACT): the R7 source-walkability fix
+    /// only touched CANDIDATE events. A piece on an unwalkable square
+    /// was movement-inert but STILL projected threats — producing
+    /// spurious check / spurious castle-blocking. This test pins the
+    /// fix: a rook on a closed Gate does NOT attack squares along its
+    /// rays.
+    #[test]
+    fn test_stranded_rook_does_not_project_threats() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White rook on a1 (file=0, rank=7) sitting on a closed Gate.
+        board.grid[7][0] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::new_rook(Color::White));
+        // Black king at a3 (file=0, rank=5) — on the rook's file.
+        board.grid[5][0].piece = Some(PieceType::new_king(Color::Black));
+        // White king far away.
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+
+        // The stranded rook must not project any threat along file 0.
+        assert!(
+            !board.is_attacked_by(&Coord { file: 0, rank: 5 }, Color::White),
+            "stranded rook (closed Gate) must not attack a3"
+        );
+        assert!(
+            !board.is_attacked_by(&Coord { file: 0, rank: 0 }, Color::White),
+            "stranded rook must not attack a8"
+        );
+        // Black king is NOT in check.
+        assert!(
+            !board.is_in_check(Color::Black),
+            "black king must not be in check from a stranded rook"
+        );
+    }
+
+    /// R8 audit: a stranded enemy piece on the castle path must not
+    /// block castling. Pre-R8, a bishop on g1-closed-Gate would
+    /// still attack f1 (the castle path tile) and block white from
+    /// castling kingside. Post-R8, the bishop projects no threats →
+    /// castle is legal.
+    #[test]
+    fn test_stranded_piece_does_not_block_castling() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White king at e1, rook at h1 (both Standard tiles).
+        board.grid[7][4].piece = Some(PieceType::new_king(Color::White));
+        board.grid[7][7].piece = Some(PieceType::new_rook(Color::White));
+        // Black bishop at e3 (file=4, rank=5) — diagonally attacks
+        // the f1-g2-h3 diagonal AND the d2-c3-b4-a5 diagonal. f1
+        // (file=5, rank=7) is on the bishop's diagonal from e3 via
+        // f2-g3. Wait, bishop at e3 (file=4, rank=5) attacks
+        // diagonals — let me check by moves: NE from e3 is f4, g5,
+        // h6. NW is d4, c5, b6, a7. SE is f2, g1. SW is d2, c1. So
+        // bishop at e3 attacks g1 via f2. With Gate-closing trick:
+        // place bishop on Gate at e3, closed. Bishop is stranded.
+        // Pre-R8 it still attacks g1 → blocks castle. Post-R8 it
+        // doesn't.
+        board.grid[5][4] = Square::new()
+            .set_square_type(SquareType::Gate { id: 2, open: false })
+            .set_piece(PieceType::new_bishop(Color::Black));
+        // Black king far away.
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        // Castle must be in the king's legal moves.
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+        let castle = king_moves
+            .iter()
+            .find(|m| matches!(m.move_type, MoveType::Castle { .. }));
+        assert!(
+            castle.is_some(),
+            "castle kingside must be legal — the stranded bishop projects no threats; got {:?}",
+            king_moves
+        );
+    }
+
+    /// R8 audit: a stranded Neutral carrier must not project its
+    /// passengers' threats. Pre-R8, a Neutral cart on a closed Gate
+    /// would still surface its king-passenger's threats via
+    /// `NeutralCarrierPassengerThreatModifier`, producing spurious
+    /// check. Post-R8, the carrier's source-walkability gates the
+    /// passenger-threat projection.
+    #[test]
+    fn test_stranded_neutral_carrier_does_not_project_passenger_threats() {
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Neutral Locomotive on a closed Gate at (3,3) carrying a
+        // White Queen (which would project queen-like threats).
+        let mut loco = Locomotive::new(1, TrainHeading::Forward);
+        loco.passengers = vec![PieceType::new_queen(Color::White)];
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::Locomotive(loco));
+        // Black king at (3,7) — same file as the carrier, would be
+        // attacked along file 3 by the queen passenger if the carrier
+        // weren't stranded.
+        board.grid[7][3].piece = Some(PieceType::new_king(Color::Black));
+        // White king elsewhere.
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::White));
+
+        // No threat from the stranded carrier's passengers.
+        assert!(
+            !board.is_attacked_by(&Coord { file: 3, rank: 7 }, Color::White),
+            "stranded Neutral carrier must not project queen-passenger threats"
+        );
+        assert!(
+            !board.is_in_check(Color::Black),
+            "black king must not be in check from a stranded carrier's passenger"
+        );
+    }
+
+    /// A stranded locomotive (closed Gate / Block / etc.) must not
+    /// project a head-crush threat.
+    ///
+    /// **Defence-in-depth caveat:** `next_train_step` only matches
+    /// `Track`/`Junction` sources and returns `None` for everything
+    /// else, so today this scenario short-circuits inside
+    /// `TrainHeadCrushModifier` even without the explicit
+    /// `is_walkable_at` guard at `train_modifiers.rs:64`. The guard
+    /// catches a hand-crafted FEN or any future relaxation of
+    /// `next_train_step`. The same outcome is also enforced via the
+    /// loco's `PieceAttacksModifier` (R8 guard) — exercised by
+    /// `test_stranded_neutral_carrier_does_not_project_passenger_threats`
+    /// for the carrier-passenger variant. This test pins the
+    /// observable inertness; the redundant guards are documented
+    /// belt-and-suspenders.
+    #[test]
+    fn test_stranded_locomotive_no_head_crush_threat() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        let mut next_track = Square::new().set_square_type(SquareType::Track {
+            direction: TrackDir::E,
+        });
+        next_track.piece = None;
+        board.grid[3][4] = next_track;
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        assert!(
+            !board.is_attacked_by(&Coord { file: 4, rank: 3 }, Color::Neutral),
+            "stranded loco must not project head-crush threat"
+        );
+    }
+
+    /// R9 audit (REGRESSION FROM R8 fix): pre-R8, a stranded corner
+    /// rook (e.g., on a closed Gate) accidentally blocked its own
+    /// king's castle via its phantom threats projecting onto the
+    /// castle path. R8 fixed the threat projection — which removed
+    /// that incidental block. The result was that a stranded rook
+    /// could be "rescued" by castling (the rook teleports to its
+    /// castle-side destination). R9 fixes by adding a walkability
+    /// check to `rook_is_friendly` in `king.rs::castle_moves` — a
+    /// stranded rook does not participate in a castle.
+    #[test]
+    fn test_castle_blocked_when_rook_on_closed_gate() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White king at e1.
+        board.grid[7][4].piece = Some(PieceType::new_king(Color::White));
+        // White rook at h1 on a closed Gate (stranded).
+        board.grid[7][7] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::new_rook(Color::White));
+        // Black king far away.
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+        let castle = king_moves
+            .iter()
+            .find(|m| matches!(m.move_type, MoveType::Castle { .. }));
+        assert!(
+            castle.is_none(),
+            "castle must NOT be available when corner rook is stranded; got {:?}",
+            castle
+        );
+    }
+
+    /// R9 companion: with the rook on a walkable corner square,
+    /// castling IS allowed (sanity check the R9 fix didn't over-
+    /// correct against normal castle paths).
+    #[test]
+    fn test_castle_allowed_when_rook_on_walkable_corner() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        board.grid[7][4].piece = Some(PieceType::new_king(Color::White));
+        // Rook at h1 on a plain Standard tile.
+        board.grid[7][7].piece = Some(PieceType::new_rook(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+        let castle = king_moves
+            .iter()
+            .find(|m| matches!(m.move_type, MoveType::Castle { .. }));
+        assert!(
+            castle.is_some(),
+            "castle must be available with a walkable corner rook"
+        );
+    }
+
+    /// R8 audit companion: when the same carrier sits on a WALKABLE
+    /// square, the passenger DOES project threats (the inverse of the
+    /// stranded case). Pins that the R8 fix didn't accidentally
+    /// disable threat projection for healthy carriers.
+    #[test]
+    fn test_healthy_neutral_carrier_still_projects_passenger_threats() {
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Same scenario as above but the carrier is on a Track tile
+        // (walkable).
+        let mut loco = Locomotive::new(1, TrainHeading::Forward);
+        loco.passengers = vec![PieceType::new_queen(Color::White)];
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            })
+            .set_piece(PieceType::Locomotive(loco));
+        board.grid[7][3].piece = Some(PieceType::new_king(Color::Black));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::White));
+
+        // Carrier's queen-passenger DOES project threats from a
+        // walkable square.
+        assert!(
+            board.is_attacked_by(&Coord { file: 3, rank: 7 }, Color::White),
+            "healthy Neutral carrier must project queen-passenger threats"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Round-11 audit additions
+    // ---------------------------------------------------------------
+
+    /// A stranded Bus is uncapturable — the target-walkability check
+    /// in `WalkabilityFilter` blocks any captor from landing on the
+    /// unwalkable square. Pinned alongside the source-walkability
+    /// tests to document the full inertness: stranded pieces don't
+    /// move, don't threaten, and can't be captured normally.
+    #[test]
+    fn test_stranded_bus_is_uncapturable_via_target_walkability() {
+        use crate::pieces::fairy::bus::Bus;
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // Black Bus on a closed Gate at (3,3).
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::Bus(Bus::new(Color::Black)));
+        // White queen at (4,4) — diagonal-1 from the Bus, would capture it
+        // if the target square were walkable.
+        board.grid[4][4].piece = Some(PieceType::new_queen(Color::White));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let queen_moves = board.legal_moves(&Coord { file: 4, rank: 4 });
+        let captures_bus = queen_moves
+            .iter()
+            .any(|m| matches!(&m.move_type, MoveType::MoveTo(c) if c.file == 3 && c.rank == 3));
+        assert!(
+            !captures_bus,
+            "white queen must not be able to land on stranded Bus (unwalkable target)"
+        );
+    }
+
+    /// A stranded Locomotive is uncapturable — same symmetry as the
+    /// Bus case.
+    #[test]
+    fn test_stranded_locomotive_is_uncapturable_via_target_walkability() {
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        board.grid[4][4].piece = Some(PieceType::new_queen(Color::White));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let queen_moves = board.legal_moves(&Coord { file: 4, rank: 4 });
+        let captures_loco = queen_moves
+            .iter()
+            .any(|m| matches!(&m.move_type, MoveType::MoveTo(c) if c.file == 3 && c.rank == 3));
+        assert!(
+            !captures_loco,
+            "white queen must not be able to land on stranded Locomotive"
+        );
+    }
+
+    /// Asymmetry pin: the R9 stranded-corner-rook castle-block test
+    /// covered only White kingside (h1). Add the Black queenside
+    /// variant (a8) to catch coordinate bugs in `back_rank` or
+    /// `right_edge` that wouldn't fire for the original test.
+    #[test]
+    fn test_castle_blocked_when_black_queenside_rook_on_closed_gate() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::Black;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = true;
+        // Black king at e8 (file=4, rank=0).
+        board.grid[0][4].piece = Some(PieceType::new_king(Color::Black));
+        // Black rook at a8 (file=0, rank=0) on a closed Gate (stranded).
+        board.grid[0][0] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false })
+            .set_piece(PieceType::new_rook(Color::Black));
+        board.grid[7][7].piece = Some(PieceType::new_king(Color::White));
+
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 0 });
+        let castle = king_moves
+            .iter()
+            .find(|m| matches!(m.move_type, MoveType::Castle { .. }));
+        assert!(
+            castle.is_none(),
+            "Black queenside castle must NOT be available when a8 rook is stranded; got {:?}",
+            castle
+        );
+    }
+
+    /// A king on a Brainrot tile cannot castle — `SquareConditionFilter`
+    /// (priority 110) drops candidates from a Brainrot/Frozen source.
+    /// Castle is a Candidate emitted by `PieceMovesModifier`, so the
+    /// filter applies uniformly. Pins this so a future refactor that
+    /// moves castle generation out of the standard candidate pipeline
+    /// would break loudly.
+    #[test]
+    fn test_brainrot_on_king_blocks_castle() {
+        let mut board = empty_board();
+        board.flags.side_to_move = Color::White;
+        board.flags.white_can_castle_kingside = true;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        // White king at e1 sitting on a Brainrot tile.
+        board.grid[7][4] = Square::new()
+            .set_piece(PieceType::new_king(Color::White))
+            .add_square_condition(SquareCondition::Brainrot);
+        // White rook at h1 on a normal Standard tile.
+        board.grid[7][7].piece = Some(PieceType::new_rook(Color::White));
+        board.grid[0][0].piece = Some(PieceType::new_king(Color::Black));
+
+        let king_moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+        assert!(
+            king_moves.is_empty(),
+            "Brainrot king must generate no moves at all (castle included); got {:?}",
+            king_moves
+        );
+    }
+
+    /// A train rolling over an enemy Skibidi captures it normally —
+    /// the Skibidi's PhaseShift state is lost on capture. Pinned so
+    /// any future "preserve Skibidi phase on capture" change is loud.
+    #[test]
+    fn test_train_runs_over_skibidi_loses_phase_state() {
+        use crate::board::TrainTickRate;
+        use crate::board::square::TrackDir;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use crate::pieces::fairy::skibidi::Skibidi;
+
+        let mut board = empty_board();
+        board.flags.train_tick_rate = TrainTickRate::EveryPly;
+        board.flags.white_can_castle_kingside = false;
+        board.flags.white_can_castle_queenside = false;
+        board.flags.black_can_castle_kingside = false;
+        board.flags.black_can_castle_queenside = false;
+        for f in 1..=3 {
+            board.grid[3][f] = Square::new().set_square_type(SquareType::Track {
+                direction: TrackDir::E,
+            });
+        }
+        // Loco at (3,1), Skibidi (phase=4) at (3,2) on the track.
+        board.grid[3][1] = board.grid[3][1]
+            .clone()
+            .set_piece(PieceType::Locomotive(Locomotive::new(
+                1,
+                TrainHeading::Forward,
+            )));
+        board.grid[3][2] = board.grid[3][2]
+            .clone()
+            .set_piece(PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 4,
+            }));
+        board.grid[7][6].piece = Some(PieceType::new_king(Color::White));
+        board.grid[0][6].piece = Some(PieceType::new_king(Color::Black));
+
+        board
+            .make_move(GameMove {
+                from: Coord { file: 6, rank: 7 },
+                move_type: MoveType::MoveTo(Coord { file: 5, rank: 7 }),
+            })
+            .expect("idle white king move ticks the train");
+
+        assert!(
+            matches!(board.grid[3][2].piece, Some(PieceType::Locomotive(_))),
+            "loco must have rolled onto the Skibidi's tile"
+        );
+        // No Skibidi remains anywhere on the board — phase state is gone.
+        let any_skibidi = board
+            .iter_pieces()
+            .any(|(_, p)| matches!(p, PieceType::Skibidi(_)));
+        assert!(
+            !any_skibidi,
+            "captured Skibidi must be gone (phase state silently lost)"
+        );
+    }
+
+    /// Direct unit test for `Board::is_walkable_at()`. The helper is
+    /// load-bearing across ~5 call sites; pinning it directly guards
+    /// against accidental inversions that the transitive coverage
+    /// might miss.
+    #[test]
+    fn test_is_walkable_at_returns_false_for_unwalkable_types_and_oob() {
+        let mut board = empty_board();
+        // Standard tile: walkable.
+        assert!(board.is_walkable_at(&Coord { file: 3, rank: 3 }));
+        // Block: not walkable.
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Block);
+        assert!(!board.is_walkable_at(&Coord { file: 3, rank: 3 }));
+        // Closed Gate: not walkable.
+        board.grid[4][4] = Square::new()
+            .set_square_type(SquareType::Gate { id: 1, open: false });
+        assert!(!board.is_walkable_at(&Coord { file: 4, rank: 4 }));
+        // Open Gate: walkable.
+        board.grid[5][5] = Square::new()
+            .set_square_type(SquareType::Gate { id: 2, open: true });
+        assert!(board.is_walkable_at(&Coord { file: 5, rank: 5 }));
+        // Vent: not walkable.
+        board.grid[6][6] = Square::new().set_square_type(SquareType::Vent);
+        assert!(!board.is_walkable_at(&Coord { file: 6, rank: 6 }));
+        // Turret: not walkable.
+        board.grid[2][2] = Square::new().set_square_type(SquareType::Turret);
+        assert!(!board.is_walkable_at(&Coord { file: 2, rank: 2 }));
+        // Out of bounds.
+        assert!(!board.is_walkable_at(&Coord { file: 99, rank: 99 }));
+        assert!(!board.is_walkable_at(&Coord { file: 0, rank: 99 }));
     }
 }

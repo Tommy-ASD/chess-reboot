@@ -42,8 +42,7 @@ impl Board {
 
         // Step 2: collect every Skibidi's coord + current phase.
         let mut skibidis: Vec<(Coord, u8)> = self
-            .all_pieces()
-            .into_iter()
+            .iter_pieces()
             .filter_map(|(coord, piece)| match piece {
                 PieceType::Skibidi(sk) => Some((coord, sk.phase)),
                 _ => None,

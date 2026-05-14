@@ -8,6 +8,22 @@ use crate::{
     pieces::{Color, piecetype::PieceType},
 };
 
+/// Castle geometry: `(king_target_file, rook_target_file)` for a
+/// given `CastleSide`. Hardcoded to 8-wide standard-chess
+/// conventions; gate on `width >= 8` at move-gen time (see
+/// `king::castle_moves`). The rook's SOURCE file depends on width
+/// (right_edge for kingside, 0 for queenside) and is computed
+/// at the call site of `relocate_pieces`.
+///
+/// Centralizing this here means a future Chess960 variant or
+/// non-8-wide castle scheme only touches one site instead of four.
+pub(crate) fn castle_target_files(side: CastleSide) -> (u8, u8) {
+    match side {
+        CastleSide::Kingside => (6, 5),
+        CastleSide::Queenside => (2, 3),
+    }
+}
+
 impl Board {
     /// Attempts to execute a move on the board.
     /// Returns Ok(()) if successful, Err(MoveError) if illegal. The error
@@ -30,9 +46,15 @@ impl Board {
     /// caller (e.g. `legal_moves`) is responsible for having generated
     /// the move from `get_moves` first; internal invariants are still
     /// verified and become `Err` rather than `panic!`.
+    ///
+    /// **Plan 10 step 10:** between phase 1 (relocate) and phase 2
+    /// (piece post-effects), the capture stack runs for every piece
+    /// that was captured by this move. Handlers return `BoardOp`s
+    /// which apply before phase 2 fires.
     pub fn make_move_unchecked(&mut self, game_move: GameMove) -> Result<(), String> {
         let board_before = self.clone();
         self.relocate_pieces(&game_move)?;
+        self.fire_capture_stack(&board_before, &game_move);
         let ctx = PostMoveCtx {
             before_state: &board_before,
             game_move: &game_move,
@@ -42,23 +64,58 @@ impl Board {
         Ok(())
     }
 
-    /// Apply a move's piece-relocation phase only — no environment
-    /// reactions (no train tick). Used by `validate_move` so king-safety
-    /// is evaluated on the player-move-only state, before any train tick
-    /// could roll over the mover's king (which would otherwise make
-    /// `WouldLeaveKingInCheck` un-detectable).
+    /// Apply a move's piece-relocation phase + capture stack + piece
+    /// post-effects, but skip environment reactions (no train tick, no
+    /// brainrot recalc beyond what post-effects compute). Used by
+    /// `validate_move` so king-safety is evaluated on the player-move-
+    /// only state, before any train tick could roll over the mover's
+    /// king.
+    ///
+    /// **Critical:** the capture stack runs here. Without it, validation
+    /// would see a different post-move board than real `make_move`, and
+    /// any `BoardOp::PlacePiece` produced by a capture handler (e.g.
+    /// `GoblinDropVictimCapture` dropping the kidnap victim onto the
+    /// captor's origin) would be invisible to king-safety — leading to
+    /// false `WouldLeaveKingInCheck` rejections when the dropped piece
+    /// would have blocked an enemy slider's ray.
     pub(crate) fn apply_move_for_validation(
         &mut self,
         game_move: GameMove,
     ) -> Result<(), String> {
         let board_before = self.clone();
         self.relocate_pieces(&game_move)?;
+        self.fire_capture_stack(&board_before, &game_move);
         let ctx = PostMoveCtx {
             before_state: &board_before,
             game_move: &game_move,
         };
         self.apply_piece_post_effects(&ctx)?;
         Ok(())
+    }
+
+    /// Plan 10 step 10: fire capture-stack handlers for any piece this
+    /// move just captured. Runs on the post-relocate board so handlers
+    /// see the empty captor-origin square (Goblin drop-victim depends
+    /// on this). Shared between `make_move_unchecked` (real apply) and
+    /// `apply_move_for_validation` (hypothetical) so the two paths
+    /// produce the same intermediate board state.
+    fn fire_capture_stack(&mut self, board_before: &Board, game_move: &GameMove) {
+        let captures = capture_targets(board_before, game_move);
+        for cap in captures {
+            let event = crate::movement::stack::capture::ResolutionEvent::Capture {
+                captor_coord: cap.captor_coord,
+                captor_origin: cap.captor_origin,
+                captor: cap.captor,
+                victim_coord: cap.victim_coord,
+                victim: cap.victim,
+                move_type: game_move.move_type.clone(),
+            };
+            let ops = crate::movement::stack::capture::default_capture_stack()
+                .resolve_capture(self, &event);
+            for op in ops {
+                op.apply(self);
+            }
+        }
     }
 
     /// Phase 1: physically move pieces around. No piece-level post hooks,
@@ -165,9 +222,10 @@ impl Board {
                 // not necessarily file 7 — keep this in sync with
                 // `king.rs::castle_moves`.
                 let right_edge = self.width().saturating_sub(1);
-                let (king_target_file, rook_source_file, rook_target_file) = match side {
-                    CastleSide::Kingside => (6u8, right_edge, 5u8),
-                    CastleSide::Queenside => (2u8, 0u8, 3u8),
+                let (king_target_file, rook_target_file) = castle_target_files(*side);
+                let rook_source_file = match side {
+                    CastleSide::Kingside => right_edge,
+                    CastleSide::Queenside => 0,
                 };
                 let king_target = Coord {
                     file: king_target_file,
@@ -324,6 +382,17 @@ impl Board {
 
                 match move_type.as_ref() {
                     MoveType::MoveTo(target) => {
+                        // Passenger exiting the carrier can capture a
+                        // corner rook (the overwrite-anything-on-target
+                        // semantics below). Mirror the top-level MoveTo
+                        // arm and revoke castle rights before clobbering
+                        // — otherwise a Bus dropping a knight onto a1
+                        // would leave white queenside still settable.
+                        if let Some(captured) =
+                            self.get_square_at(target).and_then(|s| s.piece.clone())
+                        {
+                            self.maybe_clear_castle_on_rook_capture(target, &captured);
+                        }
                         let to_sq = self
                             .get_square_mut(target)
                             .ok_or_else(|| format!("No square at {:?}", target))?;
@@ -407,7 +476,7 @@ impl Board {
     /// that capturing a rook on h1/a1/h8/a8 cancels future castling on
     /// that side. Plan 03's `post_move_effects` covers rook *moves*; this
     /// covers the case where the rook never moves but is captured in place.
-    fn maybe_clear_castle_on_rook_capture(
+    pub(crate) fn maybe_clear_castle_on_rook_capture(
         &mut self,
         captured_square: &Coord,
         captured_piece: &PieceType,
@@ -499,10 +568,7 @@ impl Board {
                 Some(piece)
             }
             MoveType::Castle { side } => {
-                let king_file = match side {
-                    CastleSide::Kingside => 6,
-                    CastleSide::Queenside => 2,
-                };
+                let (king_file, _) = castle_target_files(*side);
                 let target = Coord {
                     file: king_file,
                     rank: ctx.game_move.from.rank,
@@ -577,27 +643,63 @@ impl Board {
     }
 
     /// Phase 3 (skipped by validate): board-level auto-mechanics that
-    /// run after the move + piece reactions settle. Currently just the
-    /// train tick and the side-to-move flip. Validate's clone deliberately
-    /// stops before this phase so the player's chosen move can be
-    /// king-safety-checked without an in-progress train tick removing
-    /// the king from the board mid-evaluation.
-    fn apply_environment_reactions(&mut self, _ctx: &PostMoveCtx<'_>) {
-        // Plan 09: trains advance one step per tick-gate opening.
-        let ticked = self.maybe_advance_trains();
+    /// run after the move + piece reactions settle. Validate's clone
+    /// deliberately stops before this phase so the player's chosen
+    /// move can be king-safety-checked without an in-progress train
+    /// tick removing the king from the board mid-evaluation.
+    ///
+    /// **Plan 10 step 11:** the inline train-tick + brainrot-recalc
+    /// logic now flows through `EnvReactionRegistry`. Each
+    /// auto-mechanic is a handler registered against an `EnvPhase`.
+    /// Future pieces (Magnet, Bell-Ringer, Boy, Marcher, NPC) plug
+    /// in via the same trait without re-touching this method.
+    fn apply_environment_reactions(&mut self, ctx: &PostMoveCtx<'_>) {
+        use crate::movement::env_reactions::default_registry;
+        self.apply_environment_reactions_with(ctx, default_registry());
+    }
 
-        // A train tick can capture pieces — most importantly a
-        // Skibidi sitting on a track tile. The brainrot map computed
-        // in phase 2 is keyed on Skibidi positions, so re-run the
-        // recalc *if and only if* the tick actually fired. Most
-        // moves don't tick (`EveryFullTurn` is the default rate), so
-        // gating avoids a wasted O(N²) recalc per move.
-        if ticked {
-            self.recalc_brainrot();
-        }
+    /// Same body as `apply_environment_reactions` but with an injected
+    /// registry. The default-flow caller passes `default_registry()`;
+    /// tests can pass a custom registry containing probe handlers to
+    /// pin ordering invariants that aren't testable through the
+    /// `OnceLock`-backed default. Round-4 audit added this seam to
+    /// sharpen `test_last_move_written_before_post_mover_phase` —
+    /// otherwise the test couldn't distinguish "write happens before
+    /// PostMover" from "write happens after PostMover" since both
+    /// orderings leave `last_move` populated by the time
+    /// `make_move` returns.
+    pub(crate) fn apply_environment_reactions_with(
+        &mut self,
+        ctx: &PostMoveCtx<'_>,
+        reg: &crate::movement::env_reactions::EnvReactionRegistry,
+    ) {
+        use crate::movement::env_reactions::{EnvPhase, EnvReactionCtx};
 
-        // Plan 01: flip turn at the very end so the train tick (and any
-        // future environment reactions) still see the mover as the
+        let mut env_ctx = EnvReactionCtx::default();
+
+        // Round-3 audit fix: stamp `last_move` BEFORE the PostMover
+        // phase. Auto-action handlers at PostMover (Boy Who Followed
+        // Geese, future "react to the just-applied move" pieces) read
+        // `BoardFlags.last_move` to know what just happened. With the
+        // write deferred to after the side flip, PostMover handlers
+        // would see a stale `last_move` from the PREVIOUS turn.
+        //
+        // `compute_last_move` is pure (read-only on `ctx.before_state`
+        // + the move payload), so moving the write earlier doesn't
+        // depend on later mutation.
+        self.flags.last_move = compute_last_move(ctx.before_state, ctx.game_move);
+
+        // PostMover fires for handlers that want to react to the
+        // just-applied move on the mover's side (Boy step toward the
+        // enemy that just moved, Marcher march, NPC advance). At this
+        // point `side_to_move` is still the mover; the flip happens
+        // after the tick.
+        reg.run_phase(self, EnvPhase::PostMover, false, &mut env_ctx);
+        reg.run_phase(self, EnvPhase::TickGate, false, &mut env_ctx);
+        reg.run_phase(self, EnvPhase::PostTick, false, &mut env_ctx);
+
+        // Plan 01: flip turn after env reactions so the train tick
+        // and other auto-mechanics still see the mover as the
         // side-to-move if they need to.
         //
         // `Color::Neutral.opposite() == Color::Neutral`, so a Neutral
@@ -621,7 +723,134 @@ impl Board {
             self.flags.side_to_move = crate::pieces::Color::White;
         }
         self.flags.side_to_move = self.flags.side_to_move.opposite();
+
+        // PreMover fires AFTER the side flip — "start of opponent's
+        // turn" handlers (Magnet pull, Bell-Ringer toll) want to see
+        // the now-current side. They also see the just-written
+        // `last_move` from this turn. None registered in v1.
+        reg.run_phase(self, EnvPhase::PreMover, false, &mut env_ctx);
     }
+}
+
+/// Build a `LastMove` snapshot from the move that just applied. Pulls
+/// `mover_color` from the pre-move board's perspective (honouring
+/// `effective_mover_color` for PieceInCarrier passengers), the
+/// captured piece's symbol from the pre-move occupant of the
+/// captured square, and the primary piece's symbol from the move
+/// payload (for Promotion) or the source piece (otherwise).
+///
+/// **Read-only:** intentionally takes `&Board` for `before` only,
+/// not the post-relocation/post-tick board. The Promotion primary
+/// symbol is derived from `PromotionTarget` directly so that a
+/// train-tick captuing the freshly-promoted piece doesn't corrupt
+/// the recorded symbol.
+fn compute_last_move(
+    before: &Board,
+    game_move: &GameMove,
+) -> Option<crate::board::LastMove> {
+    use crate::board::LastMoveKind;
+
+    let from = game_move.from.clone();
+    let source_piece = before.get_square_at(&from)?.piece.clone()?;
+    let (mover_color, _) = before.effective_mover_color(&source_piece, game_move);
+
+    // `to` is the destination most consumers will read as the move's
+    // landing square. For Castle, expose the king's destination so a
+    // Mirror-style piece sees a meaningful from→to delta. For
+    // ThrowSwitch / PhaseShift / nested PieceInCarrier{!MoveTo} there
+    // is no single piece-landing square; surface `None`.
+    let to = match &game_move.move_type {
+        MoveType::Castle { side } => {
+            let (king_file, _) = castle_target_files(*side);
+            Some(Coord {
+                file: king_file,
+                rank: game_move.from.rank,
+            })
+        }
+        _ => piece_landing_square(game_move).cloned(),
+    };
+
+    // Captured: pre-move occupant of the captured square. For en
+    // passant the captured pawn lives at a different coord than `to`.
+    // The mover-color filter rejects friendly-fire pseudo-captures.
+    //
+    // **Carrier-as-victim:** a top-level `MoveTo` landing on an
+    // opposite-coloured Bus IS a real capture (the bus dies); a
+    // `MoveIntoCarrier` landing on a friendly / Neutral carrier is
+    // boarding-not-capture. The distinction is the OUTER MoveType,
+    // not whether the victim is a carrier. Excluding by carrier-shape
+    // alone would silently drop legitimate Bus captures from
+    // `LastMove`, and Mirror / Echo / Combo-Echo would treat the
+    // capture as a non-capture.
+    let captured_coord = match &game_move.move_type {
+        MoveType::EnPassant { captured, .. } => Some(captured.clone()),
+        _ => to.clone(),
+    };
+    let boarding_not_capture = match &game_move.move_type {
+        MoveType::MoveIntoCarrier(_) => true,
+        MoveType::PieceInCarrier { move_type, .. } => {
+            matches!(move_type.as_ref(), MoveType::MoveIntoCarrier(_))
+        }
+        _ => false,
+    };
+    let captured_symbol = if boarding_not_capture {
+        None
+    } else {
+        captured_coord
+            .as_ref()
+            .and_then(|c| before.get_square_at(c))
+            .and_then(|sq| sq.piece.as_ref())
+            .filter(|p| p.get_color() != mover_color)
+            .map(|p| p.symbol())
+    };
+
+    // Primary piece: post-promotion if Promotion, else the source
+    // piece's symbol.
+    //
+    // **Why not read from `after`:** the round-3 audit caught a bug
+    // where reading `after.get_square_at(target).piece` returns the
+    // LOCOMOTIVE that ticked onto the promotion square between
+    // phases 2 and 3. The `unwrap_or_else` fallback never fires
+    // (Some(loco.symbol()) is Some, not None). `primary_symbol`
+    // becomes the loco's verbose symbol — corrupting both
+    // `LastMove` consumers and the FEN round-trip (the loco symbol
+    // contains commas that confuse the `lm=` parser).
+    //
+    // Derive directly from the move payload instead: `into` +
+    // `mover_color` give a deterministic answer that doesn't depend
+    // on subsequent env reactions.
+    let primary_symbol = match &game_move.move_type {
+        MoveType::Promotion { into, .. } => {
+            let promoted = match into {
+                PromotionTarget::Queen => PieceType::new_queen(mover_color),
+                PromotionTarget::Rook => PieceType::new_rook(mover_color),
+                PromotionTarget::Bishop => PieceType::new_bishop(mover_color),
+                PromotionTarget::Knight => PieceType::new_knight(mover_color),
+            };
+            promoted.symbol()
+        }
+        _ => source_piece.symbol(),
+    };
+
+    let kind = match &game_move.move_type {
+        MoveType::MoveTo(_) => LastMoveKind::Move,
+        MoveType::MoveIntoCarrier(_) => LastMoveKind::MoveIntoCarrier,
+        MoveType::Promotion { .. } => LastMoveKind::Promote,
+        MoveType::Castle { .. } => LastMoveKind::Castle,
+        MoveType::EnPassant { .. } => LastMoveKind::EnPassant,
+        MoveType::PhaseShift => LastMoveKind::PhaseShift,
+        MoveType::ThrowSwitch { .. } => LastMoveKind::ThrowSwitch,
+        MoveType::PieceInCarrier { .. } => LastMoveKind::PieceInCarrier,
+    };
+
+    Some(crate::board::LastMove {
+        mover_color,
+        from,
+        to,
+        captured_symbol,
+        primary_symbol,
+        kind,
+    })
 }
 
 /// Bundle of inputs flowing through the post-move-effect phases. Lives
@@ -633,6 +862,109 @@ impl Board {
 pub(crate) struct PostMoveCtx<'a> {
     pub before_state: &'a Board,
     pub game_move: &'a GameMove,
+}
+
+/// Plan 10 step 10 helper: identify the captures this move produced.
+/// Read from `before` since the post-relocation board has already
+/// cleared the victim's square.
+///
+/// Field semantics (mirroring `ResolutionEvent::Capture`):
+///   - `captor_coord`: the captor's POST-MOVE position. Target for
+///     MoveTo / Promotion / EnPassant. Inner MoveTo's target for
+///     PIC{MoveTo}.
+///   - `captor_origin`: pre-move position on the outer board, or
+///     `None` for PIC (passenger emerged from inside a carrier, no
+///     outer-board origin).
+///
+/// Covers four reachable capture pathways:
+///   - `MoveType::MoveTo` / `Promotion` — direct capture at target.
+///   - `MoveType::EnPassant` — capture at `captured` coord.
+///   - `MoveType::PieceInCarrier { inner: MoveTo(target) }` —
+///     passenger exit-and-capture.
+///
+/// Carrier-boarding enemy-passenger captures (the inline `passengers.
+/// retain` in the `MoveIntoCarrier` arm) are still not surfaced.
+#[derive(Debug)]
+pub(crate) struct CapturePair {
+    pub captor_coord: Coord,
+    pub captor_origin: Option<Coord>,
+    pub captor: PieceType,
+    pub victim_coord: Coord,
+    pub victim: PieceType,
+}
+
+pub(crate) fn capture_targets(before: &Board, game_move: &GameMove) -> Vec<CapturePair> {
+    let from = game_move.from.clone();
+    let Some(source_piece) = before
+        .get_square_at(&from)
+        .and_then(|sq| sq.piece.clone())
+    else {
+        return Vec::new();
+    };
+
+    let (captor, captor_coord, captor_origin, victim_coord, victim_lookup_coord) =
+        match &game_move.move_type {
+            MoveType::MoveTo(target) | MoveType::Promotion { target, .. } => (
+                source_piece,
+                target.clone(),
+                Some(from.clone()),
+                target.clone(),
+                target.clone(),
+            ),
+            MoveType::EnPassant { target, captured } => (
+                source_piece,
+                target.clone(),
+                Some(from.clone()),
+                captured.clone(),
+                captured.clone(),
+            ),
+            // PIC{MoveTo}: passenger exits the carrier and lands on
+            // `target`. captor_coord is `target` (the passenger's
+            // post-move position); captor_origin is None because the
+            // passenger had no outer-board origin tile.
+            MoveType::PieceInCarrier {
+                piece_index,
+                move_type,
+            } => {
+                let MoveType::MoveTo(target) = move_type.as_ref() else {
+                    // PIC{MoveIntoCarrier} / PIC{anything else} is not a
+                    // capture against an outer-board square.
+                    return Vec::new();
+                };
+                let Some(passenger) = source_piece
+                    .passengers()
+                    .and_then(|ps| ps.get(*piece_index as usize))
+                    .cloned()
+                else {
+                    return Vec::new();
+                };
+                (passenger, target.clone(), None, target.clone(), target.clone())
+            }
+            // No capture for these move types.
+            _ => return Vec::new(),
+        };
+
+    let Some(victim) = before
+        .get_square_at(&victim_lookup_coord)
+        .and_then(|sq| sq.piece.clone())
+    else {
+        return Vec::new();
+    };
+
+    // Friendly-fire isn't a capture in the chess sense — and would
+    // have been rejected during move generation anyway. Defence-in-
+    // depth.
+    if victim.get_color() == captor.get_color() {
+        return Vec::new();
+    }
+
+    vec![CapturePair {
+        captor_coord,
+        captor_origin,
+        captor,
+        victim_coord,
+        victim,
+    }]
 }
 
 /// Plan 08 step 4 helper: every board-square where a piece settled as a
@@ -653,10 +985,7 @@ fn collect_landings(game_move: &GameMove) -> Vec<Coord> {
         MoveType::EnPassant { target, .. } => vec![target.clone()],
         MoveType::Castle { side } => {
             let r = game_move.from.rank;
-            let (king_file, rook_file) = match side {
-                CastleSide::Kingside => (6u8, 5u8),
-                CastleSide::Queenside => (2u8, 3u8),
-            };
+            let (king_file, rook_file) = castle_target_files(*side);
             vec![
                 Coord {
                     file: king_file,
