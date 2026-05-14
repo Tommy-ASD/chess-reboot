@@ -275,6 +275,7 @@ const KNOWN_SQUARE_TYPES = new Set<SquareType>([
   "STANDARD",
   "TURRET",
   "VENT",
+  "BLOCK",
   "SWITCH",
   "JUNCTION",
   "GATE",

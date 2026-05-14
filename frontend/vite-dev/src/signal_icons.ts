@@ -53,6 +53,23 @@ const VENT_SVG = `<svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" x
   <rect x="5" y="15" width="14" height="1.8" rx="0.5" fill="currentColor"/>
 </svg>`;
 
+/// Plan 12 Block tile — brick wall pattern. Three rows of bricks with
+/// the middle row offset by half a brick so the courses interlock the
+/// way real brickwork does. Mortar is implicit (the gaps between
+/// rectangles); brick fill is `currentColor` so the tile's accent
+/// colour drives the look.
+const BLOCK_SVG = `<svg viewBox="0 0 24 24" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3" y="4"  width="6.5" height="5" fill="currentColor"/>
+  <rect x="10.5" y="4"  width="6.5" height="5" fill="currentColor"/>
+  <rect x="18" y="4"  width="3" height="5" fill="currentColor"/>
+  <rect x="3" y="10" width="3" height="5" fill="currentColor"/>
+  <rect x="7" y="10" width="6.5" height="5" fill="currentColor"/>
+  <rect x="14.5" y="10" width="6.5" height="5" fill="currentColor"/>
+  <rect x="3" y="16" width="6.5" height="5" fill="currentColor"/>
+  <rect x="10.5" y="16" width="6.5" height="5" fill="currentColor"/>
+  <rect x="18" y="16" width="3" height="5" fill="currentColor"/>
+</svg>`;
+
 /// Plan 09 track tile, drawn minecart-style: the shape (straight,
 /// curve, T, or X) is computed from which cardinal neighbors are
 /// themselves track / junction tiles. Rails extend all the way to the
@@ -350,6 +367,8 @@ export function squareIconSvg(
       return TURRET_SVG;
     case "VENT":
       return VENT_SVG;
+    case "BLOCK":
+      return BLOCK_SVG;
     case "SWITCH":
       return SWITCH_SVG;
     case "JUNCTION":
@@ -383,6 +402,8 @@ export function squareTypeIconByType(type: SquareType): string | null {
       return TURRET_SVG;
     case "VENT":
       return VENT_SVG;
+    case "BLOCK":
+      return BLOCK_SVG;
     case "SWITCH":
       return SWITCH_SVG;
     case "JUNCTION":

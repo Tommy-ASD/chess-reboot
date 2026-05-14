@@ -467,7 +467,10 @@ pub fn square_to_fen(square: &Square) -> String {
         // TARGETS → OPEN → FIRES so the encoder is deterministic; the
         // parser is order-agnostic (two-pass accumulator below).
         match &square.square_type {
-            SquareType::Standard | SquareType::Turret | SquareType::Vent => {}
+            SquareType::Standard
+            | SquareType::Turret
+            | SquareType::Vent
+            | SquareType::Block => {}
             SquareType::Switch { targets } => {
                 parts.push(format!("TARGETS={}", format_id_list(targets)));
             }
@@ -747,6 +750,7 @@ pub fn fen_to_square(fen: &str) -> Square {
             Some("STANDARD") => SquareType::Standard,
             Some("TURRET") => SquareType::Turret,
             Some("VENT") => SquareType::Vent,
+            Some("BLOCK") => SquareType::Block,
             Some("SWITCH") => SquareType::Switch {
                 targets: targets.unwrap_or_default(),
             },

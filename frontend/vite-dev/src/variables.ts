@@ -8,6 +8,10 @@ export type SquareType =
     | "STANDARD"
     | "TURRET"
     | "VENT"
+    /// Plan 12: impassable terrain. No piece may stand on or slide
+    /// through a BLOCK square. Payload-free; the simplest non-walkable
+    /// type.
+    | "BLOCK"
     | "SWITCH"
     | "JUNCTION"
     | "GATE"

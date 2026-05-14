@@ -103,6 +103,7 @@ const SQUARE_TYPES: SquareType[] = [
   "STANDARD",
   "VENT",
   "TURRET",
+  "BLOCK",
   "SWITCH",
   "JUNCTION",
   "GATE",
@@ -116,6 +117,7 @@ const SQUARE_TYPES: SquareType[] = [
 const TYPE_CLASS: Record<Exclude<SquareType, "STANDARD">, string> = {
   VENT: "vent",
   TURRET: "turret",
+  BLOCK: "block",
   SWITCH: "switch",
   JUNCTION: "junction",
   GATE: "gate",
@@ -129,6 +131,7 @@ const PRESETS: { name: string; fen: string }[] = [
   { name: "Standard chess", fen: STARTING_FEN },
   { name: "Goblin test", fen: "(P=g(H=0-0))nbqkbn(P=g(H=7-0))/pppppppp/8/8/8/8/PPPPPPPP/(P=G(H=0-7))NBQKBN(P=G(H=7-7)) w KQkq -" },
   { name: "Vent test", fen: "(T=VENT)7/8/8/8/8/8/8/8 w - -" },
+  { name: "Block test", fen: "(T=BLOCK)7/8/8/8/8/8/8/8 w - -" },
   { name: "Frozen test", fen: "(C=FROZEN)7/8/8/8/8/8/8/8 w - -" },
   {
     name: "Signal substrate test",
@@ -1046,6 +1049,7 @@ const TYPE_ACCENT: Record<SquareType, string> = {
   STANDARD: "rgba(180, 180, 180, 0.7)",
   TURRET:   "rgba(180, 90, 30, 0.95)",
   VENT:     "rgba(60, 60, 60, 0.85)",
+  BLOCK:    "rgba(90, 70, 50, 0.95)",
   SWITCH:   "rgba(255, 196, 0, 0.95)",
   JUNCTION: "rgba(120, 200, 255, 0.95)",
   GATE:     "rgba(220, 80, 80, 0.95)",

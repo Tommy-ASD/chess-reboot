@@ -44,6 +44,9 @@ plan you want to act on.
   detection, three-phase commit, train-tick rate flags (`tr=full|ply|Nply`).
   v1 explicitly defers: per-piece collision hooks, carriage detaching,
   heading reversal, boarding-from-adjacent.
+- **Plan 12 — Block square**: payload-free, semantics-free impassable
+  tile (`T=BLOCK`). `is_walkable()` returns `false`; FEN round-trips;
+  frontend brush + brick-pattern SVG + `.type-block` CSS shipped.
 
 ## What's still missing
 
@@ -65,7 +68,12 @@ In rough priority order:
    train threats, king-safety filter) into one ordered registry.
    Lands incrementally; each migration step is a working commit.
    → [10-movement-stack.md](10-movement-stack.md)
-6. **Trains v2** — the deferred items from plan 09 (collision-hook
+6. **Duck Chess + variant infrastructure** — first true rule-variant,
+   plus the per-position `variants` flag future variants hook into.
+   Independent of plan 10; conditionals migrate to modifiers when
+   plan 10 absorbs them.
+   → [11-duck-chess.md](11-duck-chess.md)
+7. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
@@ -73,7 +81,10 @@ In rough priority order:
 
 Plans **04 / 05 / 06 / 07** can proceed in parallel. Plan **10** is the
 biggest structural piece left and unlocks cleaner future-piece work.
-Trains v2 (plan 09's deferred items) is the natural follow-up to plan 10.
+Plan **11** (Duck Chess + variant infra) is independent of plan 10 —
+the chokepoint conditionals it adds collapse into modifiers when plan
+10 reaches step 8. Trains v2 (plan 09's deferred items) is the natural
+follow-up to plan 10.
 
 ## Open questions
 
@@ -107,7 +118,7 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 | Key | Meaning | Example |
 |-----|---------|---------|
 | `P`  | Piece occupying the square | `P=K`, `P=BUS(P=(K))` |
-| `T`  | Square type (default `STANDARD`) | `T=SWITCH`, `T=PLATE`, `T=GATE`, `T=JUNCTION`, `T=TRACK`, `T=VENT`, `T=TURRET`, `T=STANDARD` |
+| `T`  | Square type (default `STANDARD`) | `T=SWITCH`, `T=PLATE`, `T=GATE`, `T=JUNCTION`, `T=TRACK`, `T=VENT`, `T=TURRET`, `T=BLOCK`, `T=STANDARD` |
 | `C`  | Condition (repeatable) | `C=FROZEN`, `C=BRAINROT` |
 | `ID` | Signal ID for Junction/Gate/Switch/Plate (default `0`) | `ID=3` |
 | `STATE` | Current branch index of a Junction (default `0`) | `STATE=0` |
@@ -116,6 +127,7 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 | `OPEN` | Gate state (default open; `OPEN=garbage` parses as closed) | `OPEN=1` |
 | `FIRES` | Pressure plate trigger (default `ANY`) | `FIRES=ANY`, `FIRES=W`, `FIRES=B`, `FIRES=N` |
 | `D`  | Track exit direction (default `E`) | `D=N`, `D=E`, `D=S`, `D=W` |
+| `DUCK` | Duck on this square (plan 11; value-less flag) | `(DUCK)` |
 
 ### Piece-payload keys (inside `P=...` for carriers)
 | Key | Meaning | Example |
@@ -134,6 +146,8 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 |-------|---------|---------|
 | `tr=full` / `tr=ply` / `tr=<n>ply` | Train tick rate | `tr=full`, `tr=2ply` |
 | `p=<n>` | Plies elapsed (for `EveryNPly` gate alignment) | `p=42` |
+| `variants=<id>,<id>,…` | Active rule variants (plan 11; default empty = standard chess) | `variants=duck_chess` |
+| `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11; default `piece`) | `duck_phase=placing` |
 
 Canonical implementer: `engine/src/board/fen.rs`. Frontend parser:
 `frontend/vite-dev/src/fen.ts`.

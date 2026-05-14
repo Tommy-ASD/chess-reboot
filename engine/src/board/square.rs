@@ -17,6 +17,12 @@ pub enum SquareType {
     Standard,
     Turret,
     Vent,
+    /// Impassable terrain. No piece may stand on or slide through a
+    /// `Block` square. No payload, no signals, no hooks — the simplest
+    /// possible non-walkable type. Invariant: `piece` is always `None`
+    /// on a `Block` square; the FEN parser is lenient but `relocate_
+    /// pieces` rejects any move whose destination is a `Block`.
+    Block,
     /// Player-thrown emitter. Stores the receiver IDs it fires when thrown.
     Switch { targets: Vec<SignalId> },
     /// Cycle-state receiver. Trains arriving here leave along
@@ -113,6 +119,7 @@ impl SquareType {
             SquareType::Standard => "STANDARD",
             SquareType::Turret => "TURRET",
             SquareType::Vent => "VENT",
+            SquareType::Block => "BLOCK",
             SquareType::Switch { .. } => "SWITCH",
             SquareType::Junction { .. } => "JUNCTION",
             SquareType::Gate { .. } => "GATE",
@@ -134,7 +141,7 @@ impl SquareType {
             | SquareType::PressurePlate { .. }
             | SquareType::Track { .. } => true,
             SquareType::Gate { open, .. } => *open,
-            SquareType::Turret | SquareType::Vent => false,
+            SquareType::Turret | SquareType::Vent | SquareType::Block => false,
         }
     }
 }

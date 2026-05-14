@@ -247,6 +247,7 @@ mod tests {
         assert!(SquareType::Standard.is_walkable());
         assert!(!SquareType::Turret.is_walkable());
         assert!(!SquareType::Vent.is_walkable());
+        assert!(!SquareType::Block.is_walkable());
         assert!(SquareType::Switch { targets: vec![] }.is_walkable());
         assert!(
             SquareType::Junction {
@@ -6040,5 +6041,197 @@ mod tests {
             }
             other => panic!("expected Goblin, got {other:?}"),
         }
+    }
+
+    // -------- Plan 12: Block square type --------
+
+    /// A Block in the rook's path terminates the ray. The intermediate
+    /// square before the Block remains reachable; the Block square and
+    /// everything past it (including a capturable enemy) is unreachable.
+    #[test]
+    fn test_block_blocks_glider_path() {
+        let mut board = empty_board();
+        // White rook on a1 = (file=0, rank=7). Block on a3 = (file=0,
+        // rank=5). Black pawn on a5 = (file=0, rank=3).
+        board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[5][0] = Square::new().set_square_type(SquareType::Block);
+        board.grid[3][0] = Square::new().set_piece(PieceType::new_pawn(Color::Black));
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 7 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(targets.contains(&(0, 6)), "a2 (one north) must be reachable");
+        assert!(!targets.contains(&(0, 5)), "rook must not land on Block at a3");
+        assert!(!targets.contains(&(0, 4)), "rook must not slide past Block to a4");
+        assert!(!targets.contains(&(0, 3)), "rook must not capture past a Block");
+    }
+
+    /// A Block square is not a legal knight landing.
+    #[test]
+    fn test_block_rejects_knight_landing() {
+        let mut board = empty_board();
+        // White knight on b1 = (file=1, rank=7). Block on c3 = (file=2,
+        // rank=5).
+        board.grid[7][1] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        board.grid[5][2] = Square::new().set_square_type(SquareType::Block);
+
+        let moves = board.get_moves(&Coord { file: 1, rank: 7 });
+        let targets: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) => Some((c.file, c.rank)),
+                _ => None,
+            })
+            .collect();
+        assert!(!targets.contains(&(2, 5)), "knight must not land on Block at c3");
+        // Sanity: the other L-targets are still available so we know the
+        // generator didn't bail entirely.
+        assert!(targets.contains(&(0, 5)), "a3 L-target still reachable");
+        assert!(targets.contains(&(3, 6)), "d2 L-target still reachable");
+    }
+
+    /// A Block in front of a pawn blocks both the single push and (when
+    /// it sits on the double-push square) the double push.
+    #[test]
+    fn test_block_rejects_pawn_push() {
+        // Case 1: Block directly in front of the pawn — no forward moves.
+        let mut board = empty_board();
+        // White pawn on a2 = (file=0, rank=6). Block on a3 = (file=0,
+        // rank=5).
+        board.grid[6][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[5][0] = Square::new().set_square_type(SquareType::Block);
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 6 });
+        let forwards: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) if c.file == 0 => Some(c.rank),
+                _ => None,
+            })
+            .collect();
+        assert!(forwards.is_empty(), "no forward moves with Block at a3; got {forwards:?}");
+
+        // Case 2: a3 clear, Block on a4 — single push legal, double push
+        // illegal.
+        let mut board = empty_board();
+        board.grid[6][0] = Square::new().set_piece(PieceType::new_pawn(Color::White));
+        board.grid[4][0] = Square::new().set_square_type(SquareType::Block);
+
+        let moves = board.get_moves(&Coord { file: 0, rank: 6 });
+        let forwards: Vec<_> = moves
+            .iter()
+            .filter_map(|m| match &m.move_type {
+                MoveType::MoveTo(c) if c.file == 0 => Some(c.rank),
+                _ => None,
+            })
+            .collect();
+        assert!(forwards.contains(&5), "single push to a3 must remain legal");
+        assert!(!forwards.contains(&4), "double push onto Block at a4 must be rejected");
+    }
+
+    /// `(T=BLOCK)` round-trips through FEN unchanged.
+    #[test]
+    fn test_block_fen_roundtrip() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new().set_square_type(SquareType::Block);
+
+        let fen = board_to_fen(&board);
+        // Block is the only non-Standard square on the board, so the FEN
+        // must contain the extended-square token exactly.
+        assert!(
+            fen.contains("(T=BLOCK)"),
+            "FEN should emit (T=BLOCK); got: {fen}"
+        );
+
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "Block square should round-trip via FEN");
+        assert_eq!(
+            board_to_fen(&board2),
+            fen,
+            "second serialization should be byte-identical"
+        );
+    }
+
+    /// A Block on the king's castling-traversal path blocks castling on
+    /// that side. Mirrors `test_castle_blocked_by_piece_in_path` —
+    /// any non-walkable terrain on the path is the same kind of blocker
+    /// as an occupied square.
+    #[test]
+    fn test_castle_blocked_by_block_on_path() {
+        let mut board = empty_board();
+        // White king e1 = (4, 7), white rook h1 = (7, 7), Block on g1 = (6, 7).
+        board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[7][6] = Square::new().set_square_type(SquareType::Block);
+
+        let moves = board.get_moves(&Coord { file: 4, rank: 7 });
+        let has_kingside_castle = moves.iter().any(|m| matches!(
+            &m.move_type,
+            MoveType::Castle { side: CastleSide::Kingside }
+        ));
+        assert!(
+            !has_kingside_castle,
+            "kingside castle must be blocked when g1 is a Block square"
+        );
+    }
+
+    /// A Block square that also carries a `SquareCondition` round-trips
+    /// through FEN unchanged. Conditions on a Block are inert (no piece
+    /// to freeze) but must serialize and re-parse without corruption.
+    #[test]
+    fn test_block_with_condition_fen_roundtrip() {
+        let mut board = empty_board();
+        board.grid[3][3] = Square::new()
+            .set_square_type(SquareType::Block)
+            .add_square_condition(SquareCondition::Frozen);
+
+        let fen = board_to_fen(&board);
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board, "Block + Frozen should round-trip via FEN");
+        assert_eq!(
+            board_to_fen(&board2),
+            fen,
+            "second serialization should be byte-identical"
+        );
+    }
+
+    /// `relocate_pieces` rejects a hand-crafted move whose destination is
+    /// a Block, even if a buggy move generator emitted it. Guards the
+    /// last-resort safety net at the engine boundary.
+    #[test]
+    fn test_relocate_pieces_rejects_block_destination() {
+        let mut board = empty_board();
+        // Rook on (0, 0); Block on (3, 0). A horizontal rook move that
+        // lands on the Block is geometrically straight but illegal.
+        board.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        board.grid[0][3] = Square::new().set_square_type(SquareType::Block);
+
+        let illegal = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 3, rank: 0 }),
+        };
+        let result = board.make_move(illegal);
+        assert!(
+            result.is_err(),
+            "move onto a Block square must be rejected"
+        );
+        // Rook unmoved, Block intact.
+        assert!(
+            matches!(&board.grid[0][0].piece, Some(PieceType::Rook(_))),
+            "rook must still be at its origin"
+        );
+        assert!(
+            matches!(board.grid[0][3].square_type, SquareType::Block),
+            "Block square must remain"
+        );
+        assert!(
+            board.grid[0][3].piece.is_none(),
+            "Block square must not have acquired a piece"
+        );
     }
 }
