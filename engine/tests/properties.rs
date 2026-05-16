@@ -341,8 +341,7 @@ proptest! {
         let f = board_to_fen(&b);
         // Re-parsing the engine's own output must also not panic.
         let _ = fen_to_board(&f);
-        // Reaching here = no panic for this input.
-        prop_assert!(true);
+        // Survival is the assertion — no panic for any fuzz_fen() input.
     }
 
     /// The four random-play invariants (Property 1–4) driven from a

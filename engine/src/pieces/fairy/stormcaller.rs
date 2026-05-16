@@ -142,14 +142,14 @@ mod tests {
     use crate::board::square::{Square, SquareCondition};
     use crate::board::{BoardFlags, TrainTickRate};
 
-    fn board8(side: Color) -> Board {
+    fn board8() -> Board {
         let grid = (0..8)
             .map(|_| (0..8).map(|_| Square::new()).collect())
             .collect();
         Board {
             grid,
             flags: BoardFlags {
-                side_to_move: side,
+                side_to_move: Color::White,
                 white_can_castle_kingside: false,
                 white_can_castle_queenside: false,
                 black_can_castle_kingside: false,
@@ -170,7 +170,7 @@ mod tests {
     /// of its 8 king-neighbours: 16 candidates.
     #[test]
     fn emits_step_and_place_for_each_neighbour() {
-        let b = board8(Color::White);
+        let b = board8();
         let s = Stormcaller::new(Color::White);
         let moves = s.initial_moves(&b, &cc(4, 4));
         let steps = moves
@@ -190,7 +190,7 @@ mod tests {
     /// (trapping it is the point).
     #[test]
     fn cannot_step_onto_enemy_but_can_place_on_it() {
-        let mut b = board8(Color::White);
+        let mut b = board8();
         b.grid[4][5] = Square::new().set_piece(PieceType::new_rook(Color::Black));
         let s = Stormcaller::new(Color::White);
         let moves = s.initial_moves(&b, &cc(4, 4));
@@ -210,7 +210,7 @@ mod tests {
     /// Neutral non-train pieces yield no moves (plan 09 convention).
     #[test]
     fn neutral_has_no_moves() {
-        let b = board8(Color::White);
+        let b = board8();
         let s = Stormcaller::new(Color::Neutral);
         assert!(s.initial_moves(&b, &cc(4, 4)).is_empty());
     }
@@ -237,7 +237,7 @@ mod tests {
     /// not move; the turn flips.
     #[test]
     fn place_tornado_via_make_move() {
-        let mut b = board8(Color::White);
+        let mut b = board8();
         b.grid[4][4] = Square::new().set_piece(PieceType::Stormcaller(
             Stormcaller::new(Color::White),
         ));
@@ -268,7 +268,7 @@ mod tests {
     /// turn it has no legal moves while the tornado lives.
     #[test]
     fn place_tornado_onto_enemy_traps_it() {
-        let mut b = board8(Color::White);
+        let mut b = board8();
         b.grid[4][4] = Square::new().set_piece(PieceType::Stormcaller(
             Stormcaller::new(Color::White),
         ));

@@ -495,8 +495,6 @@ mod tests {
     fn compulsion_terminates_no_recursion() {
         let mut b = board8();
         b.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
-        b.grid[7][1] = Square::new().set_piece(PieceType::new_rook(Color::White));
-        b.grid[7][6] = Square::new().set_piece(PieceType::new_knight(Color::White));
         b.grid[3][0] = Square::new()
             .add_square_condition(SquareCondition::Tornado { remaining: 3 });
         // If the recursion guard were wrong this would hang; reaching
@@ -505,26 +503,32 @@ mod tests {
         assert_eq!(moves, vec![move_to(c(0, 7), c(0, 3))]);
     }
 
-    /// Compulsion ∩ check, the guarantee that matters: when no
-    /// tornado-landing move is king-safe (reaching the tornado does
-    /// not resolve the check), the compulsion does NOT fire and normal
-    /// check evasion stands. The probe is capped *above* king-safety,
-    /// so it too only sees king-safe moves — it cannot arm the
-    /// compulsion off an illegal move.
+    /// Compulsion ∩ check, the king-exemption face: even in a position
+    /// where the only path to the tornado is a non-king-safe move (so
+    /// the compulsion is unarmed anyway), the EXEMPT king keeps its
+    /// normal check-evasion and is never steered onto the tornado.
+    /// This asserts only on the king, which is *unconditionally*
+    /// compulsion-exempt (Concept 4) — so it pins king-exemption, NOT
+    /// compulsion suppression. The discriminating "a non-king piece
+    /// keeps its non-tornado check-evasion when no tornado move is
+    /// king-safe" property is covered by the R3/B4 companion
+    /// `compulsion_intersects_check_non_king_evasion_survives`.
     #[test]
-    fn compulsion_intersects_check_no_force_when_unsafe() {
+    fn compulsion_intersects_check_king_exempt_when_unsafe() {
         let mut b = board8();
         b.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
         // Black rook checks down file 4.
         b.grid[0][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
         // White rook could slide to a tornado at (0,0) — but that move
         // leaves the king in check, so king-safety drops it (in the
-        // real set AND in the probe).
+        // real set AND in the probe), leaving the compulsion unarmed.
+        // The king is exempt regardless, which is what this test pins.
         b.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
         b.grid[0][0] = Square::new()
             .add_square_condition(SquareCondition::Tornado { remaining: 3 });
 
-        // King still has its normal escape(s); compulsion never fired.
+        // The king is unconditionally exempt (Concept 4): it keeps its
+        // normal escape(s) regardless of whether the compulsion armed.
         let king_moves = b.legal_moves(&c(4, 7));
         assert!(
             !king_moves.is_empty(),
@@ -856,7 +860,7 @@ mod tests {
     }
 
     /// Audit R3/B4: discriminating companion to
-    /// `compulsion_intersects_check_no_force_when_unsafe` (which only
+    /// `compulsion_intersects_check_king_exempt_when_unsafe` (which only
     /// asserted on the always-exempt king). A NON-king piece with a
     /// legal, non-tornado-landing check evasion must keep it: the
     /// compulsion must not arm off a move that isn't king-safe (the
