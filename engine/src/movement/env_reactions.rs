@@ -27,6 +27,7 @@
 use std::sync::OnceLock;
 
 use crate::board::Board;
+use crate::board::square::SquareCondition;
 
 /// When in the per-move pipeline a handler fires. Names follow the
 /// "from the player's perspective" convention — `PreMover` happens
@@ -161,6 +162,7 @@ pub fn default_registry() -> &'static EnvReactionRegistry {
 fn build_default_registry() -> EnvReactionRegistry {
     let mut r = EnvReactionRegistry::new();
     r.register(Box::new(TrainTickHandler));
+    r.register(Box::new(TornadoTickHandler));
     r.register(Box::new(BrainrotRecalcHandler));
     r
 }
@@ -218,6 +220,69 @@ impl EnvReactionHandler for BrainrotRecalcHandler {
     fn apply(&self, board: &mut Board, ctx: &mut EnvReactionCtx) {
         if ctx.train_ticked {
             board.recalc_brainrot();
+        }
+    }
+}
+
+/// Plan 13 commit 2: the Tornado countdown. Decrements every
+/// `SquareCondition::Tornado` by one per applied move and removes the
+/// condition when it reaches 0. Runs at `PostTick` so all "after the
+/// move settled" timers share a phase with the brainrot recalc;
+/// priority 90 puts it just before that recalc (order is immaterial —
+/// the countdown reads/writes only its own conditions).
+///
+/// **Cadence (resolved).** One decrement per applied move (per ply),
+/// not per `TrainTickRate`. A tornado's lifetime is its own clock, not
+/// the trains' — entangling it with `TrainTickRate` would make
+/// `remaining` unreadable ("3, but in train-ticks, which depend on the
+/// board flag"). Per-ply is deterministic and reads as written.
+///
+/// **Frozen pauses it.** A square that is also `Frozen` does not tick
+/// — consistent with Frozen halting condition/telegraph progression
+/// elsewhere (the Clock precedent). A frozen tornado is suspended,
+/// not extended past its number; it resumes counting when the freeze
+/// lifts.
+///
+/// **`runs_in_validation` is false.** Matches the train tick: env
+/// mutation during the hypothetical apply is avoided on principle.
+/// The compulsion that *reads* tornado state is a movement-stack
+/// modifier (commit 3), not part of `apply_move_for_validation`, so
+/// the countdown never needs to run during validation.
+pub struct TornadoTickHandler;
+
+impl EnvReactionHandler for TornadoTickHandler {
+    fn id(&self) -> &'static str {
+        "env.tornado_tick"
+    }
+    fn phase(&self) -> EnvPhase {
+        EnvPhase::PostTick
+    }
+    fn priority(&self) -> u32 {
+        90
+    }
+    fn runs_in_validation(&self) -> bool {
+        false
+    }
+    fn apply(&self, board: &mut Board, _ctx: &mut EnvReactionCtx) {
+        for row in board.grid.iter_mut() {
+            for sq in row.iter_mut() {
+                // Frozen suspends the countdown for this square.
+                if sq.conditions.contains(&SquareCondition::Frozen) {
+                    continue;
+                }
+                let mut ticked = false;
+                for c in sq.conditions.iter_mut() {
+                    if let SquareCondition::Tornado { remaining } = c {
+                        *remaining = remaining.saturating_sub(1);
+                        ticked = true;
+                    }
+                }
+                if ticked {
+                    sq.conditions.retain(
+                        |c| !matches!(c, SquareCondition::Tornado { remaining: 0 }),
+                    );
+                }
+            }
         }
     }
 }
@@ -358,21 +423,25 @@ mod tests {
     }
 
     /// PreMover and PostMover have no DEFAULT handlers. The check is
-    /// indirect via the known handler ids — both registered defaults
-    /// (`env.train_tick` at TickGate, `env.brainrot_recalc` at
-    /// PostTick) are not at PreMover/PostMover phases. Both PreMover
-    /// and PostMover are reserved hooks for future pieces.
+    /// indirect via the known handler ids — every registered default
+    /// (`env.train_tick` at TickGate, `env.tornado_tick` and
+    /// `env.brainrot_recalc` at PostTick) is at TickGate/PostTick, not
+    /// PreMover/PostMover. Both PreMover and PostMover are reserved
+    /// hooks for future pieces.
     #[test]
     fn pre_post_mover_have_no_default_handlers() {
         let reg = default_registry();
         let ids: Vec<_> = reg.handler_ids().collect();
         // The only currently-registered handlers:
-        //   env.train_tick   → TickGate
+        //   env.train_tick     → TickGate
+        //   env.tornado_tick   → PostTick
         //   env.brainrot_recalc → PostTick
-        // Neither is at PreMover/PostMover.
+        // None is at PreMover/PostMover.
         for id in &ids {
             assert!(
-                *id == "env.train_tick" || *id == "env.brainrot_recalc",
+                *id == "env.train_tick"
+                    || *id == "env.tornado_tick"
+                    || *id == "env.brainrot_recalc",
                 "unexpected default-registry handler {id:?}; PreMover/PostMover must stay empty"
             );
         }
@@ -440,5 +509,73 @@ mod tests {
         let mut ctx2 = EnvReactionCtx::default();
         TrainTickHandler.apply(&mut board, &mut ctx2);
         assert!(ctx2.train_ticked, "EveryPly rate must fire the tick");
+    }
+
+    /// Plan 13 commit 2: a tornado decrements by one per applied move.
+    #[test]
+    fn tornado_tick_decrements() {
+        let mut board = empty_board();
+        board.grid[0][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        let mut ctx = EnvReactionCtx::default();
+        TornadoTickHandler.apply(&mut board, &mut ctx);
+        assert_eq!(
+            board.grid[0][0].conditions,
+            vec![SquareCondition::Tornado { remaining: 2 }]
+        );
+    }
+
+    /// At `remaining == 1`, one tick takes it to 0 and the condition
+    /// is removed entirely (a freed-on-the-tick square, no event).
+    #[test]
+    fn tornado_tick_removes_at_zero() {
+        let mut board = empty_board();
+        board.grid[2][4] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 1 });
+        let mut ctx = EnvReactionCtx::default();
+        TornadoTickHandler.apply(&mut board, &mut ctx);
+        assert!(
+            board.grid[2][4].conditions.is_empty(),
+            "tornado at remaining=1 must be gone after one tick"
+        );
+    }
+
+    /// A `Frozen` square suspends the tornado countdown — the number
+    /// does not move while frozen (the Clock precedent: Frozen halts
+    /// condition progression).
+    #[test]
+    fn tornado_tick_frozen_pauses() {
+        let mut board = empty_board();
+        board.grid[1][1] = Square::new()
+            .add_square_condition(SquareCondition::Frozen)
+            .add_square_condition(SquareCondition::Tornado { remaining: 2 });
+        let mut ctx = EnvReactionCtx::default();
+        TornadoTickHandler.apply(&mut board, &mut ctx);
+        assert_eq!(
+            board.grid[1][1].conditions,
+            vec![
+                SquareCondition::Frozen,
+                SquareCondition::Tornado { remaining: 2 }
+            ],
+            "frozen tornado must keep its number"
+        );
+    }
+
+    /// The default registry registers the tornado tick at PostTick.
+    #[test]
+    fn default_registry_has_tornado_tick() {
+        let reg = default_registry();
+        assert!(reg.handler_ids().any(|id| id == "env.tornado_tick"));
+    }
+
+    /// Trait-level invariants for the tornado tick handler.
+    #[test]
+    fn tornado_tick_handler_invariants() {
+        let h = TornadoTickHandler;
+        assert_eq!(h.phase(), EnvPhase::PostTick);
+        assert_eq!(h.priority(), 90);
+        // Matches the train-tick stance: no env mutation during the
+        // hypothetical-apply of legal-move validation.
+        assert!(!h.runs_in_validation());
     }
 }
