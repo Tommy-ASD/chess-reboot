@@ -61,6 +61,20 @@ thread_local! {
     static PROBE_MEMO: RefCell<Option<ProbeMemo>> = const { RefCell::new(None) };
 }
 
+// Empirical DoS-fix guard (R-A follow-up): a test-only counter of how
+// many times `compelled_facts` actually *computes* the probe (memo
+// miss). The Round-A fix's whole point is that this stays at one per
+// legal-move query regardless of candidate count; a unit test asserts
+// the delta. Compiled out of release entirely.
+#[cfg(test)]
+thread_local! {
+    static PROBE_COMPUTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn probe_compute_count() -> u64 {
+    PROBE_COMPUTES.with(|c| c.get())
+}
+
 #[derive(Clone, Copy)]
 struct ProbeMemo {
     epoch: u64,
@@ -91,6 +105,8 @@ fn compelled_facts(board: &Board, side: Color) -> (bool, bool) {
             return (m.any_tornado, m.side_can_reach);
         }
     }
+    #[cfg(test)]
+    PROBE_COMPUTES.with(|c| c.set(c.get() + 1));
     let any = any_tornado(board);
     let can_reach = any && side_can_reach_tornado(board, side);
     PROBE_MEMO.with(|c| {
@@ -1016,5 +1032,64 @@ mod tests {
                 && !crate::board::fen::board_to_fen(&bp).contains("+3"),
             "the '+' must not survive re-serialization (idempotent fixed point)"
         );
+    }
+
+    /// Round-A DoS-fix EMPIRICAL guard (deterministic — a wall-clock
+    /// test would be flaky). The crafted-FEN super-linear blowup was
+    /// "the reachability probe runs once *per candidate*". The
+    /// pass-scoped memo must collapse that to once *per legal-move
+    /// query* regardless of candidate count. A rook on an open board
+    /// has ~14 candidates that all flow through the 305 filter; with a
+    /// (deliberately unreachable, so unarmed) tornado present, every
+    /// one of those candidates calls `compelled_facts`. The compute
+    /// counter must advance by exactly 1 for the whole query (memo
+    /// miss once, then 13 hits) — NOT ~14. Without the Round-A memo
+    /// this delta would equal the candidate count: the DoS amplifier.
+    #[test]
+    fn probe_computed_once_per_query_not_per_candidate() {
+        let mut b = board8();
+        // Rook in a corner: long open rank-0 + file-0 rays ⇒ many
+        // candidates, all reaching the 305 filter.
+        b.grid[0][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // Tornado the rook (the only White piece) cannot reach in one
+        // move ⇒ compulsion UNARMED ⇒ the rook keeps all its moves, so
+        // we observe many candidates each consulting the memo.
+        b.grid[3][3] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        // Lone black king off both rook rays (not in check, no
+        // interference).
+        b.grid[6][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+        let before = probe_compute_count();
+        let moves = b.legal_moves(&c(0, 0));
+        let after = probe_compute_count();
+
+        assert!(
+            moves.len() > 5,
+            "the rook must present many candidates through the 305 \
+             filter (got {}) — otherwise '1 compute' is not meaningful",
+            moves.len()
+        );
+        assert_eq!(
+            after - before,
+            1,
+            "Round-A memo: the reachability probe must compute ONCE per \
+             legal-move query, not once per candidate ({} candidates) — \
+             without the memo this would be ~{} (the DoS amplifier)",
+            moves.len(),
+            moves.len()
+        );
+
+        // A second query opens a fresh epoch → exactly one more compute
+        // (per-query, still not per-candidate). Pins "the memo is
+        // per-resolve, not a permanent cache, and not per-candidate".
+        let m2 = b.legal_moves(&c(0, 0));
+        let after2 = probe_compute_count();
+        assert_eq!(
+            after2 - after,
+            1,
+            "each legal-move query recomputes exactly once"
+        );
+        assert_eq!(m2.len(), moves.len());
     }
 }

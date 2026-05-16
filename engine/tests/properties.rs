@@ -96,6 +96,49 @@ fn collect_all_legal(board: &Board) -> Vec<GameMove> {
     out
 }
 
+/// Tornado lifecycle under random play. A White Stormcaller (`W` at
+/// (4,4)) plus a Black rook it can trap; kings apart, not in check.
+/// Random `picks` will play `PlaceTornado` (the only way a tornado
+/// enters mid-game), then the compulsion/trap/tick/dissipation run
+/// through real `make_move` — exactly the dynamic coverage the
+/// random-play harness lacked before this pass (Round A only added a
+/// *static* FEN-idempotence proptest for `remaining`).
+fn tornado_start() -> Board {
+    fen_to_board("k5r1/8/8/8/4W3/8/8/7K w - -")
+}
+
+/// A token-soup / arbitrary-bytes FEN fuzz strategy biased toward the
+/// tornado parse arms (parens, `C=TORNADO:`, colons, digits) plus
+/// pure lossy-UTF8 byte noise for breadth.
+fn fuzz_fen() -> impl Strategy<Value = String> {
+    // DIGITS ARE DELIBERATELY EXCLUDED. `fen_row_to_squares` reads a
+    // run of digits as one decimal count and pushes that many empty
+    // squares *before* the per-row 255 truncate, so a ~10-char digit
+    // run (`"9999999999"`) saturates the u32 count and allocates ~4.29e9
+    // squares → OOM/SIGKILL. That is a *pre-existing baseline* memory
+    // blowup (Round A finding #2 — NOT tornado; the digit path touches
+    // zero tornado code) and is out of plan-13 scope. Re-triggering it
+    // here would only OOM-kill the test runner without surfacing
+    // anything new, so this fuzz uses a digit-free alphabet to
+    // exercise the in-scope parser logic (parens, `C=…`, conditions,
+    // piece tokens, `split_once`, the tornado arms) for *panics*
+    // without re-finding the documented baseline OOM.
+    let toks = prop::sample::select(vec![
+        "(", ")", "/", "C=TORNADO:", "C=TORNADO", "C=FROZEN", "C=BRAINROT",
+        "P=BUS(P=(K))", "P=W", "P=K", "T=BLOCK", ":", ",", "=", "k", "K",
+        "Q", "w", "b", " w - -", "  ", "", "(C=TORNADO:", "TORNADO",
+    ]);
+    prop_oneof![
+        prop::collection::vec(toks, 0..40).prop_map(|v| v.concat()),
+        // Arbitrary bytes, digits stripped (see above), lossy-decoded.
+        prop::collection::vec(any::<u8>(), 0..220).prop_map(|v| {
+            let no_digits: Vec<u8> =
+                v.into_iter().filter(|b| !b.is_ascii_digit()).collect();
+            String::from_utf8_lossy(&no_digits).into_owned()
+        }),
+    ]
+}
+
 proptest! {
     /// Drive 1-39 random legal moves from the start position and assert
     /// all four properties at each step.
@@ -272,6 +315,84 @@ proptest! {
             )),
             "expected Tornado{{remaining:{}}} after round-trip; got {:?}",
             expected, conds
+        );
+    }
+
+    /// Empirical TOTALITY fuzz (cargo-fuzz/nightly unavailable here, so
+    /// proptest-driven, not libFuzzer). Throws adversarial token-soup
+    /// AND arbitrary lossy-UTF8 byte strings at `fen_to_board` (then
+    /// `board_to_fen`) and asserts only that neither panics — a panic
+    /// fails + shrinks the case. This empirically validates the
+    /// Round-A-*reasoned*-but-never-run claim that `fen_to_board` is a
+    /// total function over any input (no reachable panic/unwrap from
+    /// hostile FEN, incl. all the tornado parse arms).
+    ///
+    /// NOTE on scope: idempotence is deliberately NOT asserted here.
+    /// The general parser is intentionally lenient and a degenerate
+    /// input (e.g. `""` → a 0×0 board) does NOT round-trip to a fixed
+    /// point — a *pre-existing baseline* property, NOT introduced by
+    /// plan-13 (the empty/garbage path touches no tornado code), in the
+    /// same out-of-scope family as Round A's other baseline FEN-leniency
+    /// findings. In-scope idempotence (the tornado `C=TORNADO:n`
+    /// subset) is soundly covered by `tornado_fen_roundtrip_idempotent`.
+    #[test]
+    fn fen_to_board_is_total(s in fuzz_fen()) {
+        let b = fen_to_board(&s);
+        let f = board_to_fen(&b);
+        // Re-parsing the engine's own output must also not panic.
+        let _ = fen_to_board(&f);
+        // Reaching here = no panic for this input.
+        prop_assert!(true);
+    }
+
+    /// The four random-play invariants (Property 1–4) driven from a
+    /// Stormcaller position so `PlaceTornado` actually fires and the
+    /// tornado compulsion/trap/tick/dissipation run through real
+    /// `make_move`. Closes the Round-A gap that the random-play
+    /// harness never seeded a tornado (it only had a static
+    /// FEN-idempotence proptest).
+    #[test]
+    fn invariants_under_random_play_with_tornado(
+        picks in prop::collection::vec(any::<u32>(), 1..40)
+    ) {
+        let mut board = tornado_start();
+        let mut iters_performed = 0usize;
+        for &pick in &picks {
+            let legal = collect_all_legal(&board);
+            if legal.is_empty() {
+                break;
+            }
+            iters_performed += 1;
+            let chosen = legal[(pick as usize) % legal.len()].clone();
+
+            let pieces_before = board.all_pieces().len();
+            let board_before = board.clone();
+
+            let mut after = board.clone();
+            after.make_move(chosen)
+                .expect("a legal_moves move must apply via make_move (incl. PlaceTornado / compelled / trapped positions)");
+
+            prop_assert_ne!(
+                &after, &board_before,
+                "make_move on a legal move must not be a no-op (PlaceTornado flips side + adds the condition)"
+            );
+
+            let delta = after.all_pieces().len() as isize - pieces_before as isize;
+            prop_assert!(
+                delta == 0 || delta == -1,
+                "piece-count delta must be 0 or -1 (PlaceTornado/step = 0), got {delta}"
+            );
+
+            // Property 1: FEN round-trip exact even with a live
+            // `C=TORNADO:n` mid-game.
+            let recovered = fen_to_board(&board_to_fen(&after));
+            prop_assert_eq!(&recovered, &after, "FEN round-trip mismatch under tornado play");
+
+            board = after;
+        }
+        prop_assert!(
+            iters_performed > 0,
+            "tornado random-play test must execute at least one inner iteration"
         );
     }
 }

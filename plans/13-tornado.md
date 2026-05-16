@@ -25,7 +25,22 @@ change is additive/behavior-preserving with zero pre-tornado
 behavior change, and added three mutation-killing tests
 (`bus_passenger_exit_onto_tornado_is_compelled`,
 `stormcaller_placetornado_dropped_under_armed_compulsion`,
-`tornado_fen_boundary_and_plus_leniency`). Accepted low gaps,
+`tornado_fen_boundary_and_plus_leniency`). **Empirical pass (E1):** the audit's reasoned-but-never-executed claims
+were turned into running tests — a deterministic DoS-fix guard
+(`probe_computed_once_per_query_not_per_candidate`: the Round-A memo
+makes the reachability probe compute exactly once per legal-move
+query, not once per candidate, asserted via a `cfg(test)`
+compute-counter), a `fen_to_board` totality fuzz
+(`fen_to_board_is_total`: adversarial token-soup + lossy-UTF8 bytes
+never panic), and a tornado random-play property
+(`invariants_under_random_play_with_tornado`: `PlaceTornado` +
+compulsion/trap/tick/dissipation driven through real `make_move`,
+re-asserting the four invariants — closes Round A's
+*dynamic*-coverage gap, it had only a *static* FEN-idempotence
+proptest). Full **workspace** suite + an elevated 4000-case
+proptest run (`PROPTEST_CASES=4000`, ~281 s) both green; the four
+saved proptest-regression seeds (`s=""` + three random-play
+`picks`) are checked in as permanent guards. Accepted low gaps,
 documented not patched: the `compelled_facts` `side` sub-key is
 defensive-only (unreachable as a distinct outcome via the public API
 — commented in code, R-D/GAP-7); EnPassant-landing-onto-tornado and
@@ -35,7 +50,19 @@ color` paths (R-D/GAP-3, GAP-2 — low risk, a regression there also
 breaks the tested mirror). The pre-existing baseline issues Round A
 surfaced (api timeout/body-limit/`catch_unwind`, FEN multi-digit
 run-length, `format_coord` overflow) are NOT tornado-introduced and
-remain out of plan-13 scope. Resolved en
+remain out of plan-13 scope. E1 *empirically escalated* two of these
+from "reasoned" to "demonstrated": (i) the FEN multi-digit
+run-length blowup — `fen_row_to_squares` materialises a full digit
+run as empty squares *before* the per-row 255-truncate, so a ~10-char
+digit run saturates the count and the totality fuzz **SIGKILL-OOM'd
+the test runner** until `fuzz_fen()` was made digit-free (the digit
+path touches zero tornado code; documented in the strategy's doc
+comment); (ii) `fen_to_board` is **not** idempotent on degenerate
+input (`""` → a 0×0 board that re-serialises differently), saved as
+the `s=""` regression seed. Both are confirmed pre-existing baseline
+behaviour (out of plan-13 scope, surfaced not fixed); in-scope
+idempotence (the `C=TORNADO:n` subset) stays soundly covered by
+`tornado_fen_roundtrip_idempotent`. Resolved en
 route: cadence is **per-ply** (not `TrainTickRate`-coupled — open
 question 2 below); placer name is **Stormcaller** (confirmed). Open:
 the
