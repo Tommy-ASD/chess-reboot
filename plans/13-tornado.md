@@ -1,5 +1,17 @@
 # Plan 13: Tornado
 
+**Status (engine complete — commits 1–4 of 5 landed).** Condition
+type + FEN (`C=TORNADO:<n>`), env-reaction countdown,
+`TornadoCompulsionFilter` (priority 305, recursion-guarded probe),
+and the `Stormcaller` + `MoveType::PlaceTornado` placer are all
+shipped and tested (full engine suite green). Resolved en route:
+cadence is **per-ply** (not `TrainTickRate`-coupled — open question 2
+below); placer name is **Stormcaller** (confirmed). Open: the
+same-turn-tick interaction means a freshly placed `dur=3` reads as 2
+on the opponent's turn (documented in `stormcaller.rs`; duration cap
+is open question 1). Commit 5 (frontend brush + countdown overlay)
+is deferred — engine scope, API contract unchanged.
+
 A timed square condition that **compels destination**. While a Tornado
 condition sits on a square, any side that *could* legally move a piece
 onto that square *must* — every move that doesn't land on a tornado
