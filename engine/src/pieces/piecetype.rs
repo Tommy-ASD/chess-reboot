@@ -6,7 +6,7 @@ use crate::{
         Color, Piece,
         fairy::{
             bus::Bus, carriage::Carriage, goblin::Goblin, locomotive::Locomotive,
-            skibidi::Skibidi,
+            skibidi::Skibidi, stormcaller::Stormcaller,
         },
         standard::{
             bishop::Bishop, king::King, knight::Knight, pawn::Pawn, queen::Queen, rook::Rook,
@@ -32,6 +32,7 @@ macro_rules! dispatch {
             PieceType::Bus($piece) => $body,
             PieceType::Locomotive($piece) => $body,
             PieceType::Carriage($piece) => $body,
+            PieceType::Stormcaller($piece) => $body,
         }
     };
 }
@@ -51,6 +52,7 @@ pub enum PieceType {
     Bus(crate::pieces::fairy::bus::Bus),
     Locomotive(crate::pieces::fairy::locomotive::Locomotive),
     Carriage(crate::pieces::fairy::carriage::Carriage),
+    Stormcaller(crate::pieces::fairy::stormcaller::Stormcaller),
 }
 
 impl PieceType {
@@ -137,6 +139,7 @@ impl PieceType {
 
             "g" => Goblin::from_symbol(symbol),
             "s" => Skibidi::from_symbol(symbol),
+            "w" => Stormcaller::from_symbol(symbol),
             "bus" => Bus::from_symbol(symbol),
             "loco" => Locomotive::from_symbol(symbol),
             "cart" => Carriage::from_symbol(symbol),
@@ -252,6 +255,11 @@ impl PieceType {
                 // is even *allowed* to throw is checked at move-generation
                 // time in `Board::get_moves` via `can_throw_switch()`.
                 MoveType::ThrowSwitch { .. } => return true,
+                // PlaceTornado doesn't move the piece — like
+                // ThrowSwitch, the target-occupancy/carrier-rewrite
+                // logic below doesn't apply. The placer stays put and
+                // the target square gets a condition, not a piece.
+                MoveType::PlaceTornado { .. } => return true,
                 MoveType::MoveIntoCarrier(_) => {
                     // No piece's `initial_moves` produces a top-level
                     // MoveIntoCarrier today — the filter is the sole

@@ -91,7 +91,10 @@ fn move_destination(game_move: &GameMove) -> Option<Coord> {
         },
         MoveType::Castle { .. }
         | MoveType::PhaseShift
-        | MoveType::ThrowSwitch { .. } => None,
+        | MoveType::ThrowSwitch { .. }
+        // PlaceTornado does not relocate the placer — it can never be
+        // the move that "lands on" the tornado for compulsion.
+        | MoveType::PlaceTornado { .. } => None,
     }
 }
 

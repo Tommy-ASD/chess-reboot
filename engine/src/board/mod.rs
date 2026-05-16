@@ -104,6 +104,13 @@ pub enum MoveType {
     ThrowSwitch {
         switch: Coord,
     },
+    /// Plan 13: spend the turn stamping a `Tornado` square condition
+    /// on `target`. The placer (Stormcaller) does not move — like
+    /// `ThrowSwitch`, this is a non-relocating action. `target` is a
+    /// square within the placer's range, occupied or not.
+    PlaceTornado {
+        target: Coord,
+    },
 }
 
 impl std::fmt::Display for MoveType {
@@ -124,6 +131,7 @@ impl std::fmt::Display for MoveType {
                 write!(f, "en-passant to {target} (capturing {captured})")
             }
             MoveType::ThrowSwitch { switch } => write!(f, "throw switch at {switch}"),
+            MoveType::PlaceTornado { target } => write!(f, "place tornado at {target}"),
         }
     }
 }
@@ -197,6 +205,7 @@ pub enum LastMoveKind {
     PhaseShift,
     ThrowSwitch,
     PieceInCarrier,
+    PlaceTornado,
 }
 
 #[derive(PartialEq, Debug, Clone)]

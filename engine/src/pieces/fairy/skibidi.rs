@@ -342,7 +342,10 @@ impl Piece for Skibidi {
             | MoveType::Promotion { .. }
             | MoveType::Castle { .. }
             | MoveType::EnPassant { .. }
-            | MoveType::ThrowSwitch { .. } => {}
+            | MoveType::ThrowSwitch { .. }
+            // A Skibidi never makes a PlaceTornado move (Stormcaller-
+            // only) — no-op here.
+            | MoveType::PlaceTornado { .. } => {}
         }
     }
 }

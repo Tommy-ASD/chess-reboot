@@ -329,6 +329,7 @@ fn format_last_move_kind(kind: LastMoveKind) -> &'static str {
         LastMoveKind::PhaseShift => "PS",
         LastMoveKind::ThrowSwitch => "TS",
         LastMoveKind::PieceInCarrier => "PIC",
+        LastMoveKind::PlaceTornado => "PT",
     }
 }
 
@@ -342,6 +343,7 @@ fn parse_last_move_kind(s: &str) -> Option<LastMoveKind> {
         "PS" => Some(LastMoveKind::PhaseShift),
         "TS" => Some(LastMoveKind::ThrowSwitch),
         "PIC" => Some(LastMoveKind::PieceInCarrier),
+        "PT" => Some(LastMoveKind::PlaceTornado),
         _ => None,
     }
 }

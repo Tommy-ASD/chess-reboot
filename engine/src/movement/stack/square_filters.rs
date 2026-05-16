@@ -91,7 +91,10 @@ impl WalkabilityFilter {
             },
             MoveType::Castle { .. }
             | MoveType::PhaseShift
-            | MoveType::ThrowSwitch { .. } => None,
+            | MoveType::ThrowSwitch { .. }
+            // Plan 13: placing a tornado doesn't relocate the placer,
+            // so there's no landing square to walkability-check.
+            | MoveType::PlaceTornado { .. } => None,
         }
     }
 }

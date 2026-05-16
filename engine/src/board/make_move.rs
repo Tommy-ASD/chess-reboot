@@ -3,7 +3,7 @@ use tracing::debug;
 use crate::{
     board::{
         Board, CastleSide, Coord, GameMove, MoveError, MoveType, PromotionTarget,
-        square::SquareType,
+        square::{SquareCondition, SquareType},
     },
     pieces::{Color, piecetype::PieceType},
 };
@@ -364,6 +364,29 @@ impl Board {
                 self.fire_signal(&targets);
                 debug!(?switch, ?targets, "switch thrown");
             }
+            MoveType::PlaceTornado { target } => {
+                // The placer stays put (like ThrowSwitch — the cloned
+                // `piece` is intentionally unused here). Stamp a
+                // Tornado on `target`. If one is already there, refresh
+                // its countdown rather than stacking a second Tornado
+                // condition (keeps the C= payload unambiguous).
+                let dur = crate::pieces::fairy::stormcaller::TORNADO_DURATION;
+                let sq = self
+                    .get_square_mut(target)
+                    .ok_or_else(|| format!("PlaceTornado: no square at {target:?}"))?;
+                let mut refreshed = false;
+                for c in sq.conditions.iter_mut() {
+                    if let SquareCondition::Tornado { remaining } = c {
+                        *remaining = dur;
+                        refreshed = true;
+                    }
+                }
+                if !refreshed {
+                    sq.conditions
+                        .push(SquareCondition::Tornado { remaining: dur });
+                }
+                debug!(?from, ?target, dur, "tornado placed");
+            }
             MoveType::PieceInCarrier {
                 piece_index,
                 move_type,
@@ -554,7 +577,9 @@ impl Board {
         //
         // PhaseShift and ThrowSwitch don't relocate a piece — skip.
         let mover_dispatch: Option<PieceType> = match &ctx.game_move.move_type {
-            MoveType::PhaseShift | MoveType::ThrowSwitch { .. } => None,
+            MoveType::PhaseShift
+            | MoveType::ThrowSwitch { .. }
+            | MoveType::PlaceTornado { .. } => None,
             MoveType::MoveTo(target)
             | MoveType::Promotion { target, .. }
             | MoveType::EnPassant { target, .. } => {
@@ -841,6 +866,7 @@ fn compute_last_move(
         MoveType::PhaseShift => LastMoveKind::PhaseShift,
         MoveType::ThrowSwitch { .. } => LastMoveKind::ThrowSwitch,
         MoveType::PieceInCarrier { .. } => LastMoveKind::PieceInCarrier,
+        MoveType::PlaceTornado { .. } => LastMoveKind::PlaceTornado,
     };
 
     Some(crate::board::LastMove {
@@ -1003,7 +1029,8 @@ fn collect_landings(game_move: &GameMove) -> Vec<Coord> {
         },
         MoveType::MoveIntoCarrier(_)
         | MoveType::PhaseShift
-        | MoveType::ThrowSwitch { .. } => vec![],
+        | MoveType::ThrowSwitch { .. }
+        | MoveType::PlaceTornado { .. } => vec![],
     }
 }
 
@@ -1037,6 +1064,8 @@ fn piece_landing_square(game_move: &GameMove) -> Option<&Coord> {
             MoveType::MoveTo(c) => Some(c),
             _ => None,
         },
-        MoveType::PhaseShift | MoveType::ThrowSwitch { .. } => None,
+        MoveType::PhaseShift
+        | MoveType::ThrowSwitch { .. }
+        | MoveType::PlaceTornado { .. } => None,
     }
 }
