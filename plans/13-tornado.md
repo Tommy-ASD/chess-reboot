@@ -464,14 +464,30 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
   move dumps a piece into the tornado is a forced bleed. Intended —
   it is the composition use. The brakes are the countdown and the
   tempo the Stormcaller spent placing it, not a softening of the rule.
-- **Memoize the probe (deferred — perf only, audit R1/E5).** One
-  uncached probe per candidate is O(pieces × moves) inside an
-  O(pieces × moves) aggregation — square cost. A pass-scoped memo
-  keyed by side (board is immutable through the stack) is the planned
-  optimisation but is **not implemented**: correctness does not depend
-  on it, and the `any_tornado` fast-path makes the common (no-tornado)
-  game free, so the square cost only bites with a live tornado. Revisit
-  before any perft/search work touches tornado positions.
+- **Probe memo — IMPLEMENTED (audit Round-A/A-DoS; was R1/E5
+  "deferred perf").** The uncached per-candidate probe was not merely
+  a perf nicety: a new-angle security pass showed a tens-of-bytes
+  crafted tornado FEN drove it super-linear (O(candidates × pieces ×
+  moves × king-safety-clone)) — a single-request CPU-exhaustion DoS
+  amplifier. Fixed with a **pass-scoped, thread-local, epoch-keyed
+  memo**: `resolve_legal_moves` (the only path that runs the 305
+  filter) bumps `RESOLVE_LEGAL_EPOCH` once per call; the filter
+  caches `(any_tornado, side_can_reach_tornado)` keyed by
+  `(epoch, side)`. The board is immutable for a resolve, so reuse
+  across candidates is sound; a different query has a different epoch
+  (no stale reuse); thread-local ⇒ concurrency-safe. Probe now runs
+  once per legal-move query, not per candidate. Guarded by
+  `probe_memo_does_not_leak_across_queries` + the existing suite.
+  **Out-of-tornado-scope items the same pass surfaced (pre-existing,
+  NOT introduced by this feature; reported for the maintainers, not
+  patched here):** the `api` crate has no request timeout / body-size
+  limit / `catch_unwind` (the memo removes the tornado *amplifier* but
+  a hostile client can still submit a pathological non-tornado board —
+  fix at the api boundary); FEN multi-digit run-length inflates a
+  short string to a ≤255-wide grid (`R1111111`→1×255); and
+  `board_to_fen`'s `format_coord` overflows (`b'a' + file`) for
+  `file > 154` on very wide boards. These are general engine/api
+  hardening, separate from plan 13.
 - **Helper placement (as built — audit R1/E1).** The §Types pseudocode
   above shows `board.piece_at_is_king` / `board.square_has_tornado` /
   `board.side_can_reach_tornado` for readability, but the shipped

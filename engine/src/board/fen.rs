@@ -917,7 +917,12 @@ pub fn fen_to_square(fen: &str) -> Square {
                             // present-but-bad suffix warns. `0` is
                             // meaningless (the tick would clear it the
                             // same turn) — clamp to 1, mirroring the
-                            // Skibidi phase clamp.
+                            // Skibidi phase clamp. Note `u8::from_str`
+                            // also accepts a leading `+` (`TORNADO:+3`
+                            // → 3) and rejects whitespace/`-`/overflow;
+                            // every accepted value is idempotent
+                            // (re-serializes to the bare digits), so
+                            // this leniency is harmless (audit R-A).
                             let remaining = match payload {
                                 None => 3,
                                 Some(p) => match p.parse::<u8>() {

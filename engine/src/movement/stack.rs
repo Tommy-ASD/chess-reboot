@@ -29,10 +29,34 @@ pub mod square_filters;
 pub mod tornado;
 pub mod train_modifiers;
 
+use std::cell::Cell;
 use std::sync::OnceLock;
 
 use crate::board::{Board, Coord, GameMove};
 use crate::pieces::Color;
+
+thread_local! {
+    /// Audit Round-A/A-DoS: monotonic per-thread counter bumped once
+    /// at the top of each `resolve_legal_moves` call (the *only* path
+    /// that runs the priority-305 `TornadoCompulsionFilter`). The
+    /// filter memoizes its board-invariant probe
+    /// (`any_tornado` + `side_can_reach_tornado`) keyed by this epoch,
+    /// so the O(pieces×moves×king-safety) reachability probe runs once
+    /// per legal-move query instead of once per *candidate* — closing
+    /// the super-linear amplification a crafted tornado FEN could
+    /// exploit. Bumped ONLY here: `resolve_moves`/`resolve_moves_capped`
+    /// don't run the 305 filter, and the capped probe inside the filter
+    /// must NOT bump it (or the memo would never hit). Thread-local ⇒
+    /// concurrency-safe (no cross-request sharing). Wrap after 2^64
+    /// queries is unreachable in practice.
+    static RESOLVE_LEGAL_EPOCH: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Current resolve-legal epoch (read by `TornadoCompulsionFilter`'s
+/// pass-scoped probe memo).
+pub(crate) fn resolve_legal_epoch() -> u64 {
+    RESOLVE_LEGAL_EPOCH.with(|e| e.get())
+}
 use crate::pieces::piecetype::PieceType;
 
 /// Discriminator for `MovementEvent` variants. Powers the `touches()`
@@ -347,6 +371,11 @@ impl MovementStack {
     /// modifier runs, including the 300+ band (king-safety, future
     /// variant rules).
     pub fn resolve_legal_moves(&self, board: &Board, from: &Coord) -> Vec<GameMove> {
+        // Open a fresh probe-memo epoch for this legal-move query (see
+        // RESOLVE_LEGAL_EPOCH). The board is immutable for the duration
+        // of this `resolve`, so the tornado filter's board-invariant
+        // probe is computed once and reused across every candidate.
+        RESOLVE_LEGAL_EPOCH.with(|e| e.set(e.get().wrapping_add(1)));
         let seed = vec![MovementEvent::MoveQuery { from: from.clone() }];
         let events = self.resolve(board, seed, None, None);
         events

@@ -29,6 +29,7 @@
 use engine::board::{
     Board, GameMove,
     fen::{board_to_fen, fen_to_board},
+    square::{Square, SquareCondition},
 };
 use proptest::prelude::*;
 
@@ -231,6 +232,46 @@ proptest! {
         prop_assert!(
             iters_performed > 0,
             "train property test must execute at least one inner iteration"
+        );
+    }
+
+    /// Audit Round-A/A-PropCov: the random-play generators never seed a
+    /// tornado (no Stormcaller in the start positions ⇒ `PlaceTornado`
+    /// is never reached), so the FEN round-trip safety net above gave
+    /// the `C=TORNADO:<n>` payload ZERO coverage. This property fuzzes
+    /// `remaining` across the full `u8` range (incl. the documented
+    /// `0`→1 clamp and `255` boundary) and asserts the board is a
+    /// fixed point under serialize→parse after the first normalization
+    /// round — i.e. the tornado FEN is idempotent (no value parses to
+    /// something that re-serializes differently). Mirrors a Frozen
+    /// sibling condition to also exercise multi-condition ordering.
+    #[test]
+    fn tornado_fen_roundtrip_idempotent(remaining in 0u8..=255, with_frozen in any::<bool>()) {
+        let mut b0 = fen_to_board("k7/8/8/8/8/8/8/7K w - -");
+        let mut sq = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining });
+        if with_frozen {
+            sq = sq.add_square_condition(SquareCondition::Frozen);
+        }
+        b0.grid[4][4] = sq;
+
+        // First round normalizes (e.g. remaining 0 → 1, garbage paths
+        // are unreachable here since we construct the value directly).
+        let b1 = fen_to_board(&board_to_fen(&b0));
+        // Second round must be a no-op: b1 is a fixed point.
+        let b2 = fen_to_board(&board_to_fen(&b1));
+        prop_assert_eq!(&b1, &b2, "tornado FEN not idempotent for remaining={}", remaining);
+
+        // And the normalized value is the documented clamp: 0→1, else
+        // unchanged; the Tornado condition survives round-trip.
+        let conds = &b1.grid[4][4].conditions;
+        let expected = if remaining == 0 { 1 } else { remaining };
+        prop_assert!(
+            conds.iter().any(|c| matches!(
+                c, SquareCondition::Tornado { remaining: r } if *r == expected
+            )),
+            "expected Tornado{{remaining:{}}} after round-trip; got {:?}",
+            expected, conds
         );
     }
 }

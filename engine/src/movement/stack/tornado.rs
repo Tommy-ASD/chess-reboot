@@ -33,12 +33,66 @@
 //! optimisation (plan 13, "Things to be careful about"); correctness
 //! does not depend on it.
 
+use std::cell::RefCell;
+
 use crate::board::square::SquareCondition;
 use crate::board::{Board, Coord, GameMove, MoveType};
 use crate::movement::stack::{
     EventKindMask, MovementEffect, MovementEvent, MovementModifier,
+    resolve_legal_epoch,
 };
+use crate::pieces::Color;
 use crate::pieces::piecetype::PieceType;
+
+thread_local! {
+    /// Audit Round-A/A-DoS — pass-scoped memo of the two
+    /// board-invariant facts the compulsion needs: whether any tornado
+    /// exists, and whether the side to move can reach one with a
+    /// king-safe move. Both depend only on `board`, which is immutable
+    /// for the duration of one `resolve_legal_moves` call; that call
+    /// bumps `RESOLVE_LEGAL_EPOCH`, so a matching epoch means "same
+    /// board, same query" and the cached result is sound to reuse for
+    /// every candidate. A different query (different board / different
+    /// `status()` piece / different request) has a different epoch and
+    /// recomputes — no stale reuse. Thread-local ⇒ no cross-request
+    /// sharing. This turns the O(pieces×moves×king-safety) probe from
+    /// once-per-candidate into once-per-legal-move-query, closing the
+    /// crafted-FEN super-linear DoS amplification.
+    static PROBE_MEMO: RefCell<Option<ProbeMemo>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Copy)]
+struct ProbeMemo {
+    epoch: u64,
+    side: Color,
+    any_tornado: bool,
+    side_can_reach: bool,
+}
+
+/// `(any_tornado(board), side_can_reach_tornado(board, side))`,
+/// memoized for the current `resolve_legal_moves` epoch. `side_can_
+/// reach` is only probed when a tornado actually exists (mirrors the
+/// filter's fast-path), and only the boolean result is cached — never
+/// a board reference — so there is no lifetime/aliasing hazard.
+fn compelled_facts(board: &Board, side: Color) -> (bool, bool) {
+    let epoch = resolve_legal_epoch();
+    if let Some(m) = PROBE_MEMO.with(|c| *c.borrow()) {
+        if m.epoch == epoch && m.side == side {
+            return (m.any_tornado, m.side_can_reach);
+        }
+    }
+    let any = any_tornado(board);
+    let can_reach = any && side_can_reach_tornado(board, side);
+    PROBE_MEMO.with(|c| {
+        *c.borrow_mut() = Some(ProbeMemo {
+            epoch,
+            side,
+            any_tornado: any,
+            side_can_reach: can_reach,
+        });
+    });
+    (any, can_reach)
+}
 
 /// This filter's stack priority. After king-safety (300) so the
 /// probe and the final set are both over king-safe moves.
@@ -161,8 +215,13 @@ impl MovementModifier for TornadoCompulsionFilter {
             return MovementEffect::Keep;
         };
 
+        // Board-invariant facts, computed once per legal-move query
+        // (pass-scoped memo) rather than once per candidate.
+        let side_to_move = board.flags.side_to_move;
+        let (has_tornado, side_can_reach) = compelled_facts(board, side_to_move);
+
         // Fast path: no tornado anywhere → inert.
-        if !any_tornado(board) {
+        if !has_tornado {
             return MovementEffect::Keep;
         }
 
@@ -217,8 +276,8 @@ impl MovementModifier for TornadoCompulsionFilter {
         // `effective_mover_color`/`validate_move`; otherwise a Neutral
         // cart's passenger reads as Neutral and is never compelled.
         // Other-side candidates aren't legal anyway (turn is
-        // `validate_move`'s job); leave them untouched.
-        let side_to_move = board.flags.side_to_move;
+        // `validate_move`'s job); leave them untouched. (`side_to_move`
+        // was bound above for the memo key.)
         if effective_piece.get_color() != side_to_move {
             return MovementEffect::Keep;
         }
@@ -231,7 +290,7 @@ impl MovementModifier for TornadoCompulsionFilter {
         // short-circuit) voids that guarantee for the compulsion too —
         // such a variant must independently disable/redefine the
         // compulsion. See plan 13 "Check interaction is free" bullet.
-        if side_can_reach_tornado(board, side_to_move) {
+        if side_can_reach {
             let lands_on_tornado = move_destination(game_move)
                 .map(|d| is_tornado_square(board, &d))
                 .unwrap_or(false);
@@ -793,6 +852,50 @@ mod tests {
             "the non-king rook must keep its check-resolving capture; \
              the tornado must not arm the compulsion off a non-king-safe \
              move (got {rook_moves:?})"
+        );
+    }
+
+    /// Audit Round-A/A-DoS regression: the pass-scoped probe memo must
+    /// NOT leak across distinct legal-move queries on the same thread.
+    /// Each `legal_moves` call bumps the epoch, so a compelled board
+    /// and a non-compelled board evaluated back-to-back on one thread
+    /// must each get their own correct result (no stale reuse).
+    #[test]
+    fn probe_memo_does_not_leak_across_queries() {
+        // Compelled position: rook forced onto the tornado, knight gets
+        // nothing.
+        let mut compelled = board8();
+        compelled.grid[7][0] =
+            Square::new().set_piece(PieceType::new_rook(Color::White));
+        compelled.grid[7][6] =
+            Square::new().set_piece(PieceType::new_knight(Color::White));
+        compelled.grid[3][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+
+        // A completely separate, tornado-free position.
+        let mut free = board8();
+        free.grid[7][6] =
+            Square::new().set_piece(PieceType::new_knight(Color::White));
+
+        // Interleave on ONE thread. If the memo keyed on anything
+        // weaker than the per-query epoch, the second/third results
+        // would be the first's stale answer.
+        assert_eq!(
+            compelled.legal_moves(&c(0, 7)),
+            vec![move_to(c(0, 7), c(0, 3))],
+            "compelled query #1"
+        );
+        assert!(
+            !free.legal_moves(&c(6, 7)).is_empty(),
+            "non-compelled query must NOT reuse the compelled memo"
+        );
+        assert!(
+            compelled.legal_moves(&c(6, 7)).is_empty(),
+            "compelled query #2 (knight) must recompute, not reuse free's"
+        );
+        assert!(
+            !free.legal_moves(&c(6, 7)).is_empty(),
+            "non-compelled query #2 still correct after interleaving"
         );
     }
 }
