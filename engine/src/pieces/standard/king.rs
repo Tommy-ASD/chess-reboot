@@ -67,6 +67,17 @@ impl King {
                 if !s.square_type.is_walkable() {
                     return false;
                 }
+                // Audit R3/B1: a rook trapped on a tornado square is
+                // immobilised (plan 13 Concept 2). Castling must not
+                // rescue it off the tile — exact same rationale as the
+                // closed-Gate walkability guard directly above. The king
+                // itself stays tornado-exempt (Concept 4), so a king on
+                // a tornado may still castle provided its rook is free.
+                if s.conditions.iter().any(|c| {
+                    matches!(c, crate::board::square::SquareCondition::Tornado { .. })
+                }) {
+                    return false;
+                }
                 matches!(
                     s.piece.as_ref(),
                     Some(PieceType::Rook(r)) if r.color == self.color

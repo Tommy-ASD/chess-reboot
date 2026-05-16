@@ -4,9 +4,17 @@
 type + FEN (`C=TORNADO:<n>`), env-reaction countdown,
 `TornadoCompulsionFilter` (priority 305, recursion-guarded probe),
 and the `Stormcaller` + `MoveType::PlaceTornado` placer are all
-shipped and tested (full engine suite green). Resolved en route:
-cadence is **per-ply** (not `TrainTickRate`-coupled — open question 2
-below); placer name is **Stormcaller** (confirmed). Open: the
+shipped and tested (full **workspace** suite green — engine + api).
+Three paranoid-audit rounds applied: R1 (`28a9dea`) added the
+`make_move`/`validate_move` compulsion enforcement (C1) + test/doc
+fixes; R2 (`fa8ee0b`) fixed a king-in-carrier-on-tornado false
+stalemate (the filter now resolves the effective passenger piece for
+`PieceInCarrier` candidates) and an api-crate build break the
+engine-only test run had masked; R3 stopped a tornado-trapped rook
+being rescued by castling and strengthened two tests. Resolved en
+route: cadence is **per-ply** (not `TrainTickRate`-coupled — open
+question 2 below); placer name is **Stormcaller** (confirmed). Open:
+the
 same-turn-tick interaction means a freshly placed `dur=3` reads as 2
 on the opponent's turn (documented in `stormcaller.rs`; duration cap
 is open question 1). Commit 5 (frontend brush + countdown overlay)
@@ -380,10 +388,11 @@ plan 12's specificity:
   them lands on the tornado, restricted to it; if none does, normal
   check-evasion set (the filter never forces an illegal escape).
 
-### Shipped test mapping (audit R1: E2/E3/E4)
+### Shipped test mapping (audit R1–R3)
 
 The list above is the design intent; the shipped names differ and a
-few were strengthened during the round-1 audit. Greppable mapping:
+number were strengthened across three paranoid-audit rounds (R1
+commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
 
 | Plan name | Shipped test(s) | Notes |
 |---|---|---|
@@ -397,6 +406,8 @@ few were strengthened during the round-1 audit. Greppable mapping:
 | `test_tornado_tick_dissipates` | `tornado_tick_removes_at_zero` + `tornado_tick_frees_trapped_piece` + `tornado_dissipates_through_real_make_move` | the freed-piece "moves again" half and an end-to-end across real `make_move` plies were added in R1 |
 | `test_tornado_compulsion_intersects_check` | `compulsion_intersects_check_no_force_when_unsafe` + `compulsion_intersects_check_forces_legal_block` | split into the two faces; the second also pins king-exemption under active compulsion |
 | — | `make_move_enforces_compulsion`, `make_move_rejects_moving_trapped_piece`, `tornado_tick_multi_condition_on_one_square` | added in R1 (C1 enforcement; B2 multi-condition) |
+| — | `king_passenger_in_carrier_on_tornado_not_trapped`, `make_move_lets_king_passenger_escape_carrier_on_tornado`, `non_king_passenger_of_carrier_on_tornado_not_trapped` | added in R2/R3 — fix for the king-in-carrier-on-tornado false stalemate (R2-2): the filter resolves the *effective* passenger piece for `PieceInCarrier` candidates so a king (or any passenger) riding a carrier is not wrongly trapped/compelled |
+| — | `castle_blocked_when_rook_trapped_on_tornado`, `compulsion_intersects_check_non_king_evasion_survives` | added in R3 — a rook trapped on a tornado is not rescued by castling (R3/B1); a non-king check evasion is not stripped when the tornado is only reachable via a non-king-safe move (R3/B4) |
 
 ## Things to be careful about
 
@@ -506,10 +517,13 @@ documented here so the asymmetries are explicit rather than emergent.
    keeps its fuse short for the same reason; competitive variants may
    want `≤ 3` hard-capped while composition allows longer. Defer to a
    variant flag; v1 ships the constant.
-2. **Tick cadence.** Per-ply or per-full-turn? The env-reaction
-   registry runs per the existing tick cadence; recommend matching the
-   train tick (whatever `TrainTickRate` resolves to for the position)
-   so all timed board state shares one clock. Confirm.
+2. **Tick cadence — RESOLVED (audit R3/B2).** Per-ply, deliberately
+   **decoupled** from `TrainTickRate`. `TornadoTickHandler` fires every
+   `PostTick` ply (gated only by `any_tornado`, never `ctx.train_ticked`).
+   The earlier "match the train tick" idea was rejected: a tornado's
+   life is its own clock and coupling `remaining` to the train flag
+   would make it unreadable. See the status banner and
+   `engine/src/movement/env_reactions.rs` `TornadoTickHandler`.
 3. **Placement onto a king's square.** King is exempt, so a tornado
    stamped under a king is inert until the king leaves. Recommend
    allow-but-inert (consistent, no extra rule) over forbidding it.

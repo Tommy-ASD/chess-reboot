@@ -384,8 +384,9 @@ mod tests {
     }
 
     /// The probe terminates (no infinite recursion through the capped
-    /// resolve). Several reachable pieces exercise the probe loop more
-    /// than once; completion is the assertion.
+    /// resolve). `side_can_reach_tornado` short-circuits on the first
+    /// reachable piece, so the position just needs one; completion of
+    /// `legal_moves` (rather than a hang) is the assertion.
     #[test]
     fn compulsion_terminates_no_recursion() {
         let mut b = board8();
@@ -673,30 +674,112 @@ mod tests {
             .expect("make_move must accept the king-passenger's escape");
     }
 
-    /// Audit R2/finding-1 guard: the fix must NOT loosen the non-PIC
-    /// trap. A carrier *itself* standing on a tornado still has its own
-    /// top-level moves trapped; only the *passenger's* exits (governed
-    /// by the compulsion, here unarmed) survive.
+    /// Audit R2/finding-1 + R3/A6: the non-king counterpart of
+    /// `king_passenger_in_carrier_on_tornado_not_trapped`. A carrier on
+    /// a tornado must NOT trap its (non-king) passenger — the passenger
+    /// is not the piece standing on the tornado; the carrier is. (R3/A6:
+    /// the *carrier's own* / a normal piece's non-PIC trap is robustly
+    /// covered by `traps_the_occupant` and
+    /// `make_move_rejects_moving_trapped_piece`; the earlier
+    /// "no top-level MoveTo" assertion here was vacuous — a lone Bus
+    /// emits no top-level move anyway — so it's replaced by the
+    /// discriminating "every move is a passenger exit" check below.)
     #[test]
-    fn carrier_own_moves_still_trapped_on_tornado() {
+    fn non_king_passenger_of_carrier_on_tornado_not_trapped() {
         let b = crate::board::fen::fen_to_board(
             "7k/8/8/(P=BUS(P=(R)),C=TORNADO:3)7/8/8/8/8 w - -",
         );
         let moves = b.legal_moves(&c(0, 3));
-        // The Bus's own slider relocation (a plain MoveTo) is trapped…
+        // The rook passenger genuinely has exits (not vacuously empty),
+        // and every legal move from the carrier square is a passenger
+        // exit: the non-king passenger is NOT trapped, and the compulsion
+        // is not spuriously armed (the only piece is the on-tornado Bus,
+        // skipped by the probe's on-tornado skip — so non-tornado exits
+        // are kept rather than dropped).
         assert!(
-            !moves
+            !moves.is_empty()
+                && moves
+                    .iter()
+                    .all(|m| matches!(m.move_type, MoveType::PieceInCarrier { .. })),
+            "non-king passenger of a carrier-on-tornado must keep its \
+             exits (got {moves:?})"
+        );
+    }
+
+    /// Audit R3/B1: a rook trapped on a tornado square must NOT be
+    /// rescued by castling (plan 13 Concept 2) — same rationale as the
+    /// existing closed-Gate "stranded rook rescued by castling" guard
+    /// in `king::castle_moves`. The king itself stays tornado-exempt
+    /// (Concept 4): only the rook's tornado blocks the castle.
+    #[test]
+    fn castle_blocked_when_rook_trapped_on_tornado() {
+        // Control: White can castle kingside (K e1, R h1, rights, clear).
+        let mut b = board8();
+        b.flags.white_can_castle_kingside = true;
+        b.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        b.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        assert!(
+            b.legal_moves(&c(4, 7))
+                .iter()
+                .any(|m| matches!(m.move_type, MoveType::Castle { .. })),
+            "control: castling must be legal without the tornado"
+        );
+
+        // Tornado on the rook's home square → rook trapped → no castle.
+        let mut b2 = board8();
+        b2.flags.white_can_castle_kingside = true;
+        b2.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        b2.grid[7][7] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        let king_moves = b2.legal_moves(&c(4, 7));
+        assert!(
+            !king_moves
+                .iter()
+                .any(|m| matches!(m.move_type, MoveType::Castle { .. })),
+            "a rook trapped on a tornado must not be rescued by castling"
+        );
+        // The king is NOT over-restricted: Concept 4 keeps its normal
+        // steps (it is not on a tornado and the compulsion is unarmed —
+        // the only other white piece, the rook, is on the tornado and
+        // is skipped by the probe).
+        assert!(
+            king_moves
                 .iter()
                 .any(|m| matches!(m.move_type, MoveType::MoveTo(_))),
-            "carrier's own MoveTo must remain trapped (non-PIC path)"
+            "king keeps its ordinary moves (only the castle is blocked)"
         );
-        // …while the rook passenger's exits are NOT wrongly trapped
-        // (compulsion isn't armed: nothing else can reach the tornado).
+    }
+
+    /// Audit R3/B4: discriminating companion to
+    /// `compulsion_intersects_check_no_force_when_unsafe` (which only
+    /// asserted on the always-exempt king). A NON-king piece with a
+    /// legal, non-tornado-landing check evasion must keep it: the
+    /// compulsion must not arm off a move that isn't king-safe (the
+    /// probe is capped *above* king-safety, so an only-reachable-while-
+    /// in-check tornado cannot arm it).
+    #[test]
+    fn compulsion_intersects_check_non_king_evasion_survives() {
+        let mut b = board8();
+        b.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+        // Black rook checks down file 4.
+        b.grid[0][4] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        // White rook on rank 0 can capture the checker at (4,0) — a
+        // king-safe, check-resolving, NON-tornado move.
+        b.grid[0][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        // Tornado in the corner: reachable only by a move that does NOT
+        // resolve the check (so king-safety drops it, in the real set
+        // AND in the capped probe) → compulsion must stay unarmed.
+        b.grid[0][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+
+        let rook_moves = b.legal_moves(&c(7, 0));
         assert!(
-            moves
-                .iter()
-                .any(|m| matches!(m.move_type, MoveType::PieceInCarrier { .. })),
-            "passenger exits must survive (passenger is not on the tornado)"
+            !rook_moves.is_empty()
+                && rook_moves.iter().any(|m| *m == move_to(c(7, 0), c(4, 0))),
+            "the non-king rook must keep its check-resolving capture; \
+             the tornado must not arm the compulsion off a non-king-safe \
+             move (got {rook_moves:?})"
         );
     }
 }
