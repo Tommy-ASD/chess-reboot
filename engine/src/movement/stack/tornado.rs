@@ -144,7 +144,12 @@ pub(crate) fn any_tornado(board: &Board) -> bool {
 }
 
 /// Does the square at `coord` carry a `Tornado` condition?
-fn is_tornado_square(board: &Board, coord: &Coord) -> bool {
+///
+/// `pub(crate)` so the lone external membership site (king-castle's
+/// rook-trap guard) shares this one definition rather than open-coding
+/// the `matches!` scan — same single-source-of-truth rationale as
+/// [`any_tornado`].
+pub(crate) fn is_tornado_square(board: &Board, coord: &Coord) -> bool {
     board
         .get_square_at(coord)
         .map(|sq| {
@@ -304,7 +309,8 @@ impl MovementModifier for TornadoCompulsionFilter {
         // Other-side candidates aren't legal anyway (turn is
         // `validate_move`'s job); leave them untouched. (`side_to_move`
         // was bound above for the memo key.)
-        if effective_piece.get_color() != side_to_move {
+        let (effective_color, _) = board.effective_mover_color(piece, game_move);
+        if effective_color != side_to_move {
             return MovementEffect::Keep;
         }
 

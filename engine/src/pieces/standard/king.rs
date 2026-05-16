@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, CastleSide, Coord, GameMove, MoveType, square::SquareCondition},
+    board::{Board, CastleSide, Coord, GameMove, MoveType},
     movement::glider::{OMNI_DIRS, generate_glider_moves},
     pieces::{Color, Piece, piecetype::PieceType},
 };
@@ -73,9 +73,7 @@ impl King {
                 // closed-Gate walkability guard directly above. The king
                 // itself stays tornado-exempt (Concept 4), so a king on
                 // a tornado may still castle provided its rook is free.
-                if s.conditions.iter().any(|c| {
-                    matches!(c, SquareCondition::Tornado { .. })
-                }) {
+                if crate::movement::stack::tornado::is_tornado_square(board, sq) {
                     return false;
                 }
                 matches!(
