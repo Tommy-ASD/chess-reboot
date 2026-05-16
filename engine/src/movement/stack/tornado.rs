@@ -77,6 +77,16 @@ struct ProbeMemo {
 fn compelled_facts(board: &Board, side: Color) -> (bool, bool) {
     let epoch = resolve_legal_epoch();
     if let Some(m) = PROBE_MEMO.with(|c| *c.borrow()) {
+        // `epoch` carries the correctness contract: `resolve_legal_moves`
+        // is the SOLE bumper and the board is immutable for that call,
+        // so equal epoch ⇒ same board. `side` is **defensive only** —
+        // `apply` always probes `board.flags.side_to_move` (one value
+        // per query), so no public path ever calls `compelled_facts`
+        // with two different `side`s at the same epoch; the sub-key
+        // exists so a future caller that did would not get a stale
+        // cross-side hit. Audit R-D/GAP-7: this is intentionally not
+        // unit-killable (it guards an unreachable-via-public-API case);
+        // do not "simplify" it away.
         if m.epoch == epoch && m.side == side {
             return (m.any_tornado, m.side_can_reach);
         }
@@ -896,6 +906,115 @@ mod tests {
         assert!(
             !free.legal_moves(&c(6, 7)).is_empty(),
             "non-compelled query #2 still correct after interleaving"
+        );
+    }
+
+    /// Audit R-D/GAP-5 (Medium): pins the documented "a Bus
+    /// passenger's exit onto a tornado DOES arm + is subject to the
+    /// compulsion" behavior (the `move_destination` PIC-inner arm).
+    /// White Bus carrying a Rook (off any tornado); the rook can exit
+    /// straight down file 4 onto a tornado at (4,1) and to many
+    /// non-tornado squares. The Bus is the side's only non-king piece,
+    /// so the passenger-exit is itself the arming move (probe iterates
+    /// the top-level Bus → PIC candidates → `move_destination` resolves
+    /// the inner dest). Under the armed compulsion ONLY the
+    /// tornado-landing exit survives. If `move_destination`'s PIC inner
+    /// arm regressed to `None`, nothing would arm (no exit "lands on"
+    /// the tornado) and every exit would survive — failing the
+    /// all-land-on-tornado assertion.
+    #[test]
+    fn bus_passenger_exit_onto_tornado_is_compelled() {
+        let b = crate::board::fen::fen_to_board(
+            "8/4(C=TORNADO:3)3/8/8/4(P=BUS(P=(R)))3/8/8/7k w - -",
+        );
+        let moves = b.legal_moves(&c(4, 4));
+        assert!(!moves.is_empty(), "passenger must have the forced exit");
+        // Compulsion is active: EVERY surviving move lands on the
+        // tornado (the Bus may also slide there itself — both are
+        // legitimately compelled).
+        assert!(
+            moves.iter().all(|m| move_destination(m)
+                .map(|d| is_tornado_square(&b, &d))
+                .unwrap_or(false)),
+            "compulsion must drop every non-tornado move; got {moves:?}"
+        );
+        // The discriminating clause for GAP-5: the Bus *passenger's*
+        // exit onto the tornado must SURVIVE. If `move_destination`'s
+        // PIC-inner arm regressed to `None`, the passenger exit would
+        // resolve to no-destination → be dropped as non-tornado-landing
+        // (the Bus's own top-level slide would still arm the
+        // compulsion), and this assertion would fail.
+        assert!(
+            moves.iter().any(|m| matches!(
+                m.move_type,
+                MoveType::PieceInCarrier { .. }
+            )),
+            "the Bus passenger's exit onto the tornado must survive the \
+             compulsion (pins move_destination's PIC-inner arm); got {moves:?}"
+        );
+    }
+
+    /// Audit R-D/GAP-4 (Low): a Stormcaller under an active compulsion
+    /// (armed by a different same-side piece) cannot use PlaceTornado
+    /// to sidestep it — `move_destination(PlaceTornado) == None`, so it
+    /// never "lands on" a tornado and is dropped (D6 parallel). It must
+    /// still be forced to STEP onto the tornado if it can. Mutating
+    /// that arm to `Some(target)` would let a PlaceTornado onto the
+    /// tornado square survive — failing the "no PlaceTornado" assert.
+    #[test]
+    fn stormcaller_placetornado_dropped_under_armed_compulsion() {
+        // (3,0) tornado, armed by the White rook on (7,0) (clear rank
+        // 0). White Stormcaller adjacent at (3,1).
+        let b = crate::board::fen::fen_to_board(
+            "3(C=TORNADO:3)3R/3W4/8/8/8/8/8/7k w - -",
+        );
+        let moves = b.legal_moves(&c(3, 1));
+        assert!(
+            moves.iter().any(|m| *m == move_to(c(3, 1), c(3, 0))),
+            "Stormcaller must be forced to STEP onto the tornado; got {moves:?}"
+        );
+        assert!(
+            !moves
+                .iter()
+                .any(|m| matches!(m.move_type, MoveType::PlaceTornado { .. })),
+            "no PlaceTornado may survive an active compulsion (it has \
+             no landing square); got {moves:?}"
+        );
+    }
+
+    /// Audit R-D/GAP-10 (Low): example-based pin for the `u8` boundary
+    /// and the `+`-leniency idempotence, so these don't rest solely on
+    /// the `tornado_fen_roundtrip_idempotent` proptest.
+    #[test]
+    fn tornado_fen_boundary_and_plus_leniency() {
+        // 255 boundary round-trips byte-identically.
+        let b = crate::board::fen::fen_to_board(
+            "(C=TORNADO:255)7/8/8/8/8/8/8/8 w - -",
+        );
+        assert!(
+            b.grid[0][0].conditions.iter().any(|x| matches!(
+                x,
+                SquareCondition::Tornado { remaining: 255 }
+            )),
+            "C=TORNADO:255 must parse to remaining=255"
+        );
+        assert!(crate::board::fen::board_to_fen(&b).contains("C=TORNADO:255"));
+
+        // Leading '+' is accepted by u8::from_str and is idempotent.
+        let bp = crate::board::fen::fen_to_board(
+            "(C=TORNADO:+3)7/8/8/8/8/8/8/8 w - -",
+        );
+        assert!(
+            bp.grid[0][0].conditions.iter().any(|x| matches!(
+                x,
+                SquareCondition::Tornado { remaining: 3 }
+            )),
+            "C=TORNADO:+3 must parse to remaining=3"
+        );
+        assert!(
+            crate::board::fen::board_to_fen(&bp).contains("C=TORNADO:3")
+                && !crate::board::fen::board_to_fen(&bp).contains("+3"),
+            "the '+' must not survive re-serialization (idempotent fixed point)"
         );
     }
 }

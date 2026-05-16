@@ -5,13 +5,37 @@ type + FEN (`C=TORNADO:<n>`), env-reaction countdown,
 `TornadoCompulsionFilter` (priority 305, recursion-guarded probe),
 and the `Stormcaller` + `MoveType::PlaceTornado` placer are all
 shipped and tested (full **workspace** suite green — engine + api).
-Three paranoid-audit rounds applied: R1 (`28a9dea`) added the
-`make_move`/`validate_move` compulsion enforcement (C1) + test/doc
-fixes; R2 (`fa8ee0b`) fixed a king-in-carrier-on-tornado false
-stalemate (the filter now resolves the effective passenger piece for
-`PieceInCarrier` candidates) and an api-crate build break the
-engine-only test run had masked; R3 stopped a tornado-trapped rook
-being rescued by castling and strengthened two tests. Resolved en
+Six correctness-logic rounds (R1–R6) then four NEW-ANGLE rounds
+(A–D): R1 (`28a9dea`) added the `make_move`/`validate_move`
+compulsion enforcement (C1) + test/doc fixes; R2 (`fa8ee0b`) fixed a
+king-in-carrier-on-tornado false stalemate (the filter now resolves
+the effective passenger piece for `PieceInCarrier` candidates) and an
+api-crate build break the engine-only test run had masked; R3 stopped
+a tornado-trapped rook being rescued by castling and strengthened two
+tests; R4–R6 were doc-precision-only and declared correctness
+CONVERGED. **New-angle passes:** Round A (security/robustness,
+`0ed523d`) found + fixed a Critical DoS amplifier — the per-candidate
+reachability probe is now a thread-local epoch-keyed pass-scoped memo
+(once per legal-move query, not per candidate); Round B
+(game-theoretic/temporal) was clean and independently re-validated
+the memo is observationally pure; Round C (signals × tornado /
+nested-gen / differential) was decisively clean; Round D
+(backward-compat + test-suite mutation-adequacy) confirmed every
+change is additive/behavior-preserving with zero pre-tornado
+behavior change, and added three mutation-killing tests
+(`bus_passenger_exit_onto_tornado_is_compelled`,
+`stormcaller_placetornado_dropped_under_armed_compulsion`,
+`tornado_fen_boundary_and_plus_leniency`). Accepted low gaps,
+documented not patched: the `compelled_facts` `side` sub-key is
+defensive-only (unreachable as a distinct outcome via the public API
+— commented in code, R-D/GAP-7); EnPassant-landing-onto-tornado and
+Neutral-cart-passenger-color-gate are one-line mirrors of the
+already-tested `WalkabilityFilter::destination` / `effective_mover_
+color` paths (R-D/GAP-3, GAP-2 — low risk, a regression there also
+breaks the tested mirror). The pre-existing baseline issues Round A
+surfaced (api timeout/body-limit/`catch_unwind`, FEN multi-digit
+run-length, `format_coord` overflow) are NOT tornado-introduced and
+remain out of plan-13 scope. Resolved en
 route: cadence is **per-ply** (not `TrainTickRate`-coupled — open
 question 2 below); placer name is **Stormcaller** (confirmed). Open:
 the
@@ -416,6 +440,9 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
 | — | `make_move_enforces_compulsion`, `make_move_rejects_moving_trapped_piece`, `tornado_tick_multi_condition_on_one_square` | added in R1 (C1 enforcement; B2 multi-condition) |
 | — | `king_passenger_in_carrier_on_tornado_not_trapped`, `make_move_lets_king_passenger_escape_carrier_on_tornado`, `non_king_passenger_of_carrier_on_tornado_not_trapped` | added in R2/R3 — fix for the king-in-carrier-on-tornado false stalemate (R2-2): the filter resolves the *effective* passenger piece for `PieceInCarrier` candidates so a king (or any passenger) riding a carrier is not wrongly trapped/compelled |
 | — | `castle_blocked_when_rook_trapped_on_tornado`, `compulsion_intersects_check_non_king_evasion_survives` | added in R3 — a rook trapped on a tornado is not rescued by castling (R3/B1); a non-king check evasion is not stripped when the tornado is only reachable via a non-king-safe move (R3/B4) |
+| — | `probe_memo_does_not_leak_across_queries` | Round A — the DoS-fix epoch-keyed probe memo must not leak a stale `(any_tornado, side_can_reach)` across distinct legal-move queries on one thread |
+| — | `tornado_fen_roundtrip_idempotent` (proptest, `tests/properties.rs`) | Round A — fuzzes `remaining` 0..=255 (+ a Frozen sibling); the random-play harness never seeded a tornado so the FEN safety net had zero `C=TORNADO:<n>` coverage |
+| — | `bus_passenger_exit_onto_tornado_is_compelled`, `stormcaller_placetornado_dropped_under_armed_compulsion`, `tornado_fen_boundary_and_plus_leniency` | Round D — mutation-adequacy pins: the documented Bus-passenger-exit-arms-compulsion path (`move_destination` PIC-inner arm); PlaceTornado has no landing so it's dropped under an armed compulsion (D6 parallel); `C=TORNADO:255` byte round-trip + `:+3`→3 idempotence (off the single-proptest dependency) |
 
 ## Things to be careful about
 
