@@ -464,6 +464,36 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
   move dumps a piece into the tornado is a forced bleed. Intended —
   it is the composition use. The brakes are the countdown and the
   tempo the Stormcaller spent placing it, not a softening of the rule.
+- **Terminal-state consequence — an immortal tornado can make a game
+  engine-unterminable (audit Round-B, acceptable-by-design).** The
+  engine has no draw / repetition / 50-move machinery (deliberate
+  project scope — see plans/README open questions; `status()` only
+  yields Checkmate/Stalemate/Check/Ongoing). A tornado that never
+  expires — Frozen-paused (the tick is suspended) or Stormcaller-
+  refreshed every ≤`TORNADO_DURATION` plies (PlaceTornado resets
+  `remaining`, unbounded) — can force a side every ply with the king
+  always safe, so `status()` stays `Ongoing` forever. This is **not a
+  tornado-specific defect**: the same non-termination already exists
+  in base play (kings shuffling with no 50-move rule); tornado merely
+  adds another way to *force* it. Resolving it is the job of the
+  already-planned draw machinery, not a tornado change; the duration
+  cap is plan-13 Open Question 1. `status()`↔`make_move` stay in
+  lockstep throughout (both read the one `legal_moves` set), and
+  Round-B independently re-verified the Round-A probe memo is
+  observationally pure (exactly one `resolve_legal_moves` per
+  `make_move` — the C1 gate on the immutable pre-move board at a fresh
+  epoch; every other reachable resolve is capped ≤304 or on the
+  Threat path where the 305 filter is mask-skipped). So no stale-read
+  or counting drift over arbitrarily long games.
+- **Forward note for `BrainrotWin` (plan 04, unimplemented).** When a
+  brainrot-win terminal is added, its "brainrot caused the side to
+  have no moves" predicate must be derived from `status()`'s existing
+  post-305 emptiness probe (the same `legal_moves` aggregation), NOT a
+  "every piece sits on a Brainrot square" scan — otherwise a
+  tornado-*trapped* (non-brainrotted) piece, or a square that is both
+  Brainrot and Tornado, would be mis-attributed to a brainrot-win.
+  Shipped code is unaffected (`BrainrotWin` absent → deterministic
+  `Stalemate`); this is a constraint on the future implementer.
 - **Probe memo — IMPLEMENTED (audit Round-A/A-DoS; was R1/E5
   "deferred perf").** The uncached per-candidate probe was not merely
   a perf nicety: a new-angle security pass showed a tens-of-bytes
