@@ -264,6 +264,15 @@ impl EnvReactionHandler for TornadoTickHandler {
         false
     }
     fn apply(&self, board: &mut Board, _ctx: &mut EnvReactionCtx) {
+        // Audit R1/B3: read-only fast-path so a tornado-free board (the
+        // overwhelmingly common case) pays one short-circuiting scan
+        // instead of a full `iter_mut` grid walk every ply. Mirrors the
+        // sibling handlers' perf gating (`TornadoCompulsionFilter`'s
+        // `any_tornado`, `BrainrotRecalcHandler`'s `train_ticked`) —
+        // shares the one `any_tornado` definition to avoid drift.
+        if !crate::movement::stack::tornado::any_tornado(board) {
+            return;
+        }
         for row in board.grid.iter_mut() {
             for sq in row.iter_mut() {
                 // Frozen suspends the countdown for this square.
@@ -577,5 +586,60 @@ mod tests {
         // Matches the train-tick stance: no env mutation during the
         // hypothetical-apply of legal-move validation.
         assert!(!h.runs_in_validation());
+    }
+
+    /// Audit R1/E4 (plan's `test_tornado_tick_dissipates`): a piece
+    /// trapped on a `remaining: 1` tornado has NO legal moves; after
+    /// one tick the condition is gone AND the formerly-trapped piece
+    /// can move again. The plan mandated the "moves again" half; the
+    /// shipped `tornado_tick_removes_at_zero` only checked removal.
+    #[test]
+    fn tornado_tick_frees_trapped_piece() {
+        use crate::board::Coord;
+        use crate::pieces::piecetype::PieceType;
+        let mut board = empty_board();
+        let sq = Coord { file: 4, rank: 4 };
+        board.grid[4][4] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .add_square_condition(SquareCondition::Tornado { remaining: 1 });
+
+        // Trapped while the tornado lives.
+        assert!(
+            board.legal_moves(&sq).is_empty(),
+            "rook on a tornado square must be trapped before dissipation"
+        );
+
+        TornadoTickHandler.apply(&mut board, &mut EnvReactionCtx::default());
+
+        assert!(
+            board.grid[4][4].conditions.is_empty(),
+            "tornado must be gone after the tick"
+        );
+        assert!(
+            !board.legal_moves(&sq).is_empty(),
+            "the formerly-trapped rook must move again once freed"
+        );
+    }
+
+    /// Audit R1/B2: two `Tornado` conditions on ONE square are
+    /// FEN-constructible (no dedup). Pin the documented aggregate
+    /// behaviour: every Tornado decrements; those hitting 0 are
+    /// removed; survivors stay. Guards a future loop refactor from
+    /// silently changing this to first-match-only.
+    #[test]
+    fn tornado_tick_multi_condition_on_one_square() {
+        let mut board = empty_board();
+        board.grid[1][1] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 1 })
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+
+        TornadoTickHandler.apply(&mut board, &mut EnvReactionCtx::default());
+
+        // The :1 decremented to 0 and was removed; the :3 → :2 survives.
+        assert_eq!(
+            board.grid[1][1].conditions,
+            vec![SquareCondition::Tornado { remaining: 2 }],
+            "each Tornado ticks independently; zero-reaching ones are dropped"
+        );
     }
 }

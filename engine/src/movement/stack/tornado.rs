@@ -52,7 +52,10 @@ pub const PROBE_CAP: u32 = TORNADO_PRIORITY - 1;
 
 /// Does any square on the board carry a `Tornado` condition? Cheap
 /// fast-path gate: when false the whole filter is a no-op `Keep`.
-fn any_tornado(board: &Board) -> bool {
+/// `pub(crate)` so `validate_move` (the make_move enforcement gate)
+/// and `TornadoTickHandler` share one definition rather than three
+/// drifting copies of the same scan.
+pub(crate) fn any_tornado(board: &Board) -> bool {
     board.grid.iter().flatten().any(|sq| {
         sq.conditions
             .iter()
@@ -178,6 +181,14 @@ impl MovementModifier for TornadoCompulsionFilter {
             return MovementEffect::Keep;
         }
 
+        // Concept 1's "never produces a self-checking move" guarantee
+        // depends on KingSafetyFilter (300) having filtered the set this
+        // runs over (305) and the probe's capped set (PROBE_CAP=304 still
+        // includes 300). A variant that disables king-safety
+        // (king_safety.rs has a documented unshipped Duck-Chess
+        // short-circuit) voids that guarantee for the compulsion too —
+        // such a variant must independently disable/redefine the
+        // compulsion. See plan 13 "Check interaction is free" bullet.
         if side_can_reach_tornado(board, side_to_move) {
             let lands_on_tornado = move_destination(game_move)
                 .map(|d| is_tornado_square(board, &d))
@@ -439,6 +450,154 @@ mod tests {
                 _ => true,
             }),
             "king is never compelled toward the tornado"
+        );
+    }
+
+    /// Audit R1/C1: `make_move` (not just `legal_moves`) must enforce
+    /// the compulsion. A non-tornado move while compelled is rejected
+    /// with `CompelledByTornado`; the forced tornado move is accepted.
+    #[test]
+    fn make_move_enforces_compulsion() {
+        use crate::board::MoveError;
+
+        // Compelled-away move is rejected by make_move itself.
+        let mut b = board8();
+        b.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        b.grid[7][6] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        b.grid[3][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        // A geometrically-valid, king-safe knight move that does NOT
+        // land on the tornado — legal pre-tornado, illegal under it.
+        let knight_move = b.legal_moves(&c(6, 7)); // empty (compelled)
+        assert!(knight_move.is_empty());
+        let err = b
+            .make_move(move_to(c(6, 7), c(5, 5)))
+            .expect_err("compelled side must not be able to play a non-tornado move");
+        assert!(
+            matches!(err, MoveError::CompelledByTornado { .. }),
+            "expected CompelledByTornado, got {err:?}"
+        );
+
+        // The forced tornado-landing move is accepted by make_move.
+        let mut b2 = board8();
+        b2.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        b2.grid[7][6] =
+            Square::new().set_piece(PieceType::new_knight(Color::White));
+        b2.grid[3][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        b2.make_move(move_to(c(0, 7), c(0, 3)))
+            .expect("the compelled tornado-landing move must be accepted");
+    }
+
+    /// Audit R1/C1: a piece trapped on a tornado square cannot be moved
+    /// by `make_move` either (the trap is enforced on the execution
+    /// path, not only in `legal_moves`).
+    #[test]
+    fn make_move_rejects_moving_trapped_piece() {
+        use crate::board::MoveError;
+        let mut b = board8();
+        b.grid[3][0] = Square::new()
+            .set_piece(PieceType::new_rook(Color::White))
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+        b.grid[7][6] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        let err = b
+            .make_move(move_to(c(0, 3), c(1, 3)))
+            .expect_err("a trapped piece must not be movable via make_move");
+        assert!(
+            matches!(err, MoveError::CompelledByTornado { .. }),
+            "expected CompelledByTornado, got {err:?}"
+        );
+        // The unrelated knight is not compelled (only tornado is the
+        // occupied (0,3)) — its move executes fine.
+        b.make_move(move_to(c(6, 7), c(5, 5)))
+            .expect("unrelated piece moves normally; compulsion not armed");
+    }
+
+    /// Audit R1/E2: strengthen the recursion guard beyond
+    /// termination-as-proof. Proves *structurally* that the probe does
+    /// not re-enter the compulsion filter: the const invariant
+    /// `PROBE_CAP < TORNADO_PRIORITY` holds, AND the probe's capped
+    /// resolve still returns non-tornado moves (i.e. the 305 filter
+    /// demonstrably did NOT run inside it) while the full `legal_moves`
+    /// (which DOES run 305) collapses to the single forced move. If the
+    /// probe re-entered the filter, the capped set would also be
+    /// collapsed and this test would fail.
+    #[test]
+    fn compulsion_probe_does_not_re_enter_filter() {
+        // Recursion-guard invariant, asserted (not just commented).
+        assert!(PROBE_CAP < TORNADO_PRIORITY);
+        assert_eq!(PROBE_CAP, TORNADO_PRIORITY - 1);
+
+        let mut b = board8();
+        b.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        b.grid[7][6] = Square::new().set_piece(PieceType::new_knight(Color::White));
+        b.grid[3][0] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+
+        let stack = crate::movement::stack::default_stack();
+        // Probe-equivalent resolve, capped just below the filter.
+        let capped = stack.resolve_moves_capped(&b, &c(0, 7), PROBE_CAP);
+        // It reaches the tornado square...
+        assert!(
+            capped.iter().any(|m| *m == move_to(c(0, 7), c(0, 3))),
+            "capped probe must see the tornado-landing move"
+        );
+        // ...AND it still contains non-tornado moves — proof the 305
+        // compulsion filter did NOT run inside the capped probe (no
+        // re-entry). If it had, these would be dropped.
+        assert!(
+            capped.iter().any(|m| match &m.move_type {
+                MoveType::MoveTo(d) => !is_tornado_square(&b, d),
+                _ => true,
+            }),
+            "capped probe must retain non-tornado moves (filter excluded)"
+        );
+        assert!(capped.len() > 1);
+
+        // The full legal set DOES run the 305 filter → collapses to the
+        // single forced move. Filter ran outside, not inside the probe;
+        // the whole resolution terminated.
+        assert_eq!(b.legal_moves(&c(0, 7)), vec![move_to(c(0, 7), c(0, 3))]);
+    }
+
+    /// Audit R1/B1: end-to-end — a tornado's countdown is wired into
+    /// the real `make_move` pipeline (not just the direct handler) and
+    /// dissipates after the expected number of plies. Pieces are
+    /// positioned so NOTHING can reach the tornado square (compulsion
+    /// never arms), isolating the countdown-through-make_move path.
+    #[test]
+    fn tornado_dissipates_through_real_make_move() {
+        let mut b = board8();
+        // Kings present (king-safety meaningful), far from each other
+        // and from the tornado; rooks that cannot reach (4,4) in one
+        // move and don't check either king.
+        b.grid[7][0] = Square::new().set_piece(PieceType::new_king(Color::White));
+        b.grid[0][7] = Square::new().set_piece(PieceType::new_king(Color::Black));
+        b.grid[7][2] = Square::new().set_piece(PieceType::new_rook(Color::White));
+        b.grid[0][5] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+        b.grid[4][4] = Square::new()
+            .add_square_condition(SquareCondition::Tornado { remaining: 2 });
+
+        assert_eq!(
+            b.grid[4][4].conditions,
+            vec![SquareCondition::Tornado { remaining: 2 }]
+        );
+
+        // Ply 1 (White rook shuffles): tick 2 → 1.
+        b.make_move(move_to(c(2, 7), c(3, 7)))
+            .expect("white rook move is legal (compulsion not armed)");
+        assert_eq!(
+            b.grid[4][4].conditions,
+            vec![SquareCondition::Tornado { remaining: 1 }],
+            "one real make_move ply must tick the tornado once"
+        );
+
+        // Ply 2 (Black rook shuffles): tick 1 → 0 → removed.
+        b.make_move(move_to(c(5, 0), c(4, 0)))
+            .expect("black rook move is legal");
+        assert!(
+            b.grid[4][4].conditions.is_empty(),
+            "tornado must dissipate through the real make_move pipeline"
         );
     }
 }

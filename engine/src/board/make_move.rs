@@ -385,7 +385,23 @@ impl Board {
                     sq.conditions
                         .push(SquareCondition::Tornado { remaining: dur });
                 }
-                debug!(?from, ?target, dur, "tornado placed");
+                // Audit R1/E-4e: a tornado on a non-walkable square
+                // (Block/Turret/Vent) is inert — no piece can ever stand
+                // there to be trapped, and WalkabilityFilter drops any
+                // move that would land on it, so it never satisfies a
+                // compulsion either. It still counts down harmlessly.
+                // Surfaced (not silently inert) per the project's
+                // lenient-but-loud convention.
+                if sq.square_type.is_walkable() {
+                    debug!(?from, ?target, dur, "tornado placed");
+                } else {
+                    debug!(
+                        ?from, ?target, dur,
+                        "tornado placed on a non-walkable square — inert \
+                         (no piece can be trapped/compelled there) but it \
+                         still counts down"
+                    );
+                }
             }
             MoveType::PieceInCarrier {
                 piece_index,

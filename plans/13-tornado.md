@@ -380,6 +380,24 @@ plan 12's specificity:
   them lands on the tornado, restricted to it; if none does, normal
   check-evasion set (the filter never forces an illegal escape).
 
+### Shipped test mapping (audit R1: E2/E3/E4)
+
+The list above is the design intent; the shipped names differ and a
+few were strengthened during the round-1 audit. Greppable mapping:
+
+| Plan name | Shipped test(s) | Notes |
+|---|---|---|
+| `test_tornado_fen_roundtrip` | `test_tornado_fen_roundtrip` (+ `_bare_defaults_to_3`, `_zero_clamps_to_1`, `_garbage_suffix_defaults_to_3`) | exact + extra edges |
+| `test_tornado_compulsion_restricts_set` | `compulsion_restricts_the_set` | |
+| `test_tornado_no_reachable_mover_is_noop` | `no_reachable_mover_is_noop` | |
+| `test_tornado_traps_occupant` | `traps_the_occupant` | |
+| `test_tornado_forces_enemy_capture` | `forces_capture_of_trapped_enemy` | |
+| `test_tornado_king_exempt` | `king_is_exempt` | both faces |
+| `test_tornado_compulsion_no_recursion` | `compulsion_terminates_no_recursion` + `compulsion_probe_does_not_re_enter_filter` | the second proves *structurally* the probe excludes the 305 filter (capped set retains non-tornado moves) + asserts the `PROBE_CAP < TORNADO_PRIORITY` invariant — stronger than the trace-mode idea, which the stack API doesn't expose for the uncapped legal path |
+| `test_tornado_tick_dissipates` | `tornado_tick_removes_at_zero` + `tornado_tick_frees_trapped_piece` + `tornado_dissipates_through_real_make_move` | the freed-piece "moves again" half and an end-to-end across real `make_move` plies were added in R1 |
+| `test_tornado_compulsion_intersects_check` | `compulsion_intersects_check_no_force_when_unsafe` + `compulsion_intersects_check_forces_legal_block` | split into the two faces; the second also pins king-exemption under active compulsion |
+| — | `make_move_enforces_compulsion`, `make_move_rejects_moving_trapped_piece`, `tornado_tick_multi_condition_on_one_square` | added in R1 (C1 enforcement; B2 multi-condition) |
+
 ## Things to be careful about
 
 - **The compulsion is a set rule, not a per-piece rule.** It is
@@ -393,12 +411,26 @@ plan 12's specificity:
   priority (300) or the cap convention has to keep `probe_cap <
   compulsion_priority ≤ everything that consumes the result`. Pin the
   priorities in a test comment.
-- **Check interaction is free.** Phrasing the rule as "intersect with
-  the already-king-safety-filtered set" means the scary case ("must I
-  walk into check to obey the tornado?") cannot arise — check
-  resolution is baked into `L` at priority 300 before the filter at
-  305 runs. No special case; the `test_tornado_compulsion_intersects_check`
-  test guards it.
+- **Check interaction is free — but depends on king-safety running
+  (audit R1/E-4f).** Phrasing the rule as "intersect with the
+  already-king-safety-filtered set" means the scary case ("must I walk
+  into check to obey the tornado?") cannot arise — check resolution is
+  baked into `L` at priority 300 before the filter at 305 runs. **This
+  guarantee is conditional on `KingSafetyFilter` (300) actually
+  filtering.** `king_safety.rs` carries a documented (unshipped)
+  Duck-Chess short-circuit that makes king-safety a no-op when that
+  variant is active (Duck Chess has no concept of check). Any variant
+  that disables king-safety voids Concept 1's "never self-checking"
+  proof for the compulsion too: such a variant **must independently
+  decide tornado semantics** (most likely: also disable the compulsion,
+  mirroring the king-safety opt-out). Not a present bug — Duck Chess is
+  unshipped and `any_tornado` is inert without a tornado — but the
+  dependency is load-bearing and is cross-referenced in a comment at
+  `TornadoCompulsionFilter::apply`. Guarded by the two shipped tests
+  `compulsion_intersects_check_no_force_when_unsafe` and
+  `compulsion_intersects_check_forces_legal_block` (the single
+  `test_tornado_compulsion_intersects_check` in the test list below was
+  split into these two faces — see the test-list note).
 - **Multi-tornado: satisfy one.** If several tornado squares are
   reachable, the side must move onto *some* one of them; one
   discharges the turn. The filter already does this (it keeps every
@@ -413,14 +445,60 @@ plan 12's specificity:
   move dumps a piece into the tornado is a forced bleed. Intended —
   it is the composition use. The brakes are the countdown and the
   tempo the Stormcaller spent placing it, not a softening of the rule.
-- **Memoize the probe.** One uncached probe per candidate is
-  O(pieces × moves) inside an O(pieces × moves) aggregation — square
-  cost. Pass-scoped memo keyed by side (board is immutable through the
-  stack). Without it, large positions get slow; with it, it's one
-  extra full move-gen per legal-move query.
-- **`piece_at_is_king` / `square_has_tornado` / `side_can_reach_tornado`
-  are new `Board` helpers.** Keep them small and pure; they are the
-  only new surface on `Board` itself.
+- **Memoize the probe (deferred — perf only, audit R1/E5).** One
+  uncached probe per candidate is O(pieces × moves) inside an
+  O(pieces × moves) aggregation — square cost. A pass-scoped memo
+  keyed by side (board is immutable through the stack) is the planned
+  optimisation but is **not implemented**: correctness does not depend
+  on it, and the `any_tornado` fast-path makes the common (no-tornado)
+  game free, so the square cost only bites with a live tornado. Revisit
+  before any perft/search work touches tornado positions.
+- **Helper placement (as built — audit R1/E1).** The §Types pseudocode
+  above shows `board.piece_at_is_king` / `board.square_has_tornado` /
+  `board.side_can_reach_tornado` for readability, but the shipped
+  implementation puts these in `movement/stack/tornado.rs` as private
+  free functions (`any_tornado`, `is_tornado_square`,
+  `side_can_reach_tornado`, `move_destination`); the king test is an
+  inline `matches!(piece, PieceType::King(_))`. **`Board` gains no new
+  methods.** `any_tornado` is `pub(crate)` so `validate_move`'s
+  enforcement gate and `TornadoTickHandler`'s fast-path share one
+  definition. This is deliberately a smaller surface than the
+  pseudocode implied; the pseudocode is illustrative, not literal.
+
+## Cross-system interactions (audit R1)
+
+These were traced during the round-1 audit and confirmed coherent;
+documented here so the asymmetries are explicit rather than emergent.
+
+- **Trains are immune (R1/E-4a).** Locomotives/Carriages relocate via
+  the env tick (`TickGate`), not the movement stack, so a train is
+  never trapped or compelled by a tornado on/over its tile — exactly
+  the same precedent as Frozen/Brainrot not halting trains. A passenger
+  exiting a cart still goes through `legal_moves` and is subject to
+  compulsion normally.
+- **Reachability is top-level only (R1/E-4b).** `side_can_reach_tornado`
+  iterates `board.iter_pieces()` (top-level squares; no descent into
+  carrier passengers — mirrors `iter_pieces`/`find_king`/`status`
+  precedent). A side whose *only* tornado-reaching move is a passenger
+  exit will not arm the compulsion. Accepted v1 limitation, consistent
+  with the rest of the engine's carrier iteration; revisit only if a
+  passenger-only-mover position becomes a real use case.
+- **Stormcaller can't place while its own side is compelled (R1/D6).**
+  `PlaceTornado` has no landing square (`move_destination → None`), so
+  once the side is compelled it is dropped like any other
+  non-tornado-landing move. Intended: it is the direct consequence of
+  the set-intersection semantics (Concept 1) and the
+  "tornado-zugzwang is a feature" / "one discharges the turn" rules —
+  a side cannot dodge an active compulsion by spending its turn
+  placing more board state. The Stormcaller can still satisfy by
+  *stepping* onto the tornado. Not a defect; do not "fix" by exempting
+  PlaceTornado (that would let a side sidestep the compulsion).
+- **Tornado on non-walkable terrain is inert + logged (R1/E-4e).**
+  A Stormcaller may place onto a Block/Turret/Vent neighbour; the
+  result is inert (no piece can be trapped there, no compulsion can be
+  satisfied there) but still counts down. The `make_move` PlaceTornado
+  arm emits a distinct `debug!` for this case (lenient-but-loud),
+  rather than silently accepting a degenerate placement.
 
 ## Open questions
 

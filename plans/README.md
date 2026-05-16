@@ -8,7 +8,8 @@ plan you want to act on.
 
 - **Engine** (`engine/`): move generation, FEN serialization, move execution,
   and brainrot recalculation work for standard pieces + the custom set
-  (Goblin, Skibidi, Bus, Monkey) plus train carts (Locomotive, Carriage).
+  (Goblin, Skibidi, Bus, Monkey, Stormcaller) plus train carts
+  (Locomotive, Carriage).
   Engine test suite at 200+ tests across lib + integration (perft,
   properties, fairy scenarios, standard game), 0 compile warnings.
   Property tests cover both standard chess and an active train loop

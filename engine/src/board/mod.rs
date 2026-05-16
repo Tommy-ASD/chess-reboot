@@ -296,6 +296,19 @@ pub enum MoveError {
         piece_color: Color,
         attempted: MoveType,
     },
+    /// Plan 13: the move is geometrically valid and king-safe, but a
+    /// `Tornado` condition compels this side elsewhere — either the
+    /// side can reach a tornado square (every non-tornado-landing move
+    /// is illegal this turn) or the piece is itself trapped on a
+    /// tornado square. Distinct from `PieceCannotMakeMove` because the
+    /// move *is* in the raw set; the compulsion lives at movement-stack
+    /// priority 305, above the 299 cap `validate_move`'s raw check uses.
+    CompelledByTornado {
+        from: Coord,
+        piece_symbol: String,
+        piece_color: Color,
+        attempted: MoveType,
+    },
     /// `make_move_unchecked` returned `Err` after `validate_move` already
     /// accepted the move. In practice this is unreachable from a normal
     /// `make_move` call — `validate_move` runs the same apply path on a
@@ -362,6 +375,16 @@ impl MoveError {
             } => format!(
                 "{piece_color} '{piece_symbol}' at {from} cannot {attempted}: \
                  that move would leave the {piece_color} king in check."
+            ),
+            MoveError::CompelledByTornado {
+                from,
+                piece_symbol,
+                piece_color,
+                attempted,
+            } => format!(
+                "{piece_color} '{piece_symbol}' at {from} cannot {attempted}: \
+                 a tornado compels this side — you must move onto a tornado \
+                 square (or this piece is trapped on one)."
             ),
             MoveError::ApplyFailed {
                 from,
@@ -545,6 +568,34 @@ impl Board {
                 // in check.
                 if hypothetical.is_in_check(effective_color) {
                     return Err(MoveError::WouldLeaveKingInCheck {
+                        from: game_move.from.clone(),
+                        piece_symbol,
+                        piece_color: effective_color,
+                        attempted: game_move.move_type.clone(),
+                    });
+                }
+                // Plan 13 (audit R1/C1): king-safety is enforced here via
+                // the clone-apply above, but the tornado compulsion sits
+                // at movement-stack priority 305 — above the 299 cap that
+                // `get_moves` (the raw-membership check) uses, and it only
+                // runs in `resolve_legal_moves`. Without this gate
+                // `make_move` would execute a compulsion-violating move or
+                // move a piece trapped on a tornado square (the rule would
+                // be advisory-only on the execution path). Since the move
+                // already passed raw-membership + king-safety, the *only*
+                // reason it can be absent from `legal_moves` is the 305
+                // compulsion/trap filter. Gated behind `any_tornado` so a
+                // tornado-free game pays nothing. Ordered after king-safety
+                // so the more fundamental error still wins. Recursion-safe:
+                // legal_moves → resolve_legal_moves → TornadoCompulsionFilter
+                // → resolve_moves_capped(304) never re-enters validate_move.
+                if crate::movement::stack::tornado::any_tornado(self)
+                    && !self
+                        .legal_moves(&game_move.from)
+                        .iter()
+                        .any(|m| m == game_move)
+                {
+                    return Err(MoveError::CompelledByTornado {
                         from: game_move.from.clone(),
                         piece_symbol,
                         piece_color: effective_color,
