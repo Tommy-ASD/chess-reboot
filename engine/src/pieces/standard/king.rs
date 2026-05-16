@@ -1,5 +1,5 @@
 use crate::{
-    board::{Board, CastleSide, Coord, GameMove, MoveType},
+    board::{Board, CastleSide, Coord, GameMove, MoveType, square::SquareCondition},
     movement::glider::{OMNI_DIRS, generate_glider_moves},
     pieces::{Color, Piece, piecetype::PieceType},
 };
@@ -74,7 +74,7 @@ impl King {
                 // itself stays tornado-exempt (Concept 4), so a king on
                 // a tornado may still castle provided its rook is free.
                 if s.conditions.iter().any(|c| {
-                    matches!(c, crate::board::square::SquareCondition::Tornado { .. })
+                    matches!(c, SquareCondition::Tornado { .. })
                 }) {
                     return false;
                 }

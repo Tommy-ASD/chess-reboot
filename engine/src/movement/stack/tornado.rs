@@ -33,7 +33,7 @@
 //! optimisation (plan 13, "Things to be careful about"); correctness
 //! does not depend on it.
 
-use std::cell::RefCell;
+use std::cell::Cell;
 
 use crate::board::square::SquareCondition;
 use crate::board::{Board, Coord, GameMove, MoveType};
@@ -58,7 +58,7 @@ thread_local! {
     /// sharing. This turns the O(pieces×moves×king-safety) probe from
     /// once-per-candidate into once-per-legal-move-query, closing the
     /// crafted-FEN super-linear DoS amplification.
-    static PROBE_MEMO: RefCell<Option<ProbeMemo>> = const { RefCell::new(None) };
+    static PROBE_MEMO: Cell<Option<ProbeMemo>> = const { Cell::new(None) };
 }
 
 // Empirical DoS-fix guard (R-A follow-up): a test-only counter of how
@@ -90,7 +90,7 @@ struct ProbeMemo {
 /// a board reference — so there is no lifetime/aliasing hazard.
 fn compelled_facts(board: &Board, side: Color) -> (bool, bool) {
     let epoch = resolve_legal_epoch();
-    if let Some(m) = PROBE_MEMO.with(|c| *c.borrow()) {
+    if let Some(m) = PROBE_MEMO.with(|c| c.get()) {
         // `epoch` carries the correctness contract: `resolve_legal_moves`
         // is the SOLE bumper and the board is immutable for that call,
         // so equal epoch ⇒ same board. `side` is **defensive only** —
@@ -110,12 +110,12 @@ fn compelled_facts(board: &Board, side: Color) -> (bool, bool) {
     let any = any_tornado(board);
     let can_reach = any && side_can_reach_tornado(board, side);
     PROBE_MEMO.with(|c| {
-        *c.borrow_mut() = Some(ProbeMemo {
+        c.set(Some(ProbeMemo {
             epoch,
             side,
             any_tornado: any,
             side_can_reach: can_reach,
-        });
+        }));
     });
     (any, can_reach)
 }
@@ -161,15 +161,15 @@ fn is_tornado_square(board: &Board, coord: &Coord) -> bool {
 /// `WalkabilityFilter::destination` — kept in lockstep with it; the
 /// exhaustive match means a new piece-relocating `MoveType` arm is a
 /// compile error here until classified.
-fn move_destination(game_move: &GameMove) -> Option<Coord> {
+fn move_destination(game_move: &GameMove) -> Option<&Coord> {
     match &game_move.move_type {
-        MoveType::MoveTo(c) => Some(c.clone()),
-        MoveType::Promotion { target, .. } => Some(target.clone()),
-        MoveType::EnPassant { target, .. } => Some(target.clone()),
-        MoveType::MoveIntoCarrier(c) => Some(c.clone()),
+        MoveType::MoveTo(c) => Some(c),
+        MoveType::Promotion { target, .. } => Some(target),
+        MoveType::EnPassant { target, .. } => Some(target),
+        MoveType::MoveIntoCarrier(c) => Some(c),
         MoveType::PieceInCarrier { move_type, .. } => match move_type.as_ref() {
-            MoveType::MoveTo(c) => Some(c.clone()),
-            MoveType::MoveIntoCarrier(c) => Some(c.clone()),
+            MoveType::MoveTo(c) => Some(c),
+            MoveType::MoveIntoCarrier(c) => Some(c),
             _ => None,
         },
         MoveType::Castle { .. }
@@ -201,7 +201,7 @@ fn move_destination(game_move: &GameMove) -> Option<Coord> {
 /// (a trapped piece cannot be the one that fulfils the compulsion;
 /// without this skip a multi-tornado position would let a trapped
 /// piece's phantom reachability falsely arm the compulsion).
-fn side_can_reach_tornado(board: &Board, side: crate::pieces::Color) -> bool {
+fn side_can_reach_tornado(board: &Board, side: Color) -> bool {
     let stack = crate::movement::stack::default_stack();
     for (coord, piece) in board.iter_pieces() {
         if piece.get_color() != side {
@@ -215,7 +215,7 @@ fn side_can_reach_tornado(board: &Board, side: crate::pieces::Color) -> bool {
         }
         for m in stack.resolve_moves_capped(board, &coord, PROBE_CAP) {
             if let Some(dest) = move_destination(&m) {
-                if is_tornado_square(board, &dest) {
+                if is_tornado_square(board, dest) {
                     return true;
                 }
             }
@@ -318,7 +318,7 @@ impl MovementModifier for TornadoCompulsionFilter {
         // compulsion. See plan 13 "Check interaction is free" bullet.
         if side_can_reach {
             let lands_on_tornado = move_destination(game_move)
-                .map(|d| is_tornado_square(board, &d))
+                .map(|d| is_tornado_square(board, d))
                 .unwrap_or(false);
             if !lands_on_tornado {
                 return MovementEffect::Drop;
@@ -950,7 +950,7 @@ mod tests {
         // legitimately compelled).
         assert!(
             moves.iter().all(|m| move_destination(m)
-                .map(|d| is_tornado_square(&b, &d))
+                .map(|d| is_tornado_square(&b, d))
                 .unwrap_or(false)),
             "compulsion must drop every non-tornado move; got {moves:?}"
         );

@@ -34,6 +34,7 @@ use std::sync::OnceLock;
 
 use crate::board::{Board, Coord, GameMove};
 use crate::pieces::Color;
+use crate::pieces::piecetype::PieceType;
 
 thread_local! {
     /// Audit Round-A/A-DoS: monotonic per-thread counter bumped once
@@ -57,7 +58,6 @@ thread_local! {
 pub(crate) fn resolve_legal_epoch() -> u64 {
     RESOLVE_LEGAL_EPOCH.with(|e| e.get())
 }
-use crate::pieces::piecetype::PieceType;
 
 /// Discriminator for `MovementEvent` variants. Powers the `touches()`
 /// fast-path: a modifier that doesn't touch a given event kind is
