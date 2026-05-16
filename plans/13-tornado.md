@@ -495,21 +495,32 @@ documented here so the asymmetries are explicit rather than emergent.
   the same precedent as Frozen/Brainrot not halting trains. A passenger
   exiting a cart still goes through `legal_moves` and is subject to
   compulsion normally.
-- **Reachability via top-level pieces — including their passengers
-  (R1/E-4b, CORRECTED in R4).** `side_can_reach_tornado` iterates
-  `board.iter_pieces()` (top-level squares; it does not itself descend
-  into passenger lists). The earlier claim that "a side whose only
-  tornado-reaching move is a passenger exit will not arm the
-  compulsion" was **wrong** (a mis-adjudication): a top-level
-  *carrier*'s `get_moves` already surfaces its passengers' exits as
-  `PieceInCarrier` candidates, and `move_destination` resolves the
-  PIC inner destination — so the probe DOES arm the compulsion off a
-  passenger exit that lands on a tornado square. This is the correct
-  behaviour per Concept 1 (a passenger exit is a legal move in `L`);
-  it is exercised by `non_king_passenger_of_carrier_on_tornado_not_
-  trapped`. The genuine top-level-only constraint only matters if no
-  top-level carrier surfaces the move at all — not the passenger-exit
-  case.
+- **Reachability via top-level pieces — passenger exits arm it only
+  for SAME-COLOUR carriers (R1/E-4b, corrected R4, scoped R5).**
+  `side_can_reach_tornado` iterates `board.iter_pieces()` (top-level
+  squares; it does not itself descend into passenger lists) and
+  colour-gates on the *top-level* piece (`piece.get_color() != side`
+  → skip). Consequences:
+  - A **same-colour carrier** (a Bus, which by invariant only carries
+    same-colour passengers) passes the gate; its `get_moves` surfaces
+    its passengers' exits as `PieceInCarrier` candidates and
+    `move_destination` resolves the PIC inner destination — so a Bus
+    passenger's exit onto a tornado square DOES arm the compulsion.
+    Correct per Concept 1 (that exit is a legal move in `L`);
+    exercised by `non_king_passenger_of_carrier_on_tornado_not_trapped`.
+    This corrects the original R1/E-4b mis-adjudication ("a passenger
+    exit will never arm the compulsion"), which was wrong for Buses.
+  - A **Neutral train cart** (Locomotive/Carriage) is `Neutral`, so it
+    is *skipped by the colour gate* for either real side. Its
+    passenger's own exit therefore does **not** *arm* a compulsion —
+    deliberately, consistent with the trains-immune precedent
+    (R1/E-4a). The passenger is still *subject to* a compulsion armed
+    by the side's other (same-colour, top-level) pieces, because the
+    filter computes `effective_piece` for the passenger's own
+    candidate and applies the side-wide result. So: a Bus passenger
+    can *trigger* the compulsion; a Neutral-cart passenger only
+    *obeys* one triggered elsewhere. (R4 over-corrected to an
+    unconditional "passenger exits always arm"; R5 scopes it.)
 - **Stormcaller can't place while its own side is compelled (R1/D6).**
   `PlaceTornado` has no landing square (`move_destination → None`), so
   once the side is compelled it is dropped like any other

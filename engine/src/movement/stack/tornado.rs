@@ -103,12 +103,18 @@ fn move_destination(game_move: &GameMove) -> Option<Coord> {
 
 /// Can `side` reach any tornado square with a king-safe move?
 ///
-/// Iterates top-level pieces; a top-level *carrier*'s `get_moves`
-/// already surfaces its passengers' exits as `PieceInCarrier`
-/// candidates and `move_destination` resolves the PIC inner
-/// destination, so a passenger exit onto a tornado square DOES arm
-/// the compulsion (correct per Concept 1 — it is a legal move in
-/// `L`; see plan 13 R1/E-4b as corrected in R4).
+/// Iterates top-level pieces and colour-gates on the top-level piece
+/// (line below). A *same-colour* carrier (a Bus — same-colour
+/// passengers by invariant) passes the gate, and its `get_moves`
+/// surfaces its passengers' exits as `PieceInCarrier` candidates that
+/// `move_destination` resolves, so a Bus passenger's exit onto a
+/// tornado DOES arm the compulsion (correct per Concept 1). A
+/// `Neutral` train cart is skipped by the colour gate, so its own
+/// passenger's exit does NOT arm a compulsion — deliberately,
+/// matching the trains-immune precedent (plan 13 R1/E-4a; R1/E-4b as
+/// corrected in R4 and scoped in R5). Such a passenger is still
+/// *subject to* a compulsion armed by the side's other top-level
+/// same-colour pieces.
 ///
 /// Skips kings (a king never satisfies the compulsion — Concept 4)
 /// and skips pieces that are themselves trapped on a tornado square
