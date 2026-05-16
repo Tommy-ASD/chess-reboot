@@ -660,7 +660,7 @@ pub fn square_to_fen(square: &Square) -> String {
     }
 
     for cond in &square.conditions {
-        parts.push(format!("C={}", cond.as_str()));
+        parts.push(format!("C={}", cond.to_fen()));
     }
 
     format!("({})", parts.join(","))
@@ -898,11 +898,51 @@ pub fn fen_to_square(fen: &str) -> Square {
                     Some(d) => track_dir = Some(d),
                     None => warn!(value, "bad D field"),
                 },
-                "C" => match value {
-                    "FROZEN" => conditions.push(SquareCondition::Frozen),
-                    "BRAINROT" => conditions.push(SquareCondition::Brainrot),
-                    _ => warn!(value, "unknown square condition"),
-                },
+                "C" => {
+                    // Plan 13: conditions may carry a `:`-suffixed
+                    // payload. `Tornado` is the first; value-less
+                    // conditions ignore the (absent) suffix.
+                    let (tag, payload) = match value.split_once(':') {
+                        Some((t, p)) => (t, Some(p)),
+                        None => (value, None),
+                    };
+                    match tag {
+                        "FROZEN" => conditions.push(SquareCondition::Frozen),
+                        "BRAINROT" => conditions.push(SquareCondition::Brainrot),
+                        "TORNADO" => {
+                            // Bare `TORNADO` is a valid shorthand for
+                            // the default duration (no warn). Only a
+                            // present-but-bad suffix warns. `0` is
+                            // meaningless (the tick would clear it the
+                            // same turn) — clamp to 1, mirroring the
+                            // Skibidi phase clamp.
+                            let remaining = match payload {
+                                None => 3,
+                                Some(p) => match p.parse::<u8>() {
+                                    Ok(0) => {
+                                        warn!(
+                                            value,
+                                            "Tornado remaining=0 is meaningless; \
+                                             defaulting to 1"
+                                        );
+                                        1
+                                    }
+                                    Ok(n) => n,
+                                    Err(_) => {
+                                        warn!(
+                                            value,
+                                            "invalid Tornado remaining; \
+                                             defaulting to 3"
+                                        );
+                                        3
+                                    }
+                                },
+                            };
+                            conditions.push(SquareCondition::Tornado { remaining });
+                        }
+                        _ => warn!(value, "unknown square condition"),
+                    }
+                }
                 _ => warn!(field, "unknown field"),
             }
         }

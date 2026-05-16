@@ -152,14 +152,37 @@ impl SquareType {
 pub enum SquareCondition {
     Frozen,
     Brainrot,
+    /// Plan 13: a timed tornado. While present, the side to move is
+    /// compelled toward this square (see `TornadoCompulsionFilter`) and
+    /// a piece standing here is trapped until it dissipates. `remaining`
+    /// is the tick countdown; the env-reaction tick decrements it and
+    /// removes the condition at 0. The engine's first payload-carrying
+    /// condition — hence `to_fen()` rather than `as_str()` at the
+    /// serialize site.
+    Tornado { remaining: u8 },
     // adding more later on
 }
 
 impl SquareCondition {
+    /// Bare uppercase tag, no payload. Stable identifier used by
+    /// callers that only need to name the condition (logging, the
+    /// non-payload parse arms). The FEN serializer uses `to_fen()`
+    /// instead so payload-carrying conditions round-trip.
     pub fn as_str(&self) -> &'static str {
         match self {
             SquareCondition::Frozen => "FROZEN",
             SquareCondition::Brainrot => "BRAINROT",
+            SquareCondition::Tornado { .. } => "TORNADO",
+        }
+    }
+
+    /// Full FEN value form, including any payload. Value-less
+    /// conditions are byte-identical to `as_str()`; `Tornado` appends
+    /// `:<remaining>`. Paired with the parser's `:`-split in `fen.rs`.
+    pub fn to_fen(&self) -> String {
+        match self {
+            SquareCondition::Tornado { remaining } => format!("TORNADO:{remaining}"),
+            other => other.as_str().to_string(),
         }
     }
 }

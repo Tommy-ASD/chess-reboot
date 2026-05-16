@@ -174,6 +174,75 @@ mod tests {
         assert_eq!(board2, board);
     }
 
+    /// Plan 13 commit 1: a `Tornado` condition serializes with its
+    /// `:<remaining>` payload and round-trips byte-identically.
+    #[test]
+    fn test_tornado_fen_roundtrip() {
+        let mut board = Board {
+            grid: vec![vec![Square::new(); 8]; 8],
+            flags: BoardFlags {
+                side_to_move: Color::White,
+                white_can_castle_kingside: true,
+                white_can_castle_queenside: true,
+                black_can_castle_kingside: true,
+                black_can_castle_queenside: true,
+                en_passant_target: None,
+                train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
+                ply_count: 0,
+                last_move: None,
+            },
+        };
+
+        board.grid[1][1] = Square::new()
+            .set_piece(PieceType::new_knight(Color::Black))
+            .add_square_condition(SquareCondition::Tornado { remaining: 3 });
+
+        let fen = board_to_fen(&board);
+        assert_eq!(
+            fen,
+            "8/1(P=n,C=TORNADO:3)6/8/8/8/8/8/8 w KQkq - tr=full p=0"
+        );
+
+        let board2 = fen_to_board(&fen);
+        assert_eq!(board2, board);
+    }
+
+    /// Bare `C=TORNADO` (no suffix) is a valid shorthand and parses to
+    /// the default duration of 3 — no warning, clean round-trip back to
+    /// the explicit `:3` form.
+    #[test]
+    fn test_tornado_fen_bare_defaults_to_3() {
+        let board = fen_to_board("(C=TORNADO)7/8/8/8/8/8/8/8 w KQkq -");
+        assert_eq!(
+            board.grid[0][0].conditions,
+            vec![SquareCondition::Tornado { remaining: 3 }]
+        );
+        // Re-serializing canonicalizes to the explicit-suffix form.
+        assert!(board_to_fen(&board).contains("C=TORNADO:3"));
+    }
+
+    /// `C=TORNADO:0` is meaningless (the env tick would clear it the
+    /// same turn) — clamp to 1, mirroring the Skibidi phase clamp.
+    #[test]
+    fn test_tornado_fen_zero_clamps_to_1() {
+        let board = fen_to_board("(C=TORNADO:0)7/8/8/8/8/8/8/8 w KQkq -");
+        assert_eq!(
+            board.grid[0][0].conditions,
+            vec![SquareCondition::Tornado { remaining: 1 }]
+        );
+    }
+
+    /// A present-but-unparseable suffix falls back to the default 3
+    /// (and warns — not asserted here, but the parser path is covered).
+    #[test]
+    fn test_tornado_fen_garbage_suffix_defaults_to_3() {
+        let board = fen_to_board("(C=TORNADO:abc)7/8/8/8/8/8/8/8 w KQkq -");
+        assert_eq!(
+            board.grid[0][0].conditions,
+            vec![SquareCondition::Tornado { remaining: 3 }]
+        );
+    }
+
     #[test]
     fn test_fen_roundtrip() {
         let mut board = Board {
