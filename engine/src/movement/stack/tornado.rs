@@ -158,26 +158,55 @@ impl MovementModifier for TornadoCompulsionFilter {
             return MovementEffect::Keep;
         };
 
+        // Audit R2/finding-1: `mover` is the *carrier's* square for a
+        // PieceInCarrier candidate, and `piece` the carrier — not the
+        // passenger that is actually moving. Resolve the EFFECTIVE
+        // moving piece (mirrors `Board::effective_mover_color` /
+        // `find_king`'s carrier descent) so the king-exemption and the
+        // side gate see the passenger, not the Bus/cart. Without this a
+        // King riding a carrier is neither exempted nor protected from
+        // the trap — a Concept-4 violation that yields a false
+        // stalemate.
+        let is_pic = matches!(game_move.move_type, MoveType::PieceInCarrier { .. });
+        let effective_piece: &PieceType = match &game_move.move_type {
+            MoveType::PieceInCarrier { piece_index, .. } => piece
+                .passengers()
+                .and_then(|ps| ps.get(*piece_index as usize))
+                .unwrap_or(piece),
+            _ => piece,
+        };
+
         // King is fully exempt: never trapped, never restricted.
-        // Returned before the trap and compulsion clauses so neither
-        // can touch a king move.
-        if matches!(piece, PieceType::King(_)) {
+        // Keyed on the *effective* piece so a king passenger is exempt
+        // too. Returned before the trap and compulsion clauses so
+        // neither can touch a king move.
+        if matches!(effective_piece, PieceType::King(_)) {
             return MovementEffect::Keep;
         }
 
-        // Trap is intrinsic to the piece, not the turn: a non-king
-        // piece on a tornado square simply has no moves while the
-        // tornado lives. Checked before the side gate so a trapped
-        // enemy is correctly inert when queried.
-        if is_tornado_square(board, mover) {
+        // Trap is intrinsic to the piece *standing on* the tornado, not
+        // the turn: a non-king piece on a tornado square has no moves
+        // while the tornado lives. A PieceInCarrier candidate is a
+        // *passenger exiting a carrier* — the passenger is NOT on the
+        // tornado; the carrier is, and the carrier's own top-level
+        // MoveTo candidates are trapped by this same path (non-PIC),
+        // while trains relocate via the env tick and are immune by
+        // precedent (R1/E-4a). So the trap applies only to non-PIC
+        // candidates. Checked before the side gate so a trapped enemy
+        // is correctly inert when queried.
+        if !is_pic && is_tornado_square(board, mover) {
             return MovementEffect::Drop;
         }
 
-        // The compulsion restricts only the side to move. Other-side
-        // candidates aren't legal anyway (turn is `validate_move`'s
-        // job); leave them untouched.
+        // The compulsion restricts only the side to move. Use the
+        // EFFECTIVE colour (the passenger's, for a PieceInCarrier
+        // candidate out of a Neutral cart) so it stays consistent with
+        // `effective_mover_color`/`validate_move`; otherwise a Neutral
+        // cart's passenger reads as Neutral and is never compelled.
+        // Other-side candidates aren't legal anyway (turn is
+        // `validate_move`'s job); leave them untouched.
         let side_to_move = board.flags.side_to_move;
-        if piece.get_color() != side_to_move {
+        if effective_piece.get_color() != side_to_move {
             return MovementEffect::Keep;
         }
 
@@ -598,6 +627,76 @@ mod tests {
         assert!(
             b.grid[4][4].conditions.is_empty(),
             "tornado must dissipate through the real make_move pipeline"
+        );
+    }
+
+    /// Audit R2/finding-1: a King riding a carrier on a tornado square
+    /// must NOT be trapped (Concept 4 is unconditional). Before the fix
+    /// the filter saw the Bus (not the King passenger) and dropped
+    /// every exit → false Stalemate. `find_king` descends into the Bus,
+    /// so the king is "found" but had no moves.
+    #[test]
+    fn king_passenger_in_carrier_on_tornado_not_trapped() {
+        use crate::board::GameStatus;
+        // White Bus carrying the White King on a tornado square at
+        // (0,3); lone Black king far away; White to move.
+        let b = crate::board::fen::fen_to_board(
+            "7k/8/8/(P=BUS(P=(K)),C=TORNADO:3)7/8/8/8/8 w - -",
+        );
+        let bus = c(0, 3);
+        assert!(
+            !b.legal_moves(&bus).is_empty(),
+            "king-passenger exits must survive — a king in a carrier on \
+             a tornado is NOT trapped (Concept 4)"
+        );
+        assert_eq!(
+            b.status(),
+            GameStatus::Ongoing,
+            "must not be a false Stalemate"
+        );
+    }
+
+    /// Audit R2/finding-1 (C1 path): the round-1 `validate_move`
+    /// enforcement calls `legal_moves` → same filter, so `make_move`
+    /// must also let the king-passenger escape (not `CompelledByTornado`).
+    #[test]
+    fn make_move_lets_king_passenger_escape_carrier_on_tornado() {
+        let mut b = crate::board::fen::fen_to_board(
+            "7k/8/8/(P=BUS(P=(K)),C=TORNADO:3)7/8/8/8/8 w - -",
+        );
+        let escape = b
+            .legal_moves(&c(0, 3))
+            .into_iter()
+            .next()
+            .expect("king passenger must have an escape move");
+        b.make_move(escape)
+            .expect("make_move must accept the king-passenger's escape");
+    }
+
+    /// Audit R2/finding-1 guard: the fix must NOT loosen the non-PIC
+    /// trap. A carrier *itself* standing on a tornado still has its own
+    /// top-level moves trapped; only the *passenger's* exits (governed
+    /// by the compulsion, here unarmed) survive.
+    #[test]
+    fn carrier_own_moves_still_trapped_on_tornado() {
+        let b = crate::board::fen::fen_to_board(
+            "7k/8/8/(P=BUS(P=(R)),C=TORNADO:3)7/8/8/8/8 w - -",
+        );
+        let moves = b.legal_moves(&c(0, 3));
+        // The Bus's own slider relocation (a plain MoveTo) is trapped…
+        assert!(
+            !moves
+                .iter()
+                .any(|m| matches!(m.move_type, MoveType::MoveTo(_))),
+            "carrier's own MoveTo must remain trapped (non-PIC path)"
+        );
+        // …while the rook passenger's exits are NOT wrongly trapped
+        // (compulsion isn't armed: nothing else can reach the tornado).
+        assert!(
+            moves
+                .iter()
+                .any(|m| matches!(m.move_type, MoveType::PieceInCarrier { .. })),
+            "passenger exits must survive (passenger is not on the tornado)"
         );
     }
 }

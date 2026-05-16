@@ -71,6 +71,7 @@ fn move_error_code(err: &MoveError) -> &'static str {
         MoveError::WrongTurn { .. } => "wrong_turn",
         MoveError::PieceCannotMakeMove { .. } => "piece_cannot_make_move",
         MoveError::WouldLeaveKingInCheck { .. } => "would_leave_king_in_check",
+        MoveError::CompelledByTornado { .. } => "compelled_by_tornado",
         MoveError::ApplyFailed { .. } => "apply_failed",
     }
 }
