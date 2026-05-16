@@ -103,6 +103,13 @@ fn move_destination(game_move: &GameMove) -> Option<Coord> {
 
 /// Can `side` reach any tornado square with a king-safe move?
 ///
+/// Iterates top-level pieces; a top-level *carrier*'s `get_moves`
+/// already surfaces its passengers' exits as `PieceInCarrier`
+/// candidates and `move_destination` resolves the PIC inner
+/// destination, so a passenger exit onto a tornado square DOES arm
+/// the compulsion (correct per Concept 1 — it is a legal move in
+/// `L`; see plan 13 R1/E-4b as corrected in R4).
+///
 /// Skips kings (a king never satisfies the compulsion — Concept 4)
 /// and skips pieces that are themselves trapped on a tornado square
 /// (a trapped piece cannot be the one that fulfils the compulsion;

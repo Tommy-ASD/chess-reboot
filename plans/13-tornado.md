@@ -61,7 +61,15 @@ square on the board carries it:
 2. **Trap in place.** A piece standing on a tornado square cannot
    generate any move out of it. It is immobilized until the condition
    dissipates. (Mechanically identical to the Frozen short-circuit;
-   different only in that it expires.)
+   different only in that it expires.) **Castle carve-out (R3/B1):**
+   this also blocks *castling* when the castling **rook**'s home
+   square carries a Tornado — the rook is trapped, so the castle is
+   rejected in `king::castle_moves` (the compulsion filter cannot see
+   it: a `Castle` candidate is king-keyed and has no single landing
+   square, so `move_destination(Castle) → None`). Same rationale as
+   the pre-existing closed-Gate "stranded rook rescued by castling"
+   guard. The **king** itself stays tornado-exempt (Concept 4): a king
+   on a tornado may still castle provided its rook is free.
 3. **Forced execution.** Because the compulsion applies to both sides,
    a piece trapped on a tornado square is a square the *enemy* is
    compelled to capture into the first turn a capture there is among
@@ -487,13 +495,21 @@ documented here so the asymmetries are explicit rather than emergent.
   the same precedent as Frozen/Brainrot not halting trains. A passenger
   exiting a cart still goes through `legal_moves` and is subject to
   compulsion normally.
-- **Reachability is top-level only (R1/E-4b).** `side_can_reach_tornado`
-  iterates `board.iter_pieces()` (top-level squares; no descent into
-  carrier passengers — mirrors `iter_pieces`/`find_king`/`status`
-  precedent). A side whose *only* tornado-reaching move is a passenger
-  exit will not arm the compulsion. Accepted v1 limitation, consistent
-  with the rest of the engine's carrier iteration; revisit only if a
-  passenger-only-mover position becomes a real use case.
+- **Reachability via top-level pieces — including their passengers
+  (R1/E-4b, CORRECTED in R4).** `side_can_reach_tornado` iterates
+  `board.iter_pieces()` (top-level squares; it does not itself descend
+  into passenger lists). The earlier claim that "a side whose only
+  tornado-reaching move is a passenger exit will not arm the
+  compulsion" was **wrong** (a mis-adjudication): a top-level
+  *carrier*'s `get_moves` already surfaces its passengers' exits as
+  `PieceInCarrier` candidates, and `move_destination` resolves the
+  PIC inner destination — so the probe DOES arm the compulsion off a
+  passenger exit that lands on a tornado square. This is the correct
+  behaviour per Concept 1 (a passenger exit is a legal move in `L`);
+  it is exercised by `non_king_passenger_of_carrier_on_tornado_not_
+  trapped`. The genuine top-level-only constraint only matters if no
+  top-level carrier surfaces the move at all — not the passenger-exit
+  case.
 - **Stormcaller can't place while its own side is compelled (R1/D6).**
   `PlaceTornado` has no landing square (`move_destination → None`), so
   once the side is compelled it is dropped like any other
