@@ -26,6 +26,7 @@ pub mod king_safety;
 pub mod piece_attacks;
 pub mod piece_moves;
 pub mod square_filters;
+pub mod tornado;
 pub mod train_modifiers;
 
 use std::sync::OnceLock;
@@ -357,6 +358,29 @@ impl MovementStack {
             .collect()
     }
 
+    /// Resolve moves for the piece at `from`, running every modifier
+    /// with `priority <= max_priority`. The recursion guard for the
+    /// tornado compulsion probe (plan 13): the probe caps at
+    /// `tornado::PROBE_CAP` (= `TORNADO_PRIORITY - 1`) so it sees
+    /// king-safe moves (king-safety is 300) but never re-enters the
+    /// compulsion filter (305). Mirrors `resolve_legal_moves` with an
+    /// explicit cap instead of "no cap".
+    pub fn resolve_moves_capped(
+        &self,
+        board: &Board,
+        from: &Coord,
+        max_priority: u32,
+    ) -> Vec<GameMove> {
+        let seed = vec![MovementEvent::MoveQuery { from: from.clone() }];
+        self.resolve(board, seed, None, Some(max_priority))
+            .into_iter()
+            .filter_map(|ev| match ev {
+                MovementEvent::Candidate { game_move, .. } => Some(game_move),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Resolve threats against `target` from pieces of `attacker_color`.
     /// Seeds with a single `ThreatQuery`; piece-intrinsic threat
     /// modifiers (step 4) emit `Threat` events; train collision filters
@@ -416,6 +440,10 @@ pub fn default_stack() -> &'static MovementStack {
 ///   (212).
 /// - Step 9: `KingSafetyFilter` (300) — skipped by `resolve_moves`
 ///   (capped at 299); applied by `resolve_legal_moves`.
+/// - Plan 13: `TornadoCompulsionFilter` (305) — destination
+///   compulsion + trap; runs after king-safety so it operates over
+///   the king-safe set. Skipped by `resolve_moves` and by the
+///   tornado probe's capped resolve.
 fn build_default_stack() -> MovementStack {
     let mut s = MovementStack::new();
     // Step 8: piece-intrinsic move emission (priority 30).
@@ -436,6 +464,10 @@ fn build_default_stack() -> MovementStack {
     // Step 9: king-safety filter (priority 300). Skipped by
     // `resolve_moves` (capped at 299); applied by `resolve_legal_moves`.
     s.register(Box::new(king_safety::KingSafetyFilter));
+    // Plan 13: tornado destination-compulsion (priority 305). After
+    // king-safety so the probe and the final set are both over
+    // king-safe moves.
+    s.register(Box::new(tornado::TornadoCompulsionFilter));
     s
 }
 
