@@ -1,5 +1,30 @@
 # Plan 05: FEN parser hardening
 
+## Implementation notes (post-landing)
+
+All three steps landed.
+
+- **Doctests** — both `fen.rs` doctests un-`ignore`d with `use` lines;
+  the wrong `Some(15)` corrected to `Some(16)`. They now run as
+  regression guards.
+- **FenError** — `FenError` introduced (the proposed enum).
+  `fen_to_board` / `fen_to_square` / `fen_row_to_squares` are now
+  fallible. Hard structural errors (empty input, ragged board, unknown
+  glyph, unbalanced parens) abort the parse; field-level slips (bad
+  `OPEN=`, `tr=`, `C=TORNADO:` suffix, over-capacity Bus) stay
+  deliberately lenient (`warn!` + default). The fallible result is
+  cascaded through every call site. `api/src/main.rs` returns a
+  structured **400** (`FenErrorBody { code, message, fen }`) on
+  malformed input.
+- **Latent bug** — `symbol_to_piece` had no `M`/`m` arm, so the Monkey
+  silently round-tripped to an empty square (the exact silent-garbage
+  class this plan targets). Arm added; the fairy perft constants, pinned
+  against the monkey-less board, were re-pinned.
+
+The original analysis below is kept for rationale.
+
+---
+
 The FEN parser currently swallows everything. Bad input produces wrong
 boards instead of clear errors. Two doctests are `ignore`d because their
 assertions are wrong. Several "by coincidence" panic paths exist on
@@ -143,7 +168,8 @@ Steps 1-2 can happen any time. Step 3 should land before plan 06
   `FenError::UnknownPieceSymbol("Z")`.
 - `test_fen_too_many_in_row_returns_err` — `"PPPPPPPPP/..."` returns
   `BadRowWidth { found: 9, .. }`.
-- `test_fen_stray_close_paren_does_not_panic` — `(P=R)) 7/..."` returns
-  `UnbalancedParen` rather than panicking.
+- `test_fen_stray_close_paren_does_not_panic` —
+  `"(P=R))7/8/8/8/8/8/8/8 w - -"` returns `UnbalancedParen` rather than
+  panicking.
 - `test_fen_roundtrip_preserves_castle_rights` (after plan 01 / step 3) —
   board with non-default castle rights round-trips correctly.

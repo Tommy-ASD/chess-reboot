@@ -61,6 +61,18 @@ shape, not a bare string:
 
 Use `serde` derive on `FenError` and `IntoResponse` for axum.
 
+> **Update — plan 05 shipped a different (intentional) shape.** The
+> landed contract is `FenErrorBody { code, message, fen }` (e.g.
+> `{"code":"fen_bad_row_width","message":"Row 0 is …","fen":"…"}`),
+> mapped by a hand-written `fen_error_code(&FenError)`. `FenError`
+> itself is **not** `serde`-derived and there is no `IntoResponse`;
+> the shape deliberately mirrors `MakeMoveErrorBody` so clients branch
+> on a stable string `code`. If richer per-variant fields (`row`,
+> `expected`, `found`) are wanted later, **extend `FenErrorBody`** —
+> do not replace it with a serde-flattened `FenError`, since clients
+> now depend on `code`. The 400-on-bad-FEN deliverable is done; only
+> the optional per-variant detail fields remain.
+
 ### Driven by plan 03 (promotion etc.)
 
 Promotion needs a way to pick the target piece. If `MoveType::Promotion`
@@ -131,7 +143,9 @@ Flag for whenever this goes anywhere near a real deployment.
    unblocks JSON board format later).
 2. After plan 02 lands: include `GameStatus` in `/new_state` response
    and add `/board/status` endpoint.
-3. After plan 05 lands: switch error responses to structured `FenError`
-   JSON.
+3. ~~After plan 05 lands: switch error responses to structured
+   `FenError` JSON.~~ **Done** — plan 05 shipped `FenErrorBody
+   { code, message, fen }` + 400 (see the note under "Driven by plan
+   05" above; only optional per-variant detail fields remain).
 4. Whenever multiplayer / persistence / clocks come up: redesign as
    stateful with game IDs.

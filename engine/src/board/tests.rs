@@ -57,7 +57,7 @@ mod tests {
         let fen = board_to_fen(&board);
         assert_eq!(fen, "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0");
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -84,7 +84,7 @@ mod tests {
         let fen = board_to_fen(&board);
         assert_eq!(fen, "R7/8/8/8/8/8/8/7k w KQkq - tr=full p=0");
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -113,7 +113,7 @@ mod tests {
         let fen = board_to_fen(&board);
         assert_eq!(fen, "(P=R,T=VENT)7/8/8/8/8/8/8/8 w KQkq - tr=full p=0");
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -141,7 +141,7 @@ mod tests {
         let fen = board_to_fen(&board);
         assert_eq!(fen, "8/1(P=n,C=FROZEN)6/8/8/8/8/8/8 w KQkq - tr=full p=0");
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -170,7 +170,7 @@ mod tests {
         let fen = board_to_fen(&board);
         assert_eq!(fen, "8/1(P=n,T=VENT,C=FROZEN)6/8/8/8/8/8/8 w KQkq - tr=full p=0");
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -203,7 +203,7 @@ mod tests {
             "8/1(P=n,C=TORNADO:3)6/8/8/8/8/8/8 w KQkq - tr=full p=0"
         );
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -212,7 +212,7 @@ mod tests {
     /// the explicit `:3` form.
     #[test]
     fn test_tornado_fen_bare_defaults_to_3() {
-        let board = fen_to_board("(C=TORNADO)7/8/8/8/8/8/8/8 w KQkq -");
+        let board = fen_to_board("(C=TORNADO)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         assert_eq!(
             board.grid[0][0].conditions,
             vec![SquareCondition::Tornado { remaining: 3 }]
@@ -225,7 +225,7 @@ mod tests {
     /// same turn) — clamp to 1, mirroring the Skibidi phase clamp.
     #[test]
     fn test_tornado_fen_zero_clamps_to_1() {
-        let board = fen_to_board("(C=TORNADO:0)7/8/8/8/8/8/8/8 w KQkq -");
+        let board = fen_to_board("(C=TORNADO:0)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         assert_eq!(
             board.grid[0][0].conditions,
             vec![SquareCondition::Tornado { remaining: 1 }]
@@ -236,7 +236,7 @@ mod tests {
     /// (and warns — not asserted here, but the parser path is covered).
     #[test]
     fn test_tornado_fen_garbage_suffix_defaults_to_3() {
-        let board = fen_to_board("(C=TORNADO:abc)7/8/8/8/8/8/8/8 w KQkq -");
+        let board = fen_to_board("(C=TORNADO:abc)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         assert_eq!(
             board.grid[0][0].conditions,
             vec![SquareCondition::Tornado { remaining: 3 }]
@@ -268,7 +268,7 @@ mod tests {
             .add_square_condition(SquareCondition::Frozen);
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board);
     }
 
@@ -298,7 +298,7 @@ mod tests {
         });
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "fen was: {fen}");
     }
 
@@ -310,7 +310,7 @@ mod tests {
         board.grid[0][0] = Square::new().set_square_type(SquareType::Switch { targets: vec![] });
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "fen was: {fen}");
     }
 
@@ -372,17 +372,17 @@ mod tests {
     fn test_signal_fen_field_order_independent() {
         // Canonical order vs. shuffled order — both must parse to the same
         // Square. Gate is the cheapest variant for this check (two fields).
-        let canonical = fen_to_board("(T=GATE,ID=7,OPEN=0)7/8/8/8/8/8/8/8 w KQkq -");
-        let shuffled = fen_to_board("(T=GATE,OPEN=0,ID=7)7/8/8/8/8/8/8/8 w KQkq -");
+        let canonical = fen_to_board("(T=GATE,ID=7,OPEN=0)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
+        let shuffled = fen_to_board("(T=GATE,OPEN=0,ID=7)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         assert_eq!(canonical, shuffled);
 
         // Junction with all three payload fields shuffled.
         let canonical_j = fen_to_board(
             "(T=JUNCTION,ID=3,STATE=1,BRANCHES=(N,E))7/8/8/8/8/8/8/8 w KQkq -",
-        );
+        ).unwrap();
         let shuffled_j = fen_to_board(
             "(T=JUNCTION,BRANCHES=(N,E),STATE=1,ID=3)7/8/8/8/8/8/8/8 w KQkq -",
-        );
+        ).unwrap();
         assert_eq!(canonical_j, shuffled_j);
     }
 
@@ -403,12 +403,12 @@ mod tests {
             branches: vec![],
         });
         let fen = board_to_fen(&board);
-        let parsed = fen_to_board(&fen);
+        let parsed = fen_to_board(&fen).unwrap();
         assert_eq!(parsed, board, "fen was: {fen}");
 
         // Missing BRANCHES field entirely should also degrade gracefully —
         // not panic, default to empty.
-        let bare = fen_to_board("(T=JUNCTION,ID=3,STATE=0)7/8/8/8/8/8/8/8 w KQkq -");
+        let bare = fen_to_board("(T=JUNCTION,ID=3,STATE=0)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         let first = &bare.grid[0][0].square_type;
         match first {
             SquareType::Junction {
@@ -476,7 +476,7 @@ mod tests {
         });
 
         let fen = board_to_fen(&board);
-        let parsed = fen_to_board(&fen);
+        let parsed = fen_to_board(&fen).unwrap();
         assert_eq!(parsed, board, "fen was: {fen}");
 
         // Sanity-check the link integrity explicitly — not just structural
@@ -1352,7 +1352,7 @@ mod tests {
     /// (and visibly broken to anyone watching the board).
     #[test]
     fn test_signal_gate_bad_open_value_falls_back_to_closed() {
-        let board = fen_to_board("(T=GATE,ID=3,OPEN=2)7/8/8/8/8/8/8/8 w KQkq -");
+        let board = fen_to_board("(T=GATE,ID=3,OPEN=2)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
         match &board.grid[0][0].square_type {
             SquareType::Gate { id, open } => {
                 assert_eq!(*id, 3);
@@ -1876,7 +1876,7 @@ mod tests {
         }));
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
 
         // The brainrot conditions are derived state — recompute on both
         // sides before comparing so we don't depend on whether either
@@ -1900,7 +1900,7 @@ mod tests {
         }));
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "Bus carrying pieces should round-trip");
     }
 
@@ -2115,7 +2115,7 @@ mod tests {
     fn test_bus_fen_malformed_p_field_does_not_panic() {
         // Should parse without panicking. The malformed P=R field is
         // dropped; the Bus comes back with an empty passenger list.
-        let board = fen_to_board("(P=BUS(P=R))7/8/8/8/8/8/8/8");
+        let board = fen_to_board("(P=BUS(P=R))7/8/8/8/8/8/8/8").unwrap();
         // Confirm something was placed at (0,0) — specifically, a Bus.
         match &board.grid[0][0].piece {
             Some(PieceType::Bus(bus)) => assert!(
@@ -2158,7 +2158,7 @@ mod tests {
         }));
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "Goblin in Kidnapping state should round-trip");
     }
 
@@ -2211,7 +2211,7 @@ mod tests {
             fen.contains(" b "),
             "side-to-move 'b' should be present in FEN, got {fen:?}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.flags.side_to_move, Color::Black);
     }
 
@@ -2228,7 +2228,7 @@ mod tests {
             fen.contains(" - - "),
             "no castle rights + no ep should be encoded as ' - - ', got {fen:?}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.flags, board.flags);
     }
 
@@ -2237,7 +2237,7 @@ mod tests {
         // Pre-plan-01 callers may still hand in a grid-only FEN. The
         // parser must default sanely (white-to-move, all castle rights,
         // no ep target) rather than misinterpret the missing fields.
-        let board = fen_to_board("8/8/8/8/8/8/8/8");
+        let board = fen_to_board("8/8/8/8/8/8/8/8").unwrap();
         assert_eq!(board.flags.side_to_move, Color::White);
         assert!(board.flags.white_can_castle_kingside);
         assert!(board.flags.black_can_castle_queenside);
@@ -2652,7 +2652,7 @@ mod tests {
             fen.contains(" d3 "),
             "expected FEN to contain ep target ' d3 ', got {fen:?}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(
             board2.flags.en_passant_target,
             Some(Coord { file: 3, rank: 5 })
@@ -2978,7 +2978,7 @@ mod tests {
         let board = empty_board_sized(10, 10);
         let fen = board_to_fen(&board);
         assert_eq!(fen, "10/10/10/10/10/10/10/10/10/10 w - - tr=full p=0");
-        let parsed = fen_to_board(&fen);
+        let parsed = fen_to_board(&fen).unwrap();
         assert_eq!(parsed.width(), 10);
         assert_eq!(parsed.height(), 10);
         assert_eq!(parsed, board);
@@ -2997,7 +2997,7 @@ mod tests {
             fen.contains(" e2 "),
             "expected en-passant ' e2 ' on 12-tall board, got: {fen}"
         );
-        let parsed = fen_to_board(&fen);
+        let parsed = fen_to_board(&fen).unwrap();
         assert_eq!(
             parsed.flags.en_passant_target,
             Some(Coord { file: 4, rank: 10 }),
@@ -3237,7 +3237,7 @@ mod tests {
             )));
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "loco+track should round-trip through FEN");
         match &board2.grid[3][3].piece {
             Some(p) => assert_eq!(p.get_color(), Color::Neutral),
@@ -3762,7 +3762,7 @@ mod tests {
             fen.ends_with(" p=42"),
             "FEN should end with the ply counter, got {fen}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.flags.ply_count, 42);
         assert_eq!(board2.flags.train_tick_rate, TrainTickRate::EveryNPly(3));
     }
@@ -4119,7 +4119,7 @@ mod tests {
             .set_piece(PieceType::Locomotive(loco));
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         match &board2.grid[3][3].piece {
             Some(PieceType::Locomotive(l)) => {
                 assert_eq!(l.last_dir, Some(TrackDir::W));
@@ -4283,7 +4283,7 @@ mod tests {
     /// B3: the FEN parser rejects `tr=0ply` (modulo-by-zero hazard).
     #[test]
     fn test_fen_rejects_zero_ply_tick_rate() {
-        let board = fen_to_board("8/8/8/8/8/8/8/8 w - - tr=0ply p=0");
+        let board = fen_to_board("8/8/8/8/8/8/8/8 w - - tr=0ply p=0").unwrap();
         assert_eq!(
             board.flags.train_tick_rate,
             TrainTickRate::EveryFullTurn,
@@ -4296,12 +4296,253 @@ mod tests {
     /// debug-build panic on hostile input.
     #[test]
     fn test_fen_parser_survives_unbalanced_parens() {
-        // Each of these would have panicked the parser pre-fix.
-        let _ = fen_to_board("K) w - -");
-        let _ = fen_to_board("(P=K w - -");
-        let _ = fen_to_board("((P=K))) w - -");
-        // Survival is the assertion — the parser may produce
-        // garbage on malformed input, but it must not panic.
+        use crate::board::fen::FenError;
+        // Pre-fix: panicked. Plan-05-pre: survived but produced a
+        // silently-garbage board. Now: a structured hard error, and
+        // still no panic.
+        //  - "K)"      → stray ')' at row top level
+        //  - "(P=K"    → unterminated extended block
+        //  - "((P=K)))"→ balanced inner block, then a stray trailing ')'
+        for fen in ["K) w - -", "(P=K w - -", "((P=K))) w - -"] {
+            assert_eq!(
+                fen_to_board(fen),
+                Err(FenError::UnbalancedParen { in_row: 0 }),
+                "expected UnbalancedParen for {fen:?}"
+            );
+        }
+    }
+
+    // ============================================================
+    // Plan 05: FEN hardening — structural errors are now hard errors
+    // (`FenError`) instead of silently-garbage boards.
+    // ============================================================
+
+    /// An unrecognized piece glyph used to coerce to an empty square,
+    /// silently corrupting the position. It now aborts the parse.
+    #[test]
+    fn test_fen_unknown_symbol_returns_err() {
+        use crate::board::fen::FenError;
+        assert_eq!(
+            fen_to_board("Z7/8/8/8/8/8/8/8"),
+            Err(FenError::UnknownPieceSymbol("Z".to_string())),
+        );
+    }
+
+    /// A ragged board (one row wider than the rest) used to slide
+    /// through and then be mis-indexed by the engine. The most common
+    /// width is treated as the intended one; the odd row is rejected.
+    #[test]
+    fn test_fen_too_many_in_row_returns_err() {
+        use crate::board::fen::FenError;
+        let err = fen_to_board("PPPPPPPPP/8/8/8/8/8/8/8");
+        assert!(
+            matches!(
+                err,
+                Err(FenError::BadRowWidth {
+                    row: 0,
+                    expected: 8,
+                    found: 9
+                })
+            ),
+            "expected BadRowWidth {{ found: 9, .. }}, got {err:?}"
+        );
+    }
+
+    /// A stray `)` with no matching `(` previously fell through to
+    /// `fen_to_square(")")` → empty square. It must now be a structured
+    /// error (and, as before, must not panic).
+    #[test]
+    fn test_fen_stray_close_paren_does_not_panic() {
+        use crate::board::fen::FenError;
+        assert_eq!(
+            fen_to_board("(P=R))7/8/8/8/8/8/8/8 w - -"),
+            Err(FenError::UnbalancedParen { in_row: 0 }),
+        );
+    }
+
+    /// Castle rights are parsed (not hardcoded to all-true) and survive
+    /// a `board_to_fen` → `fen_to_board` round-trip for every
+    /// combination, including the all-revoked (`-`) case.
+    #[test]
+    fn test_fen_roundtrip_preserves_castle_rights() {
+        for (wk, wq, bk, bq) in [
+            (true, false, false, true),
+            (false, true, true, false),
+            (false, false, false, false),
+            (true, true, true, true),
+        ] {
+            let mut board = empty_board();
+            board.flags.white_can_castle_kingside = wk;
+            board.flags.white_can_castle_queenside = wq;
+            board.flags.black_can_castle_kingside = bk;
+            board.flags.black_can_castle_queenside = bq;
+
+            let fen = board_to_fen(&board);
+            let round_tripped = fen_to_board(&fen).unwrap();
+
+            assert_eq!(
+                round_tripped.flags, board.flags,
+                "castle rights ({wk},{wq},{bk},{bq}) did not round-trip via {fen:?}"
+            );
+        }
+    }
+
+    /// Plan-05 audit (B1): `EmptyInput` is the one parser-constructed
+    /// `FenError` the other new tests don't reach. Without this, a
+    /// regression making `""` parse to a silent 0×0 `Ok` board would
+    /// pass every test (`fen_to_board_is_total` skips `Err`s).
+    #[test]
+    fn test_fen_empty_input_returns_err() {
+        use crate::board::fen::FenError;
+        for s in ["", " ", "   ", "\t\n", " \t \n "] {
+            assert_eq!(
+                fen_to_board(s),
+                Err(FenError::EmptyInput),
+                "input {s:?} must be EmptyInput"
+            );
+        }
+    }
+
+    /// Plan-05 audit (B2/B3/B6 + R2C-1/R2A-1): exhaustive guard
+    /// against the Monkey-class latent bug — a `PieceType` whose
+    /// `symbol()` has no matching `symbol_to_piece` arm round-trips to
+    /// an empty square (exactly how the Monkey `M`/`m` bug hid). One
+    /// specimen of EVERY variant must survive `board_to_fen →
+    /// fen_to_board` **with its color intact** (the substantive half
+    /// of the Monkey fix is the `M`→White / `m`→Black branch, not just
+    /// "is it a Monkey").
+    ///
+    /// Enforcement: `kind` is a wildcard-free `match` over every
+    /// `PieceType` variant and is called on every specimen, so adding
+    /// a variant is a **compile error here** — the dev is forced into
+    /// this test, where the co-located `specimens` list + the comment
+    /// in `kind` instruct them to add a specimen + arm. (It can't
+    /// *mechanically* force the specimen, only the `kind` arm; the
+    /// instruction closes that gap procedurally.)
+    #[test]
+    fn test_every_piece_type_roundtrips_through_fen() {
+        use crate::pieces::fairy::carriage::Carriage;
+        use crate::pieces::fairy::locomotive::{Locomotive, TrainHeading};
+        use crate::pieces::fairy::stormcaller::Stormcaller;
+
+        fn kind(p: &PieceType) -> &'static str {
+            // NO wildcard arm — intentional. A new PieceType variant
+            // breaks compilation here; when you add the arm, also add
+            // a specimen to `specimens` below (color-distinct if the
+            // symbol is case-encoded, like Monkey's M/m).
+            match p {
+                PieceType::Pawn(_) => "Pawn",
+                PieceType::Rook(_) => "Rook",
+                PieceType::Knight(_) => "Knight",
+                PieceType::Bishop(_) => "Bishop",
+                PieceType::Queen(_) => "Queen",
+                PieceType::King(_) => "King",
+                PieceType::Monkey(_) => "Monkey",
+                PieceType::Goblin(_) => "Goblin",
+                PieceType::Skibidi(_) => "Skibidi",
+                PieceType::Bus(_) => "Bus",
+                PieceType::Locomotive(_) => "Locomotive",
+                PieceType::Carriage(_) => "Carriage",
+                PieceType::Stormcaller(_) => "Stormcaller",
+            }
+        }
+
+        // Every specimen has a color that round-trips as-is. Do NOT
+        // add a Neutral-colored Monkey/Goblin/Skibidi/Bus/Stormcaller
+        // specimen without revisiting the color assertion: those
+        // symbols are case-only, so Neutral serializes uppercase and
+        // parses back as White (the documented standard-piece
+        // asymmetry). Locomotive/Carriage are inherently Neutral and
+        // round-trip Neutral (their symbol carries no color).
+        let specimens = [
+            PieceType::new_pawn(Color::White),
+            PieceType::new_rook(Color::Black),
+            PieceType::new_knight(Color::White),
+            PieceType::new_bishop(Color::Black),
+            PieceType::new_queen(Color::White),
+            PieceType::new_king(Color::Black),
+            // Both colors — the bug was color-specific (`M` vs `m`).
+            PieceType::Monkey(Monkey { color: Color::White }),
+            PieceType::Monkey(Monkey { color: Color::Black }),
+            PieceType::Goblin(Goblin::new(Color::White, Coord { file: 0, rank: 0 })),
+            PieceType::Skibidi(Skibidi::new(Color::Black)),
+            PieceType::Bus(Bus::new(Color::White)),
+            PieceType::Locomotive(Locomotive::new(1, TrainHeading::Forward)),
+            PieceType::Carriage(Carriage::new(1, 1)),
+            PieceType::Stormcaller(Stormcaller::new(Color::White)),
+        ];
+
+        for specimen in specimens {
+            let mut board = empty_board();
+            board.grid[3][3] = Square::new().set_piece(specimen.clone());
+            let fen = board_to_fen(&board);
+            let back = fen_to_board(&fen).unwrap();
+            let got = back.grid[3][3].piece.as_ref();
+            assert!(
+                got.is_some(),
+                "{} silently dropped to an empty square; fen={fen}",
+                kind(&specimen)
+            );
+            let got = got.unwrap();
+            assert_eq!(
+                kind(got),
+                kind(&specimen),
+                "{} round-tripped as a different piece; fen={fen}",
+                kind(&specimen)
+            );
+            assert_eq!(
+                got.get_color(),
+                specimen.get_color(),
+                "{} round-tripped with the wrong color; fen={fen}",
+                kind(&specimen)
+            );
+        }
+    }
+
+    /// Plan-05 audit (B7): `UnknownPieceSymbol` has two construction
+    /// sites. `test_fen_unknown_symbol_returns_err` covers the
+    /// bare-glyph fallback; this covers the `P=` field inside an
+    /// extended square — the case the fen.rs comment explicitly
+    /// motivates ("a typo'd glyph into a silent empty square").
+    #[test]
+    fn test_fen_unknown_symbol_in_extended_square_returns_err() {
+        use crate::board::fen::FenError;
+        assert_eq!(
+            fen_to_board("(P=Z)7/8/8/8/8/8/8/8"),
+            Err(FenError::UnknownPieceSymbol("Z".to_string())),
+        );
+    }
+
+    /// Plan-05 audit (B5): the ragged-board check derives
+    /// `expected`/`row` (both API-surfaced in the 400 body) from
+    /// `Vec::max_by_key`'s "last maximum wins" tie-break. The existing
+    /// test only had a clear modal width with the odd row first. Pin
+    /// the under-specified shapes so a refactor (or std change) can't
+    /// silently flip the reported diagnostics.
+    #[test]
+    fn test_fen_ragged_board_width_diagnostics() {
+        use crate::board::fen::FenError::BadRowWidth;
+        // Clear modal width, odd row LAST (was only tested first).
+        assert_eq!(
+            fen_to_board("8/8/PPPPPPPPP/8/8/8/8/8"),
+            Err(BadRowWidth { row: 2, expected: 8, found: 9 }),
+        );
+        // Odd row NARROWER than the rest (was only tested wider).
+        assert_eq!(
+            fen_to_board("PPPPPPP/8/8/8/8/8/8/8"),
+            Err(BadRowWidth { row: 0, expected: 8, found: 7 }),
+        );
+        // 2-row tie [8,9]: `max_by_key` returns the LAST max →
+        // expected=9, first deviating row is 0. Pins tie direction.
+        assert_eq!(
+            fen_to_board("PPPPPPPP/PPPPPPPPP"),
+            Err(BadRowWidth { row: 0, expected: 9, found: 8 }),
+        );
+        // Count-tie [8,8,7,7]: last max → expected=7, first dev row 0.
+        assert_eq!(
+            fen_to_board("8/8/PPPPPPP/PPPPPPP"),
+            Err(BadRowWidth { row: 0, expected: 7, found: 8 }),
+        );
     }
 
     /// FEN round-trip: `tr=ply` and `tr=full` both serialize and
@@ -4315,7 +4556,7 @@ mod tests {
             fen.contains("tr=ply"),
             "EveryPly should serialize as tr=ply, got {fen}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.flags.train_tick_rate, TrainTickRate::EveryPly);
 
         let mut board = empty_board();
@@ -4325,7 +4566,7 @@ mod tests {
             fen.contains("tr=full"),
             "EveryFullTurn should serialize as tr=full, got {fen}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.flags.train_tick_rate, TrainTickRate::EveryFullTurn);
     }
 
@@ -4364,7 +4605,7 @@ mod tests {
             })
             .set_piece(PieceType::new_king(Color::Black));
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2.grid[3][3], board.grid[3][3]);
     }
 
@@ -4382,7 +4623,7 @@ mod tests {
             fen.contains("FIRES=N"),
             "expected FIRES=N for Neutral trigger, got {fen}"
         );
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         match &board2.grid[4][4].square_type {
             SquareType::PressurePlate { fires_for, .. } => {
                 assert_eq!(
@@ -4715,7 +4956,7 @@ mod tests {
     #[test]
     fn test_fen_parser_drops_nested_carriers() {
         // Bus carrying a Bus → inner Bus dropped.
-        let board = fen_to_board("(P=BUS(P=(BUS,P)))7/8/8/8/8/8/8/8 w - -");
+        let board = fen_to_board("(P=BUS(P=(BUS,P)))7/8/8/8/8/8/8/8 w - -").unwrap();
         match &board.grid[0][0].piece {
             Some(PieceType::Bus(b)) => {
                 assert_eq!(
@@ -4735,7 +4976,7 @@ mod tests {
 
         // Locomotive carrying a Carriage → inner CART dropped.
         let board =
-            fen_to_board("(P=LOCO(ID=1,H=F,P=(CART(ID=1,I=1),K)))7/8/8/8/8/8/8/8 w - -");
+            fen_to_board("(P=LOCO(ID=1,H=F,P=(CART(ID=1,I=1),K)))7/8/8/8/8/8/8/8 w - -").unwrap();
         match &board.grid[0][0].piece {
             Some(PieceType::Locomotive(l)) => {
                 assert_eq!(
@@ -6225,7 +6466,7 @@ mod tests {
             "FEN should emit (T=BLOCK); got: {fen}"
         );
 
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "Block square should round-trip via FEN");
         assert_eq!(
             board_to_fen(&board2),
@@ -6268,7 +6509,7 @@ mod tests {
             .add_square_condition(SquareCondition::Frozen);
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(board2, board, "Block + Frozen should round-trip via FEN");
         assert_eq!(
             board_to_fen(&board2),
@@ -6325,7 +6566,7 @@ mod tests {
             !fen.contains("lm="),
             "FEN of a fresh board should omit lm=; got: {fen}"
         );
-        let recovered = fen_to_board(&fen);
+        let recovered = fen_to_board(&fen).unwrap();
         assert!(recovered.flags.last_move.is_none());
     }
 
@@ -6394,7 +6635,7 @@ mod tests {
             fen.contains("lm=(C=B,F=4-1,K=MOVE,T=4-3,V=Q,P=p)"),
             "FEN should contain canonical lm payload; got: {fen}"
         );
-        let recovered = fen_to_board(&fen);
+        let recovered = fen_to_board(&fen).unwrap();
         assert_eq!(recovered.flags.last_move, board.flags.last_move);
     }
 
@@ -6429,7 +6670,7 @@ mod tests {
             };
             board.flags.last_move = Some(original.clone());
             let fen = board_to_fen(&board);
-            let recovered = fen_to_board(&fen);
+            let recovered = fen_to_board(&fen).unwrap();
             assert_eq!(
                 recovered.flags.last_move.as_ref(),
                 Some(&original),
@@ -7171,7 +7412,7 @@ mod tests {
         // Construct a FEN with an empty P= field. The lm payload
         // should be rejected as a whole (primary_symbol required).
         let fen = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,F=4-6,K=MOVE,P=)";
-        let board = fen_to_board(fen);
+        let board = fen_to_board(fen).unwrap();
         assert!(
             board.flags.last_move.is_none(),
             "lm= with empty P= must produce None last_move; got {:?}",
@@ -7190,8 +7431,8 @@ mod tests {
     fn test_lm_parser_duplicate_keys_order_independent() {
         let fen_a = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,C=foo,F=4-6,K=MOVE,P=P)";
         let fen_b = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=foo,C=W,F=4-6,K=MOVE,P=P)";
-        let board_a = fen_to_board(fen_a);
-        let board_b = fen_to_board(fen_b);
+        let board_a = fen_to_board(fen_a).unwrap();
+        let board_b = fen_to_board(fen_b).unwrap();
         assert!(board_a.flags.last_move.is_some());
         assert!(board_b.flags.last_move.is_some());
         // Both orderings produce the same parsed mover_color.
@@ -7212,7 +7453,7 @@ mod tests {
     #[test]
     fn test_lm_parser_rejects_unbalanced_parens() {
         let fen = "8/8/8/8/8/8/8/8 w KQkq - tr=full p=0 lm=(C=W,F=4-6,K=MOVE,P=G(H=0)";
-        let board = fen_to_board(fen);
+        let board = fen_to_board(fen).unwrap();
         assert!(
             board.flags.last_move.is_none(),
             "lm= with internal-paren imbalance must produce None; got {:?}",
@@ -7230,7 +7471,7 @@ mod tests {
     fn test_fen_parser_clamps_bus_over_capacity() {
         let board = fen_to_board(
             "(P=BUS(P=(P,N,B,R,Q,P,N,B,R,Q)))7/8/8/8/8/8/8/8 w - -",
-        );
+        ).unwrap();
         match &board.grid[0][0].piece {
             Some(PieceType::Bus(b)) => {
                 assert!(
@@ -7301,7 +7542,7 @@ mod tests {
     fn test_fen_parser_clamps_skibidi_phase() {
         for bogus in ["0", "5", "99", "255"] {
             let fen = format!("(P=S(PHASE={bogus}))7/8/8/8/8/8/8/8 w - -");
-            let board = fen_to_board(&fen);
+            let board = fen_to_board(&fen).unwrap();
             match &board.grid[0][0].piece {
                 Some(PieceType::Skibidi(s)) => {
                     assert!(
@@ -8253,7 +8494,7 @@ mod tests {
             .set_piece(kidnapping_goblin);
 
         let fen = board_to_fen(&board);
-        let board2 = fen_to_board(&fen);
+        let board2 = fen_to_board(&fen).unwrap();
         assert_eq!(
             board2, board,
             "Kidnapping Goblin on a Track tile must FEN round-trip cleanly"

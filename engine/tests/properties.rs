@@ -4,7 +4,7 @@
 //! turns any failure into a minimal reproducer (a small `picks` vec).
 //!
 //! Properties:
-//! 1. FEN round-trip — `fen_to_board(board_to_fen(b))` equals `b` at
+//! 1. FEN round-trip — `fen_to_board(board_to_fen(b)).unwrap()` equals `b` at
 //!    every step. Brainrot conditions are derived state, but we play
 //!    from a standard chess position (no Skibidis) so the raw grid
 //!    equality suffices.
@@ -34,7 +34,7 @@ use engine::board::{
 use proptest::prelude::*;
 
 fn standard_start() -> Board {
-    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -")
+    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -").unwrap()
 }
 
 /// Small board with a closed-loop train on the right side and idle
@@ -71,7 +71,7 @@ fn train_start() -> Board {
     // property test allows a -1 piece-count delta.
     fen_to_board(
         "K6k/8/8/4(T=TRACK,D=E,P=LOCO(ID=1,H=F,L=S))(T=TRACK,D=E)2/4(T=TRACK,D=E,P=CART(ID=1,I=1))(T=TRACK,D=E)2/8/8/8 w - - tr=full p=0",
-    )
+    ).unwrap()
 }
 
 /// Collects every move legal_moves offers for the side to move.
@@ -80,7 +80,7 @@ fn train_start() -> Board {
 /// exit moves and must be included, otherwise the property net is
 /// strictly weaker than the engine's `status()` invariant.
 fn collect_all_legal(board: &Board) -> Vec<GameMove> {
-    use engine::pieces::{Color, Piece};
+    use engine::pieces::Color;
     let mut out = Vec::new();
     for (coord, piece) in board.all_pieces() {
         let counts = piece.get_color() == board.flags.side_to_move
@@ -104,7 +104,7 @@ fn collect_all_legal(board: &Board) -> Vec<GameMove> {
 /// random-play harness lacked before this pass (Round A only added a
 /// *static* FEN-idempotence proptest for `remaining`).
 fn tornado_start() -> Board {
-    fen_to_board("k5r1/8/8/8/4W3/8/8/7K w - -")
+    fen_to_board("k5r1/8/8/8/4W3/8/8/7K w - -").unwrap()
 }
 
 /// A token-soup / arbitrary-bytes FEN fuzz strategy biased toward the
@@ -182,7 +182,7 @@ proptest! {
 
             // Property 1: FEN round-trip is exact.
             let fen = board_to_fen(&after);
-            let recovered = fen_to_board(&fen);
+            let recovered = fen_to_board(&fen).unwrap();
             prop_assert_eq!(&recovered, &after, "FEN round-trip mismatch");
 
             board = after;
@@ -267,7 +267,7 @@ proptest! {
 
             // Property 1: FEN round-trip is exact after train tick.
             let fen = board_to_fen(&after);
-            let recovered = fen_to_board(&fen);
+            let recovered = fen_to_board(&fen).unwrap();
             prop_assert_eq!(&recovered, &after, "FEN round-trip mismatch after train tick");
 
             board = after;
@@ -290,7 +290,7 @@ proptest! {
     /// sibling condition to also exercise multi-condition ordering.
     #[test]
     fn tornado_fen_roundtrip_idempotent(remaining in 0u8..=255, with_frozen in any::<bool>()) {
-        let mut b0 = fen_to_board("k7/8/8/8/8/8/8/7K w - -");
+        let mut b0 = fen_to_board("k7/8/8/8/8/8/8/7K w - -").unwrap();
         let mut sq = Square::new()
             .add_square_condition(SquareCondition::Tornado { remaining });
         if with_frozen {
@@ -300,9 +300,9 @@ proptest! {
 
         // First round normalizes (e.g. remaining 0 → 1, garbage paths
         // are unreachable here since we construct the value directly).
-        let b1 = fen_to_board(&board_to_fen(&b0));
+        let b1 = fen_to_board(&board_to_fen(&b0)).unwrap();
         // Second round must be a no-op: b1 is a fixed point.
-        let b2 = fen_to_board(&board_to_fen(&b1));
+        let b2 = fen_to_board(&board_to_fen(&b1)).unwrap();
         prop_assert_eq!(&b1, &b2, "tornado FEN not idempotent for remaining={}", remaining);
 
         // And the normalized value is the documented clamp: 0→1, else
@@ -328,20 +328,38 @@ proptest! {
     /// hostile FEN, incl. all the tornado parse arms).
     ///
     /// NOTE on scope: idempotence is deliberately NOT asserted here.
-    /// The general parser is intentionally lenient and a degenerate
-    /// input (e.g. `""` → a 0×0 board) does NOT round-trip to a fixed
-    /// point — a *pre-existing baseline* property, NOT introduced by
-    /// plan-13 (the empty/garbage path touches no tornado code), in the
-    /// same out-of-scope family as Round A's other baseline FEN-leniency
-    /// findings. In-scope idempotence (the tornado `C=TORNADO:n`
-    /// subset) is soundly covered by `tornado_fen_roundtrip_idempotent`.
+    /// The general parser is intentionally lenient and some degenerate
+    /// *accepted* inputs do NOT round-trip to a fixed point — e.g.
+    /// `"0"`/`"00"` parse to a 1×0 board whose empty grid token
+    /// re-serialises to a leading space, which `split_whitespace`
+    /// left-shifts on the next parse into a different board. (`"/"` or
+    /// `"8"`, by contrast, *are* fixed points — their grid token
+    /// survives re-encoding; non-idempotence is specific to the
+    /// empty-grid-token case, not "any degenerate board".) This is a
+    /// *pre-existing baseline* property, NOT introduced by plan-13 (the
+    /// empty/garbage path touches no tornado code), in the same
+    /// out-of-scope family as Round A's other baseline FEN-leniency
+    /// findings. (Plan 05 since made the former `""` example a hard
+    /// `Err(FenError::EmptyInput)`, no longer a 0×0 board — the `Err`
+    /// is filtered by the `if let Ok` below, see the plan-13 note.)
+    /// In-scope idempotence (the tornado `C=TORNADO:n` subset) is
+    /// soundly covered by `tornado_fen_roundtrip_idempotent`.
     #[test]
     fn fen_to_board_is_total(s in fuzz_fen()) {
-        let b = fen_to_board(&s);
-        let f = board_to_fen(&b);
-        // Re-parsing the engine's own output must also not panic.
-        let _ = fen_to_board(&f);
-        // Survival is the assertion — no panic for any fuzz_fen() input.
+        // Plan 05: `fen_to_board` is now fallible. "Total" no longer
+        // means "always yields a board" — it means "never panics":
+        // every input maps to `Ok(board)` or `Err(FenError)`, never a
+        // panic/unwrap abort. A graceful `Err` on hostile token-soup is
+        // the *intended* hardened behaviour, not a property violation.
+        if let Ok(b) = fen_to_board(&s) {
+            let f = board_to_fen(&b);
+            // The engine's own serialization of any board it accepted
+            // must itself re-parse cleanly — a real round-trip
+            // soundness invariant (the 80+ round-trip tests rely on it).
+            fen_to_board(&f)
+                .expect("board_to_fen output must always re-parse");
+        }
+        // Survival (no panic) is the assertion for any fuzz_fen() input.
     }
 
     /// The four random-play invariants (Property 1–4) driven from a
@@ -384,7 +402,7 @@ proptest! {
 
             // Property 1: FEN round-trip exact even with a live
             // `C=TORNADO:n` mid-game.
-            let recovered = fen_to_board(&board_to_fen(&after));
+            let recovered = fen_to_board(&board_to_fen(&after)).unwrap();
             prop_assert_eq!(&recovered, &after, "FEN round-trip mismatch under tornado play");
 
             board = after;

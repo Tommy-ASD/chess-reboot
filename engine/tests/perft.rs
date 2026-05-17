@@ -40,7 +40,7 @@ fn perft(board: &Board, depth: u32) -> u64 {
 /// reference counts are tabulated to ridiculous depths and any small
 /// move-gen bug eventually breaks them.
 fn standard_start() -> Board {
-    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -")
+    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -").unwrap()
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn perft_start_depth_4() {
 fn kiwipete() -> Board {
     fen_to_board(
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -",
-    )
+    ).unwrap()
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn perft_kiwipete_depth_2() {
 /// "Position 3" — endgame-y perft anchor designed to exercise pawn
 /// promotion and en passant heavily.
 fn position_three() -> Board {
-    fen_to_board("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -")
+    fen_to_board("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -").unwrap()
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn fairy_setup() -> Board {
     // home-square clause.
     fen_to_board(
         "4k3/8/3s4/2p5/5P2/4S3/1M6/(P=BUS)3K2(P=G(H=7-7)) w - -",
-    )
+    ).unwrap()
 }
 
 #[test]
@@ -150,6 +150,24 @@ fn perft_fairy_setup_depth_1_smoke() {
     assert_eq!(
         count, FAIRY_PERFT_DEPTH_1,
         "fairy-setup depth-1 perft drifted — investigate which piece changed"
+    );
+}
+
+/// Plan-05 audit (B6): the 40→47 constant bump is the only guard for
+/// the `symbol_to_piece` `M`/`m` arm. Anchor it structurally so a
+/// regression names the Monkey instead of a generic "perft drifted"
+/// (and so an unrelated move-gen change that *coincidentally* also
+/// nets 47 on a monkey-less board can't mask the parse regression).
+#[test]
+fn fairy_setup_places_a_monkey_on_b2() {
+    use engine::pieces::piecetype::PieceType;
+    // FEN grid row 6 (`1M6`) → file 1 → grid[6][1] is b2.
+    let board = fairy_setup();
+    assert!(
+        matches!(board.grid[6][1].piece, Some(PieceType::Monkey(_))),
+        "fairy setup must place a Monkey at b2 = grid[6][1] (regression \
+         guard for the symbol_to_piece M/m arm); got {:?}",
+        board.grid[6][1].piece
     );
 }
 
@@ -170,5 +188,12 @@ fn perft_fairy_setup_depth_2_smoke() {
 // Constants pinned by the first run of these tests; future drift trips
 // the regression. Treat changes here as load-bearing: each requires
 // understanding which piece's move-gen changed and why.
-const FAIRY_PERFT_DEPTH_1: u64 = 40;
-const FAIRY_PERFT_DEPTH_2: u64 = 501;
+//
+// Plan 05 (FEN hardening): bumped 40→47 / 501→599. The fairy setup
+// places a white Monkey on b2, but `symbol_to_piece` had no `M`/`m`
+// arm, so the parser silently dropped it to an empty square — the
+// exact silent-garbage class plan 05 closes. The old constants were
+// pinned against that monkey-less board; these are the counts for the
+// board the FEN actually describes.
+const FAIRY_PERFT_DEPTH_1: u64 = 47;
+const FAIRY_PERFT_DEPTH_2: u64 = 599;

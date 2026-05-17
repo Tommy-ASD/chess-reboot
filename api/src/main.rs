@@ -10,7 +10,7 @@ use tower_http::cors::CorsLayer;
 
 use engine::board::{
     Coord, GameMove, MoveError,
-    fen::{board_to_fen, fen_to_board},
+    fen::{FenError, board_to_fen, fen_to_board},
 };
 use engine::pieces::Color;
 
@@ -25,11 +25,50 @@ pub struct GetMovesResponse {
     pub moves: Vec<GameMove>,
 }
 
+/// JSON error body returned on a 400 when the supplied `board_fen` is
+/// structurally malformed. Follows the same client contract as
+/// `MakeMoveErrorBody` — a machine-branchable `code` plus a human
+/// message — with an echo of the FEN the server actually parsed.
+/// Intentionally leaner: no structured `details` payload (the FEN
+/// failure is fully described by `code` + `message`).
+#[derive(Debug, Serialize)]
+struct FenErrorBody {
+    code: &'static str,
+    message: String,
+    /// The FEN string the server received, so a client can confirm what
+    /// it sent without re-deriving it from request state.
+    fen: String,
+}
+
+fn fen_error_code(err: &FenError) -> &'static str {
+    match err {
+        FenError::EmptyInput => "fen_empty_input",
+        FenError::BadRowCount { .. } => "fen_bad_row_count",
+        FenError::BadRowWidth { .. } => "fen_bad_row_width",
+        FenError::UnknownPieceSymbol(_) => "fen_unknown_piece_symbol",
+        FenError::UnbalancedParen { .. } => "fen_unbalanced_paren",
+        FenError::BadExtendedSquare { .. } => "fen_bad_extended_square",
+        FenError::BadFlagsField(_) => "fen_bad_flags_field",
+    }
+}
+
+fn fen_error_response(err: FenError, fen: String) -> Response {
+    let body = FenErrorBody {
+        code: fen_error_code(&err),
+        message: err.to_string(),
+        fen,
+    };
+    (StatusCode::BAD_REQUEST, Json(body)).into_response()
+}
+
 #[axum::debug_handler]
-async fn get_moves_handler(Json(req): Json<GetMovesRequest>) -> Json<GetMovesResponse> {
-    let board = fen_to_board(&req.board_fen);
+async fn get_moves_handler(Json(req): Json<GetMovesRequest>) -> Response {
+    let board = match fen_to_board(&req.board_fen) {
+        Ok(b) => b,
+        Err(e) => return fen_error_response(e, req.board_fen),
+    };
     let moves = board.get_moves(&req.from);
-    Json(GetMovesResponse { moves })
+    Json(GetMovesResponse { moves }).into_response()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,7 +119,10 @@ fn move_error_code(err: &MoveError) -> &'static str {
 async fn get_new_board_state_handler(
     Json(req): Json<GetNewBoardStateRequest>,
 ) -> Response {
-    let mut board = fen_to_board(&req.board_fen);
+    let mut board = match fen_to_board(&req.board_fen) {
+        Ok(b) => b,
+        Err(e) => return fen_error_response(e, req.board_fen),
+    };
     let side_to_move = board.flags.side_to_move;
     let game_move = req.game_move.clone();
 
@@ -128,4 +170,60 @@ pub async fn serve_api() {
 #[tokio::main]
 async fn main() {
     serve_api().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plan-05 audit (B8): the FEN→400 mapping is the plan's stated API
+    /// deliverable, and the engine-side `FenError` tests can't reach
+    /// the three parser-never-constructs variants
+    /// (`BadRowCount`/`BadExtendedSquare`/`BadFlagsField`) — this is
+    /// their only coverage. Pure-function test; no HTTP harness needed.
+    #[test]
+    fn fen_error_code_maps_every_variant() {
+        let cases: [(FenError, &str); 7] = [
+            (FenError::EmptyInput, "fen_empty_input"),
+            (
+                FenError::BadRowCount { expected: 8, found: 9 },
+                "fen_bad_row_count",
+            ),
+            (
+                FenError::BadRowWidth { row: 0, expected: 8, found: 9 },
+                "fen_bad_row_width",
+            ),
+            (
+                FenError::UnknownPieceSymbol("Z".to_string()),
+                "fen_unknown_piece_symbol",
+            ),
+            (
+                FenError::UnbalancedParen { in_row: 0 },
+                "fen_unbalanced_paren",
+            ),
+            (
+                FenError::BadExtendedSquare {
+                    content: "x".to_string(),
+                    reason: "r",
+                },
+                "fen_bad_extended_square",
+            ),
+            (
+                FenError::BadFlagsField("x".to_string()),
+                "fen_bad_flags_field",
+            ),
+        ];
+        for (err, code) in cases {
+            assert_eq!(fen_error_code(&err), code, "code for {err:?}");
+            // `fen_error_response` builds the body from these same two
+            // calls (`fen_error_code` + `Display`), so the body's
+            // `code`/`message` can't diverge from what's asserted
+            // here; we only additionally pin the 400 status and a
+            // non-empty `Display` (the JSON shape is a trivial
+            // infallible derive, not re-deserialized here).
+            let resp = fen_error_response(err.clone(), "the-fen".to_string());
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            assert!(!err.to_string().is_empty(), "empty message for {err:?}");
+        }
+    }
 }

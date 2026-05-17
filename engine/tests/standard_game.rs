@@ -10,7 +10,7 @@ use engine::board::{
 };
 
 fn standard_start() -> Board {
-    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -")
+    fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -").unwrap()
 }
 
 /// Build a plain `MoveTo` GameMove from two algebraic-style coords.
@@ -96,7 +96,7 @@ fn opening_play_stays_ongoing_and_alternates_turns() {
 fn white_kingside_castle_lands() {
     // King on e1 (4,7), rook on h1 (7,7), squares between empty.
     let mut board =
-        fen_to_board("4k3/8/8/8/8/8/8/4K2R w KQkq -");
+        fen_to_board("4k3/8/8/8/8/8/8/4K2R w KQkq -").unwrap();
 
     use engine::board::CastleSide;
     let castle = GameMove {
@@ -134,7 +134,7 @@ fn white_kingside_castle_lands() {
 fn en_passant_capture_chain() {
     // Set up so black just needs to wait for the double push.
     // Black pawn on d4 (3,4), white pawn on e2 (4,6), side white to move.
-    let mut board = fen_to_board("8/8/8/8/3p4/8/4P3/8 w - -");
+    let mut board = fen_to_board("8/8/8/8/3p4/8/4P3/8 w - -").unwrap();
 
     // White e2-e4 — sets ep target to e3 = (4,5).
     board.make_move(mv((4, 6), (4, 4))).expect("white e2-e4");
@@ -190,7 +190,7 @@ fn en_passant_capture_chain() {
 fn capture_promotion_clears_castle_right() {
     // a8 = (0,0) black rook; b7 = (1,1) white pawn;
     // e8/e1 kings for legality.
-    let mut board = fen_to_board("r3k3/1P6/8/8/8/8/8/4K3 w q -");
+    let mut board = fen_to_board("r3k3/1P6/8/8/8/8/8/4K3 w q -").unwrap();
     assert!(board.flags.black_can_castle_queenside);
 
     use engine::board::{MoveType, PromotionTarget};

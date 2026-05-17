@@ -751,7 +751,7 @@ mod tests {
         // (0,3); lone Black king far away; White to move.
         let b = crate::board::fen::fen_to_board(
             "7k/8/8/(P=BUS(P=(K)),C=TORNADO:3)7/8/8/8/8 w - -",
-        );
+        ).unwrap();
         let bus = c(0, 3);
         assert!(
             !b.legal_moves(&bus).is_empty(),
@@ -772,7 +772,7 @@ mod tests {
     fn make_move_lets_king_passenger_escape_carrier_on_tornado() {
         let mut b = crate::board::fen::fen_to_board(
             "7k/8/8/(P=BUS(P=(K)),C=TORNADO:3)7/8/8/8/8 w - -",
-        );
+        ).unwrap();
         let escape = b
             .legal_moves(&c(0, 3))
             .into_iter()
@@ -796,7 +796,7 @@ mod tests {
     fn non_king_passenger_of_carrier_on_tornado_not_trapped() {
         let b = crate::board::fen::fen_to_board(
             "7k/8/8/(P=BUS(P=(R)),C=TORNADO:3)7/8/8/8/8 w - -",
-        );
+        ).unwrap();
         let moves = b.legal_moves(&c(0, 3));
         // The rook passenger genuinely has exits (not vacuously empty),
         // and every legal move from the carrier square is a passenger
@@ -953,7 +953,7 @@ mod tests {
     fn bus_passenger_exit_onto_tornado_is_compelled() {
         let b = crate::board::fen::fen_to_board(
             "8/4(C=TORNADO:3)3/8/8/4(P=BUS(P=(R)))3/8/8/7k w - -",
-        );
+        ).unwrap();
         let moves = b.legal_moves(&c(4, 4));
         assert!(!moves.is_empty(), "passenger must have the forced exit");
         // Compulsion is active: EVERY surviving move lands on the
@@ -994,7 +994,7 @@ mod tests {
         // 0). White Stormcaller adjacent at (3,1).
         let b = crate::board::fen::fen_to_board(
             "3(C=TORNADO:3)3R/3W4/8/8/8/8/8/7k w - -",
-        );
+        ).unwrap();
         let moves = b.legal_moves(&c(3, 1));
         assert!(
             moves.iter().any(|m| *m == move_to(c(3, 1), c(3, 0))),
@@ -1017,7 +1017,7 @@ mod tests {
         // 255 boundary round-trips byte-identically.
         let b = crate::board::fen::fen_to_board(
             "(C=TORNADO:255)7/8/8/8/8/8/8/8 w - -",
-        );
+        ).unwrap();
         assert!(
             b.grid[0][0].conditions.iter().any(|x| matches!(
                 x,
@@ -1030,7 +1030,7 @@ mod tests {
         // Leading '+' is accepted by u8::from_str and is idempotent.
         let bp = crate::board::fen::fen_to_board(
             "(C=TORNADO:+3)7/8/8/8/8/8/8/8 w - -",
-        );
+        ).unwrap();
         assert!(
             bp.grid[0][0].conditions.iter().any(|x| matches!(
                 x,

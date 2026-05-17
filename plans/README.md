@@ -10,8 +10,9 @@ plan you want to act on.
   and brainrot recalculation work for standard pieces + the custom set
   (Goblin, Skibidi, Bus, Monkey, Stormcaller) plus train carts
   (Locomotive, Carriage).
-  Engine test suite at 200+ tests across lib + integration (perft,
-  properties, fairy scenarios, standard game), 0 compile warnings.
+  Engine test suite at 340+ tests across lib + integration (perft,
+  properties, fairy scenarios, standard game) + doctests, 0 compile
+  warnings.
   Property tests cover both standard chess and an active train loop
   (the train property's helper now descends into Neutral carts so
   king-passenger scenarios are exercised under random play).
@@ -37,6 +38,14 @@ plan you want to act on.
   validate variant that skips the train tick.
 - **Plan 03 — standard-chess completeness**: promotion (Q/R/B/N),
   castling (king-/queen-side), en passant (set + clear + capture).
+- **Plan 05 — FEN hardening**: `FenError` type; `fen_to_board` /
+  `fen_to_square` / `fen_row_to_squares` are now fallible. Hard
+  structural errors (empty input, ragged board, unknown piece glyph,
+  unbalanced parens) abort the parse; field-level slips stay lenient
+  (`warn!` + default). `api/` returns a structured 400 on bad FEN.
+  Surfaced + fixed a latent silent-garbage bug: the Monkey (`M`/`m`)
+  had no `symbol_to_piece` arm and round-tripped to an empty square
+  (fairy perft constants re-pinned to the correct board).
 - **Plan 08 — signal substrate**: Switch, Junction, Gate, PressurePlate
   tile types; `fire_signal` dispatcher; FEN round-trip; `ThrowSwitch`
   move type.
@@ -67,31 +76,31 @@ In rough priority order:
 1. **Custom-piece spec gaps** — Skibidi win-by-brainrot, passenger Pawn
    double-push semantics, a few smaller items.
    → [04-custom-piece-spec-gaps.md](04-custom-piece-spec-gaps.md)
-2. **FEN parser hardening** — most paths now warn loudly on malformed
-   input; remaining gaps tracked in the plan.
-   → [05-fen-hardening.md](05-fen-hardening.md)
-3. **API evolution** — the API is still stateless and tiny.
+2. **API evolution** — the API is still stateless and tiny. (FEN
+   hardening, plan 05, has now landed — the API returns real 400s on
+   malformed FEN, the prerequisite this plan was waiting on.)
    → [06-api-evolution.md](06-api-evolution.md)
-4. **Test strategy** — 190+ tests now (lib + perft + property +
-   integration), but coverage is still uneven.
+3. **Test strategy** — 340+ tests now (326 lib + perft + property +
+   integration + doctests), but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-5. **Movement stack** — generic modifier pipeline that absorbs the
+4. **Movement stack** — generic modifier pipeline that absorbs the
    per-piece / per-square conditionals (brainrot, gate walkability,
    train threats, king-safety filter) into one ordered registry.
    Lands incrementally; each migration step is a working commit.
    → [10-movement-stack.md](10-movement-stack.md)
-6. **Duck Chess + variant infrastructure** — first true rule-variant,
+5. **Duck Chess + variant infrastructure** — first true rule-variant,
    plus the per-position `variants` flag future variants hook into.
    Independent of plan 10; conditionals migrate to modifiers when
    plan 10 absorbs them.
    → [11-duck-chess.md](11-duck-chess.md)
-7. **Trains v2** — the deferred items from plan 09 (collision-hook
+6. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
-Plans **04 / 05 / 06 / 07** can proceed in parallel. Plan **10** is the
+Plans **04 / 06 / 07** can proceed in parallel (plan **05** shipped).
+Plan **10** is the
 biggest structural piece left and unlocks cleaner future-piece work.
 Plan **11** (Duck Chess + variant infra) is independent of plan 10 —
 the chokepoint conditionals it adds collapse into modifiers when plan

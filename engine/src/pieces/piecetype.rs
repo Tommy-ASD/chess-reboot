@@ -4,6 +4,7 @@ use crate::{
     board::GameMove,
     pieces::{
         Color, Piece,
+        chess2::monkey::Monkey,
         fairy::{
             bus::Bus, carriage::Carriage, goblin::Goblin, locomotive::Locomotive,
             skibidi::Skibidi, stormcaller::Stormcaller,
@@ -137,6 +138,15 @@ impl PieceType {
                 Color::Black
             })),
 
+            // Monkey serializes as `M`/`m` but had no parse arm — it
+            // silently round-tripped to an empty square (plan 05). A
+            // Neutral monkey serializes as `M` and parses back as White,
+            // the same Neutral asymmetry the standard pieces carry.
+            "m" => Some(PieceType::new_monkey(if sym == "M" {
+                Color::White
+            } else {
+                Color::Black
+            })),
             "g" => Goblin::from_symbol(symbol),
             "s" => Skibidi::from_symbol(symbol),
             "w" => Stormcaller::from_symbol(symbol),
@@ -170,6 +180,10 @@ impl PieceType {
 
     pub fn new_king(color: Color) -> PieceType {
         Self::King(King { color })
+    }
+
+    pub fn new_monkey(color: Color) -> PieceType {
+        Self::Monkey(Monkey { color })
     }
 
     /// Does this piece block the path of other pieces?

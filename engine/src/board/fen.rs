@@ -8,6 +8,86 @@ use crate::{
     pieces::{Color, piecetype::PieceType},
 };
 
+/// Structural FEN parse failures.
+///
+/// Plan 05 splits malformed FEN into two tiers:
+///
+/// - **Hard structural errors** (this type) — the grid itself is
+///   ill-formed: empty input, a ragged board, an unknown piece glyph,
+///   or unbalanced parens in an extended block. These abort the parse
+///   so callers (notably the API) can return a real 4xx instead of a
+///   silently-wrong board.
+/// - **Soft payload leniency** (still `warn!` + default, *not* an
+///   error): a bad `OPEN=` value, an unparseable `tr=`/`p=` flag, a
+///   garbage `C=TORNADO:` suffix, an over-capacity Bus, etc. These are
+///   recoverable field-level slips; rejecting the whole board for them
+///   would break perft databases / opening books / hand-edited boards
+///   that lean on the documented defaults.
+#[derive(PartialEq, Debug, Clone)]
+pub enum FenError {
+    /// The FEN string had no grid token at all (empty / whitespace).
+    EmptyInput,
+    /// Reserved: a fixed-dimension context expected a specific number
+    /// of rows. Not produced by the current variable-size parser.
+    BadRowCount { expected: usize, found: usize },
+    /// The board is ragged — `row` does not match the board width
+    /// (`expected`, the most common row width). Boards must be
+    /// rectangular; a uniformly N-wide board of any N is fine.
+    BadRowWidth {
+        row: usize,
+        expected: usize,
+        found: usize,
+    },
+    /// A glyph (or `P=` payload) did not resolve to any known piece.
+    UnknownPieceSymbol(String),
+    /// An extended `(...)` block in row `in_row` opened or closed a
+    /// paren that never balanced.
+    UnbalancedParen { in_row: usize },
+    /// Reserved: a structurally-broken extended square. Not produced by
+    /// the current parser (extended-field slips stay lenient).
+    BadExtendedSquare {
+        content: String,
+        reason: &'static str,
+    },
+    /// Reserved: a structurally-broken trailing flag field. Not produced
+    /// by the current parser (flag fields stay lenient).
+    BadFlagsField(String),
+}
+
+impl std::fmt::Display for FenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FenError::EmptyInput => write!(f, "FEN is empty."),
+            FenError::BadRowCount { expected, found } => {
+                write!(f, "Expected {expected} rows, found {found}.")
+            }
+            FenError::BadRowWidth {
+                row,
+                expected,
+                found,
+            } => write!(
+                f,
+                "Row {row} is {found} squares wide; board width is {expected} \
+                 (the board must be rectangular)."
+            ),
+            FenError::UnknownPieceSymbol(s) => {
+                write!(f, "Unknown piece symbol {s:?}.")
+            }
+            FenError::UnbalancedParen { in_row } => {
+                write!(f, "Unbalanced parenthesis in row {in_row}.")
+            }
+            FenError::BadExtendedSquare { content, reason } => {
+                write!(f, "Malformed extended square {content:?}: {reason}.")
+            }
+            FenError::BadFlagsField(s) => {
+                write!(f, "Malformed flags field {s:?}.")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FenError {}
+
 /// Finds the index of the closing parenthesis that matches the opening
 /// parenthesis located at `open_index`.
 ///
@@ -30,7 +110,9 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
+/// use engine::board::fen::find_matching_paren;
+///
 /// let s = "G(H=0-7,P=g(H=0-0))";
 ///
 /// // The first '(' occurs at index 1
@@ -38,8 +120,8 @@ use crate::{
 ///
 /// // A nested example:
 /// let s = "foo(bar(baz),qux)";
-/// // '(' at index 3 closes at index 15
-/// assert_eq!(find_matching_paren(s, 3), Some(15));
+/// // '(' at index 3 closes at the final ')' at byte index 16
+/// assert_eq!(find_matching_paren(s, 3), Some(16));
 ///
 /// // Unmatched parentheses:
 /// let s = "(abc(def)";
@@ -83,8 +165,8 @@ pub fn find_matching_paren(s: &str, open_index: usize) -> Option<usize> {
     None
 }
 
-fn fen_row_to_squares(row: &str) -> Vec<Square> {
-    trace!(row, "fen_row_to_squares");
+fn fen_row_to_squares(row: &str, row_idx: usize) -> Result<Vec<Square>, FenError> {
+    trace!(row, row_idx, "fen_row_to_squares");
 
     let mut squares = Vec::new();
     let mut chars = row.chars().peekable();
@@ -129,6 +211,7 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
             let mut buf = String::new();
             // `i32` for defensive bounds — see find_matching_paren.
             let mut depth: i32 = 0;
+            let mut closed = false;
 
             while let Some(c) = chars.next() {
                 buf.push(c);
@@ -140,10 +223,12 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                     ')' => {
                         depth -= 1;
                         if depth <= 0 {
-                            // Either correctly balanced (==0) or stray
-                            // `)` with no preceding `(` (<0). Either
-                            // way, stop scanning this block.
+                            // Balanced (depth==0). A stray `)` with no
+                            // matching `(` can't reach here — the block
+                            // is only entered on a leading `(`, so depth
+                            // starts at 1.
                             trace!(buf, "extended block closed");
+                            closed = true;
                             break;
                         }
                     }
@@ -151,8 +236,16 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                 }
             }
 
+            if !closed {
+                // The iterator drained with depth still > 0: an
+                // unterminated `(...)` block. Previously this produced a
+                // best-effort (wrong) square; now it's a hard error.
+                warn!(buf, row_idx, "unterminated extended block in FEN row");
+                return Err(FenError::UnbalancedParen { in_row: row_idx });
+            }
+
             trace!(buf, "parsing extended square");
-            squares.push(fen_to_square(&buf));
+            squares.push(fen_to_square(&buf)?);
 
             index += buf.len();
             continue;
@@ -161,15 +254,23 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
         // -------------------------------
         // 3. STANDARD SINGLE-CHAR PIECE
         // -------------------------------
+        if ch == ')' {
+            // A `)` outside any extended block is a stray close paren.
+            // The old parser fell through to `fen_to_square(")")` →
+            // empty square, silently swallowing malformed input.
+            warn!(row_idx, "stray ')' in FEN row");
+            return Err(FenError::UnbalancedParen { in_row: row_idx });
+        }
+
         trace!(?ch, "standard piece");
-        squares.push(fen_to_square(&ch.to_string()));
+        squares.push(fen_to_square(&ch.to_string())?);
 
         chars.next();
         index += 1;
     }
 
     trace!(count = squares.len(), "row complete");
-    squares
+    Ok(squares)
 }
 
 pub fn board_to_fen(board: &Board) -> String {
@@ -511,7 +612,33 @@ fn parse_castle_rights(s: &str) -> (bool, bool, bool, bool) {
     (wk, wq, bk, bq)
 }
 
-pub fn fen_to_board(fen: &str) -> Board {
+/// The board must be rectangular. A single ragged row used to slide
+/// through and produce a board the engine then mis-indexes. Picks the
+/// most common row width as the intended one and returns the first row
+/// that disagrees. A uniformly N-wide board (any N), or an empty grid,
+/// is fine (`None`).
+fn detect_ragged(grid: &[Vec<Square>]) -> Option<FenError> {
+    let widths: Vec<usize> = grid.iter().map(|r| r.len()).collect();
+    let &first = widths.first()?;
+    if widths.iter().all(|&w| w == first) {
+        return None;
+    }
+    let expected = widths
+        .iter()
+        .copied()
+        .max_by_key(|w| widths.iter().filter(|&&x| x == *w).count())
+        .unwrap_or(first);
+    let row = widths.iter().position(|&w| w != expected)?;
+    let found = widths[row];
+    warn!(row, expected, found, "ragged FEN board");
+    Some(FenError::BadRowWidth {
+        row,
+        expected,
+        found,
+    })
+}
+
+pub fn fen_to_board(fen: &str) -> Result<Board, FenError> {
     debug!(%fen, "fen_to_board");
 
     // Split off optional flag fields:
@@ -519,7 +646,12 @@ pub fn fen_to_board(fen: &str) -> Board {
     // Plan 09 appends `tr=...` and `p=...`. Both are back-compatible: any
     // FEN without them parses with the defaults (`EveryFullTurn`, 0).
     let mut parts = fen.split_whitespace();
-    let grid_part = parts.next().unwrap_or("");
+    // An absent grid token (empty / whitespace-only input) is a hard
+    // error rather than a silent 0×0 board.
+    let grid_part = match parts.next() {
+        Some(g) => g,
+        None => return Err(FenError::EmptyInput),
+    };
     let stm_part = parts.next();
     let castle_part = parts.next();
     let ep_part = parts.next();
@@ -544,8 +676,8 @@ pub fn fen_to_board(fen: &str) -> Board {
     let row_limit = rows.len().min(255);
     let mut grid = vec![];
 
-    for row in rows.into_iter().take(row_limit) {
-        let mut squares = fen_row_to_squares(row);
+    for (row_idx, row) in rows.into_iter().take(row_limit).enumerate() {
+        let mut squares = fen_row_to_squares(row, row_idx)?;
         // Same clamp for row width.
         if squares.len() > 255 {
             warn!(
@@ -555,6 +687,10 @@ pub fn fen_to_board(fen: &str) -> Board {
             squares.truncate(255);
         }
         grid.push(squares);
+    }
+
+    if let Some(e) = detect_ragged(&grid) {
+        return Err(e);
     }
 
     let side_to_move = match stm_part {
@@ -601,7 +737,7 @@ pub fn fen_to_board(fen: &str) -> Board {
         last_move,
     };
 
-    Board { grid, flags }
+    Ok(Board { grid, flags })
 }
 
 pub fn square_to_fen(square: &Square) -> String {
@@ -772,17 +908,12 @@ fn parse_pressure_trigger(v: &str) -> Option<PressureTrigger> {
 /// the input, split only at top-level commas.
 ///
 /// # Examples
-/// ```ignore
-/// let input = "a, b(c, d), e";
-/// let parts = split_top_level(input);
+/// ```
+/// use engine::board::fen::split_top_level;
 ///
 /// assert_eq!(
-///     parts,
-///     vec![
-///         "a",
-///         "b(c, d)",
-///         "e",
-///     ]
+///     split_top_level("a, b(c, d), e"),
+///     ["a", "b(c, d)", "e"]
 /// );
 /// ```
 ///
@@ -831,14 +962,14 @@ pub fn split_top_level(input: &str) -> Vec<String> {
     parts
 }
 
-pub fn fen_to_square(fen: &str) -> Square {
+pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
     // Standard empty
     if fen.is_empty() || fen == "()" {
-        return Square {
+        return Ok(Square {
             piece: None,
             square_type: SquareType::Standard,
             conditions: vec![],
-        };
+        });
     }
 
     // Extended form
@@ -869,7 +1000,15 @@ pub fn fen_to_square(fen: &str) -> Square {
 
             match key {
                 "P" => {
-                    piece = PieceType::symbol_to_piece(value);
+                    // A present `P=` that resolves to nothing is a hard
+                    // error: previously it became `piece: None`, turning
+                    // a typo'd glyph into a silent empty square.
+                    match PieceType::symbol_to_piece(value) {
+                        Some(p) => piece = Some(p),
+                        None => {
+                            return Err(FenError::UnknownPieceSymbol(value.to_string()));
+                        }
+                    }
                 }
                 "T" => {
                     type_tag = Some(value.to_string());
@@ -1007,17 +1146,22 @@ pub fn fen_to_square(fen: &str) -> Square {
             }
         };
 
-        return Square {
+        return Ok(Square {
             piece,
             square_type,
             conditions,
-        };
+        });
     }
 
-    // Standard single-character piece
-    Square {
-        piece: PieceType::symbol_to_piece(fen),
-        square_type: SquareType::Standard,
-        conditions: vec![],
+    // Standard single-character piece. An unrecognized glyph (e.g.
+    // `"Z"`) used to coerce to `piece: None` — an empty square — which
+    // hid the bad input. It is now a hard parse error.
+    match PieceType::symbol_to_piece(fen) {
+        Some(p) => Ok(Square {
+            piece: Some(p),
+            square_type: SquareType::Standard,
+            conditions: vec![],
+        }),
+        None => Err(FenError::UnknownPieceSymbol(fen.to_string())),
     }
 }

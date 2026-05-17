@@ -71,6 +71,15 @@ on the opponent's turn (documented in `stormcaller.rs`; duration cap
 is open question 1). Commit 5 (frontend brush + countdown overlay)
 is deferred — engine scope, API contract unchanged.
 
+> **Update — plan 05 (FEN hardening) since fixed (ii)'s premise.**
+> `fen_to_board("")` now returns `Err(FenError::EmptyInput)` (guarded
+> by `test_fen_empty_input_returns_err`), not a 0×0 board, so the
+> idempotence-on-empty quirk no longer exists. The `s=""` regression
+> seed remains valid — `fen_to_board_is_total` was rewritten to
+> `if let Ok(b) = …`, so `s=""` now exercises the `Err` skip-path
+> rather than the old garbage-board path. No tornado-scope behaviour
+> changed.
+
 A timed square condition that **compels destination**. While a Tornado
 condition sits on a square, any side that *could* legally move a piece
 onto that square *must* — every move that doesn't land on a tornado
