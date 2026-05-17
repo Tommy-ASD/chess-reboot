@@ -164,10 +164,11 @@ pub enum SquareCondition {
 }
 
 impl SquareCondition {
-    /// Bare uppercase tag, no payload. Stable identifier used by
-    /// callers that only need to name the condition (logging, the
-    /// non-payload parse arms). The FEN serializer uses `to_fen()`
-    /// instead so payload-carrying conditions round-trip.
+    /// Bare uppercase tag, no payload. The stable name accessor;
+    /// currently the sole caller is `to_fen()` itself, which delegates
+    /// here for value-less conditions. Kept `pub` as the canonical
+    /// no-payload identifier (FEN serialization goes through `to_fen()`
+    /// so payload-carrying conditions round-trip).
     pub fn as_str(&self) -> &'static str {
         match self {
             SquareCondition::Frozen => "FROZEN",

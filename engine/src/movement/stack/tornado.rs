@@ -875,9 +875,10 @@ mod tests {
         // White rook on rank 0 can capture the checker at (4,0) — a
         // king-safe, check-resolving, NON-tornado move.
         b.grid[0][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
-        // Tornado in the corner: reachable only by a move that does NOT
-        // resolve the check (so king-safety drops it, in the real set
-        // AND in the capped probe) → compulsion must stay unarmed.
+        // Tornado in the corner: the checker at (4,0) sits on the
+        // rank-0 ray between this rook and the corner, so the rook is
+        // blocked at the checker and NO rook move reaches the tornado
+        // at all → compulsion stays unarmed (unreachable, not unsafe).
         b.grid[0][0] = Square::new()
             .add_square_condition(SquareCondition::Tornado { remaining: 3 });
 

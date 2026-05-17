@@ -463,7 +463,7 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
 | `test_tornado_king_exempt` | `king_is_exempt` | both faces |
 | `test_tornado_compulsion_no_recursion` | `compulsion_terminates_no_recursion` + `compulsion_probe_does_not_re_enter_filter` | the second proves *structurally* the probe excludes the 305 filter (capped set retains non-tornado moves) + asserts the `PROBE_CAP < TORNADO_PRIORITY` invariant — stronger than the trace-mode idea, which the stack API doesn't expose for the uncapped legal path |
 | `test_tornado_tick_dissipates` | `tornado_tick_removes_at_zero` + `tornado_tick_frees_trapped_piece` + `tornado_dissipates_through_real_make_move` | the freed-piece "moves again" half and an end-to-end across real `make_move` plies were added in R1 |
-| `test_tornado_compulsion_intersects_check` | `compulsion_intersects_check_no_force_when_unsafe` + `compulsion_intersects_check_forces_legal_block` | split into the two faces; the second also pins king-exemption under active compulsion |
+| `test_tornado_compulsion_intersects_check` | `compulsion_intersects_check_king_exempt_when_unsafe` + `compulsion_intersects_check_forces_legal_block` | split into the two faces; the second also pins king-exemption under active compulsion |
 | — | `make_move_enforces_compulsion`, `make_move_rejects_moving_trapped_piece`, `tornado_tick_multi_condition_on_one_square` | added in R1 (C1 enforcement; B2 multi-condition) |
 | — | `king_passenger_in_carrier_on_tornado_not_trapped`, `make_move_lets_king_passenger_escape_carrier_on_tornado`, `non_king_passenger_of_carrier_on_tornado_not_trapped` | added in R2/R3 — fix for the king-in-carrier-on-tornado false stalemate (R2-2): the filter resolves the *effective* passenger piece for `PieceInCarrier` candidates so a king (or any passenger) riding a carrier is not wrongly trapped/compelled |
 | — | `castle_blocked_when_rook_trapped_on_tornado`, `compulsion_intersects_check_non_king_evasion_survives` | added in R3 — a rook trapped on a tornado is not rescued by castling (R3/B1); a non-king check evasion is not stripped when the tornado is only reachable via a non-king-safe move (R3/B4) |
@@ -500,7 +500,7 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
   unshipped and `any_tornado` is inert without a tornado — but the
   dependency is load-bearing and is cross-referenced in a comment at
   `TornadoCompulsionFilter::apply`. Guarded by the two shipped tests
-  `compulsion_intersects_check_no_force_when_unsafe` and
+  `compulsion_intersects_check_king_exempt_when_unsafe` and
   `compulsion_intersects_check_forces_legal_block` (the single
   `test_tornado_compulsion_intersects_check` in the test list below was
   split into these two faces — see the test-list note).
@@ -575,14 +575,18 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
 - **Helper placement (as built — audit R1/E1).** The §Types pseudocode
   above shows `board.piece_at_is_king` / `board.square_has_tornado` /
   `board.side_can_reach_tornado` for readability, but the shipped
-  implementation puts these in `movement/stack/tornado.rs` as private
-  free functions (`any_tornado`, `is_tornado_square`,
+  implementation puts these in `movement/stack/tornado.rs` as free
+  functions (`any_tornado`, `is_tornado_square`,
   `side_can_reach_tornado`, `move_destination`); the king test is an
   inline `matches!(piece, PieceType::King(_))`. **`Board` gains no new
-  methods.** `any_tornado` is `pub(crate)` so `validate_move`'s
-  enforcement gate and `TornadoTickHandler`'s fast-path share one
-  definition. This is deliberately a smaller surface than the
-  pseudocode implied; the pseudocode is illustrative, not literal.
+  methods.** `any_tornado` and `is_tornado_square` are `pub(crate)`:
+  `any_tornado` so `validate_move`'s enforcement gate and
+  `TornadoTickHandler`'s fast-path share one definition, and
+  `is_tornado_square` so `king.rs`'s castle guard reuses it
+  (rook-trapped-on-tornado); `side_can_reach_tornado` and
+  `move_destination` stay private. This is deliberately a smaller
+  surface than the pseudocode implied; the pseudocode is illustrative,
+  not literal.
 
 ## Cross-system interactions (audit R1)
 
