@@ -27,7 +27,6 @@
 use std::sync::OnceLock;
 
 use crate::board::Board;
-use crate::board::square::SquareCondition;
 
 /// When in the per-move pipeline a handler fires. Names follow the
 /// "from the player's perspective" convention — `PreMover` happens
@@ -264,35 +263,12 @@ impl EnvReactionHandler for TornadoTickHandler {
         false
     }
     fn apply(&self, board: &mut Board, _ctx: &mut EnvReactionCtx) {
-        // Audit R1/B3: read-only fast-path so a tornado-free board (the
-        // overwhelmingly common case) pays one short-circuiting scan
-        // instead of a full `iter_mut` grid walk every ply. Mirrors the
-        // sibling handlers' perf gating (`TornadoCompulsionFilter`'s
-        // `any_tornado`, `BrainrotRecalcHandler`'s `train_ticked`) —
-        // shares the one `any_tornado` definition to avoid drift.
-        if !crate::movement::stack::tornado::any_tornado(board) {
-            return;
-        }
-        for row in board.grid.iter_mut() {
-            for sq in row.iter_mut() {
-                // Frozen suspends the countdown for this square.
-                if sq.conditions.contains(&SquareCondition::Frozen) {
-                    continue;
-                }
-                let mut ticked = false;
-                for c in sq.conditions.iter_mut() {
-                    if let SquareCondition::Tornado { remaining } = c {
-                        *remaining = remaining.saturating_sub(1);
-                        ticked = true;
-                    }
-                }
-                if ticked {
-                    sq.conditions.retain(
-                        |c| !matches!(c, SquareCondition::Tornado { remaining: 0 }),
-                    );
-                }
-            }
-        }
+        // Thin delegator — the grid walk (incl. the `any_tornado`
+        // fast-path and the Frozen-suspends rule) lives on
+        // `Board::tick_tornadoes`, mirroring `BrainrotRecalcHandler`
+        // delegating to `Board::recalc_brainrot`. Reads/writes only
+        // square conditions; never touches `_ctx`.
+        board.tick_tornadoes();
     }
 }
 
@@ -300,7 +276,7 @@ impl EnvReactionHandler for TornadoTickHandler {
 mod tests {
     use super::*;
     use crate::board::{BoardFlags, TrainTickRate};
-    use crate::board::square::Square;
+    use crate::board::square::{Square, SquareCondition};
     use crate::pieces::Color;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

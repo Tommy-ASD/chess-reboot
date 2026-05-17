@@ -13,6 +13,7 @@ pub mod make_move;
 pub mod signal;
 pub mod square;
 mod tests;
+pub mod tornado;
 pub mod trains;
 
 pub type File = u8; // 0–7 for default boards
