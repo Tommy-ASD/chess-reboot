@@ -37,7 +37,7 @@ const KING_STEPS: [(isize, isize); 8] = [
     (1, -1),
 ];
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Stormcaller {
     pub color: Color,
 }

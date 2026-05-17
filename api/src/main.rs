@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
 use engine::board::{
-    Coord, GameMove, MoveError,
+    Coord, GameMove, GameStatus, MoveError,
     fen::{FenError, board_to_fen, fen_to_board},
 };
 use engine::pieces::Color;
@@ -80,6 +80,26 @@ pub struct GetNewBoardStateRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetNewBoardStateResponse {
     pub new_board_fen: String,
+    /// Game status of the position *after* the move was applied,
+    /// evaluated for the side now to move: `Check`/`Stalemate` refer to
+    /// that player and `Ongoing` means the game continues. Note
+    /// `Checkmate { winner }` names the side that *delivered* mate — the
+    /// player who just moved, **not** the side now to move. Folded in so
+    /// a client gets check/checkmate/stalemate with every move without a
+    /// follow-up `/board/status` round-trip. Adjacently tagged (see
+    /// `GameStatus`): `{"status":"Checkmate","data":{"winner":"White"}}`
+    /// means White just gave mate and won.
+    pub status: GameStatus,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetStatusRequest {
+    pub board_fen: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetStatusResponse {
+    pub status: GameStatus,
 }
 
 /// JSON error body returned on 4xx. Designed to be self-contained: a
@@ -129,7 +149,9 @@ async fn get_new_board_state_handler(
     match board.make_move(game_move) {
         Ok(()) => {
             let new_board_fen = board_to_fen(&board);
-            Json(GetNewBoardStateResponse { new_board_fen }).into_response()
+            let status = board.status();
+            Json(GetNewBoardStateResponse { new_board_fen, status })
+                .into_response()
         }
         Err(err) => {
             let body = MakeMoveErrorBody {
@@ -144,6 +166,18 @@ async fn get_new_board_state_handler(
     }
 }
 
+/// Ad-hoc game-status query for a client that holds a FEN and just
+/// wants to know "is this game over?" without making a move. Same
+/// structured-400-on-bad-FEN contract as the other endpoints.
+#[axum::debug_handler]
+async fn get_status_handler(Json(req): Json<GetStatusRequest>) -> Response {
+    let board = match fen_to_board(&req.board_fen) {
+        Ok(b) => b,
+        Err(e) => return fen_error_response(e, req.board_fen),
+    };
+    Json(GetStatusResponse { status: board.status() }).into_response()
+}
+
 pub async fn serve_api() {
     let cors = CorsLayer::new()
         .allow_origin("*".parse::<http::HeaderValue>().unwrap()) // allow all — dev only
@@ -156,6 +190,7 @@ pub async fn serve_api() {
     let app = Router::new()
         .route("/board/moves", post(get_moves_handler))
         .route("/board/new_state", post(get_new_board_state_handler))
+        .route("/board/status", post(get_status_handler))
         .layer(cors);
 
     let listener = tokio::net::TcpListener::bind(&binding_address)
@@ -225,5 +260,62 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
             assert!(!err.to_string().is_empty(), "empty message for {err:?}");
         }
+    }
+
+    /// Plan 06 (audit D): `/board/new_state` must report the status of
+    /// the position *after* the move, not before. A regression that
+    /// read `status()` on the pre-move board would still pass every
+    /// engine-side test (those build boards directly), so guard the
+    /// ordering at the handler: a move that delivers mate must come back
+    /// `Checkmate`, not `Ongoing`. Direct handler call — no HTTP
+    /// harness, consistent with the test above.
+    #[tokio::test]
+    async fn new_state_status_is_post_move() {
+        use engine::board::MoveType;
+
+        let to = |f, r| MoveType::MoveTo(Coord { file: f, rank: r });
+        let at = |f, r| Coord { file: f, rank: r };
+
+        // Internal coord system: rank 0 is black's back row, rank 7 is white's.
+        // Fool's mate, set up to the position where Black plays Qd8-h4#.
+        let mut board = fen_to_board(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+        )
+        .unwrap();
+        for (from, dest) in [
+            (at(5, 6), to(5, 5)), // f2-f3
+            (at(4, 1), to(4, 3)), // e7-e5
+            (at(6, 6), to(6, 4)), // g2-g4
+        ] {
+            board
+                .make_move(GameMove { from, move_type: dest })
+                .unwrap();
+        }
+        // Pre-move status of this position is `Ongoing`; the handler
+        // must report the *post-move* status of the mating move.
+        let req = GetNewBoardStateRequest {
+            board_fen: board_to_fen(&board),
+            game_move: GameMove {
+                from: at(3, 0), // d8
+                move_type: to(7, 4), // h4 — Qd8-h4#
+            },
+        };
+
+        let resp = get_new_board_state_handler(Json(req)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let body: GetNewBoardStateResponse =
+            serde_json::from_slice(&bytes).expect("parse response JSON");
+        assert!(
+            matches!(
+                body.status,
+                GameStatus::Checkmate { winner: Color::Black }
+            ),
+            "expected post-move Checkmate(Black), got {:?}",
+            body.status
+        );
     }
 }

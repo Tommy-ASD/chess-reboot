@@ -37,6 +37,19 @@ Where `GameStatus` is the enum from plan 02 (Ongoing / Checkmate /
 Stalemate / BrainrotWin). Serde JSON of the enum is fine — adjacently
 tagged works.
 
+> **Update — shipped.** The landed enum is `Ongoing` /
+> `Check { side_to_move }` / `Checkmate { winner }` / `Stalemate` —
+> there's an extra `Check` variant this plan didn't anticipate and
+> **no `BrainrotWin`** (deferred to plan 04, per the doc-comment on
+> `Board::status()`). It derives serde with
+> `#[serde(tag = "status", content = "data")]`, e.g.
+> `{"status":"Checkmate","data":{"winner":"White"}}` /
+> `{"status":"Ongoing"}`. Folded into `/board/new_state` (status of the
+> position *after* the move) **and** exposed as `POST /board/status`
+> `{ board_fen } -> { status }`, which reuses the same
+> structured-400-on-bad-FEN contract. Shape pinned by
+> `game_status_json_shape` in the engine test suite.
+
 Alternatively, fold status into `/board/new_state`'s response:
 
 ```
@@ -131,6 +144,30 @@ Recommendation: add the derives now (it's free); leave the API on FEN
 for the moment; introduce a JSON board format the moment it stops being
 trivial to extend the FEN.
 
+> **Update — derives shipped.** `Board`, `BoardFlags`, `LastMove`,
+> `Square`, `SquareType`, `SquareCondition`, `PressureTrigger`,
+> `PieceType` and the full piece graph (standard + fairy + chess2,
+> incl. carriers with nested `PieceType`) now derive
+> `Serialize`/`Deserialize`. `Coord` / `Color` / `TrackDir` /
+> `TrainHeading` / `MoveType` / `GameMove` already did. Lossless JSON
+> round-trip is smoke-tested by `serde_json_board_roundtrip` (standard
+> position, nested-bus, loco+cart+passenger, tornado condition,
+> capture-bearing `last_move`). A 23-type sweep rather than the "one or
+> two lines" estimated above — mechanical, and `serde_json` is a
+> dev-dependency only (the round-trip test), no new runtime dep. The
+> API stays on FEN; the JSON board format itself is still deferred.
+>
+> **Constraint — a `Deserialize`d `Board` is structurally
+> unvalidated.** Unlike the FEN path, derived `Deserialize` is a free
+> constructor: it can build a ragged grid or out-of-range fairy state
+> (Skibidi `phase`, Carriage `chain_index`, Junction `state`) that the
+> FEN parser would reject. It is memory-safe (all grid access is
+> bounds-checked) but engine-invalid. Only FEN-sourced boards are
+> trusted today and there is **no** `Board`-from-JSON ingress (the API
+> takes `board_fen`, never a serialized `Board`), so this is latent,
+> not active. Any future JSON-board ingress must validate (or use
+> `#[serde(try_from)]`) before the board reaches engine logic.
+
 ## CORS, auth, etc.
 
 The API allows all origins (`CorsLayer::new().allow_origin("*")`),
@@ -139,13 +176,19 @@ Flag for whenever this goes anywhere near a real deployment.
 
 ## Sequencing
 
-1. Add `Serialize`/`Deserialize` to `Board` and `BoardFlags` (free,
-   unblocks JSON board format later).
-2. After plan 02 lands: include `GameStatus` in `/new_state` response
-   and add `/board/status` endpoint.
+1. ~~Add `Serialize`/`Deserialize` to `Board` and `BoardFlags`.~~
+   **Done** — extended across the whole `grid`/`flags` graph (23
+   types); lossless JSON round-trip smoke-tested. See the "derives
+   shipped" note above. The JSON *board format* (vs FEN on the wire) is
+   still intentionally deferred.
+2. ~~After plan 02 lands: include `GameStatus` in `/new_state` response
+   and add `/board/status` endpoint.~~ **Done** — both shipped; see the
+   "shipped" note under "Driven by plan 02" above for the real enum
+   shape + JSON tagging.
 3. ~~After plan 05 lands: switch error responses to structured
    `FenError` JSON.~~ **Done** — plan 05 shipped `FenErrorBody
    { code, message, fen }` + 400 (see the note under "Driven by plan
    05" above; only optional per-variant detail fields remain).
 4. Whenever multiplayer / persistence / clocks come up: redesign as
-   stateful with game IDs.
+   stateful with game IDs. **Still open** — explicitly out of scope
+   (see "Stateless vs stateful" above).

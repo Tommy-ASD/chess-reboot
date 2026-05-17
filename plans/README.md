@@ -21,9 +21,11 @@ plan you want to act on.
   PieceInCarrier envelope, Bus direction, Skibidi captures, Brainrot
   shape/neutralization), and converted the reachable `panic!`/`todo!`
   paths to `Err` returns.
-- **API** (`api/`): basic axum service with two endpoints
-  (`POST /board/moves`, `POST /board/new_state`). Now returns
-  `400 Bad Request` on illegal moves instead of silently echoing.
+- **API** (`api/`): axum service with three endpoints
+  (`POST /board/moves`, `POST /board/new_state`, `POST /board/status`).
+  Returns `400 Bad Request` on illegal moves and a structured 400 on
+  malformed FEN. `/new_state` and `/status` carry the adjacently-tagged
+  `GameStatus`.
 - **Frontend** (`frontend/vite-dev/`): exists, mostly an editor /
   rendering surface. Out of scope of this engine-focused project work
   unless the API contract changes.
@@ -46,6 +48,14 @@ plan you want to act on.
   Surfaced + fixed a latent silent-garbage bug: the Monkey (`M`/`m`)
   had no `symbol_to_piece` arm and round-tripped to an empty square
   (fairy perft constants re-pinned to the correct board).
+- **Plan 06 — API evolution** (steps 1–3): serde `Serialize`/
+  `Deserialize` swept across the whole `Board`/`grid`/`flags`/piece
+  graph (23 types; JSON round-trip smoke-tested). `GameStatus`
+  (adjacently tagged) folded into `POST /board/new_state` and exposed
+  via new `POST /board/status`; structured-400-on-bad-FEN (plan 05)
+  already wired. Step 4 (stateful redesign with game IDs) deferred —
+  no clock / multiplayer / persistence. The JSON board format (vs FEN
+  on the wire) also still deferred; the unblocking derives have landed.
 - **Plan 08 — signal substrate**: Switch, Junction, Gate, PressurePlate
   tile types; `fire_signal` dispatcher; FEN round-trip; `ThrowSwitch`
   move type.
@@ -76,30 +86,27 @@ In rough priority order:
 1. **Custom-piece spec gaps** — Skibidi win-by-brainrot, passenger Pawn
    double-push semantics, a few smaller items.
    → [04-custom-piece-spec-gaps.md](04-custom-piece-spec-gaps.md)
-2. **API evolution** — the API is still stateless and tiny. (FEN
-   hardening, plan 05, has now landed — the API returns real 400s on
-   malformed FEN, the prerequisite this plan was waiting on.)
-   → [06-api-evolution.md](06-api-evolution.md)
-3. **Test strategy** — 340+ tests now (326 lib + perft + property +
+2. **Test strategy** — 340+ tests now (328 lib + perft + property +
    integration + doctests), but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-4. **Movement stack** — generic modifier pipeline that absorbs the
+3. **Movement stack** — generic modifier pipeline that absorbs the
    per-piece / per-square conditionals (brainrot, gate walkability,
    train threats, king-safety filter) into one ordered registry.
    Lands incrementally; each migration step is a working commit.
    → [10-movement-stack.md](10-movement-stack.md)
-5. **Duck Chess + variant infrastructure** — first true rule-variant,
+4. **Duck Chess + variant infrastructure** — first true rule-variant,
    plus the per-position `variants` flag future variants hook into.
    Independent of plan 10; conditionals migrate to modifiers when
    plan 10 absorbs them.
    → [11-duck-chess.md](11-duck-chess.md)
-6. **Trains v2** — the deferred items from plan 09 (collision-hook
+5. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
-Plans **04 / 06 / 07** can proceed in parallel (plan **05** shipped).
+Plans **04 / 07** can proceed in parallel (plans **05** and **06**
+shipped).
 Plan **10** is the
 biggest structural piece left and unlocks cleaner future-piece work.
 Plan **11** (Duck Chess + variant infra) is independent of plan 10 —

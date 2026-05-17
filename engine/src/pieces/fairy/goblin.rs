@@ -36,7 +36,7 @@ use crate::{
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GoblinState {
     Free, // hasn't kidnapped any piece
     Kidnapping {
@@ -44,7 +44,7 @@ pub enum GoblinState {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Goblin {
     pub color: Color,
     pub state: GoblinState,

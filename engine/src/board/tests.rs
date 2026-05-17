@@ -9387,4 +9387,93 @@ mod tests {
         assert!(!board.is_walkable_at(&Coord { file: 99, rank: 99 }));
         assert!(!board.is_walkable_at(&Coord { file: 0, rank: 99 }));
     }
+
+    /// Plan 06 step 1: `Board` (and its whole `grid` / `flags` graph)
+    /// must JSON-round-trip losslessly. This is the contract the future
+    /// JSON board format depends on. It exercises the corners most
+    /// likely to break the "free" serde-derive sweep — carriers with a
+    /// nested `PieceType`, a payload-carrying square condition, and a
+    /// populated `flags.last_move` — but is a smoke test, not an
+    /// exhaustive sweep of every `PieceType` / `SquareType` variant. FEN
+    /// is the canonical wire format, so the JSON detour must not perturb
+    /// it either.
+    #[test]
+    fn serde_json_board_roundtrip() {
+        let fens = [
+            // Every standard piece + all four castle flags.
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+            // Carrier holding a nested carrier (recursive `PieceType`).
+            "(P=BUS(P=(BUS,P)))7/8/8/8/8/8/8/8 w - -",
+            // Train graph: loco + chained cart + king passenger.
+            "(P=LOCO(ID=1,H=F,P=(CART(ID=1,I=1),K)))7/8/8/8/8/8/8/8 w - -",
+            // Payload-carrying square condition (`SquareCondition`).
+            "(C=TORNADO:3)7/8/8/8/8/8/8/8 w KQkq -",
+            // Populated `flags.last_move` — the `BoardFlags` node that
+            // ships in `/board/new_state` (capture-bearing `LastMove`,
+            // exercising `LastMoveKind` + `Option<captured_symbol>`).
+            // The flag fields are POSITIONAL (`… ep tr p lm`); the
+            // `tr=full p=0` tokens are required so `lm=(…)` lands in
+            // the last-move slot and actually populates `last_move`
+            // (a non-vacuity guard below enforces this).
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - tr=full p=0 lm=(C=B,F=4-1,K=MOVE,T=4-3,V=Q,P=p)",
+        ];
+        for fen in fens {
+            let board = fen_to_board(fen).expect("test FEN parses");
+            let json =
+                serde_json::to_string(&board).expect("Board -> JSON");
+            let back: Board =
+                serde_json::from_str(&json).expect("JSON -> Board");
+            assert_eq!(board, back, "JSON round-trip changed {fen:?}");
+            assert_eq!(
+                board_to_fen(&board),
+                board_to_fen(&back),
+                "FEN diverged after JSON round-trip for {fen:?}"
+            );
+        }
+        // Non-vacuity guard: the 5th FEN must genuinely populate
+        // `flags.last_move`, otherwise its `LastMove`/`LastMoveKind`
+        // serde is never exercised and the round-trip above is a
+        // no-op for that node (positional flag tokens make this an
+        // easy, silent mistake).
+        let lm_board = fen_to_board(fens[4]).expect("last-move FEN parses");
+        let lm = lm_board
+            .flags
+            .last_move
+            .as_ref()
+            .expect("5th FEN must populate flags.last_move");
+        assert_eq!(
+            lm.captured_symbol.as_deref(),
+            Some("Q"),
+            "captured_symbol must round-trip via serde, not be dropped"
+        );
+    }
+
+    /// Plan 06: `GameStatus` is now part of the API contract
+    /// (`POST /board/status` + folded into `/board/new_state`). Pin the
+    /// adjacently-tagged JSON shape so a stray serde attribute change
+    /// can't silently break clients branching on `status`.
+    #[test]
+    fn game_status_json_shape() {
+        let cases = [
+            (GameStatus::Ongoing, r#"{"status":"Ongoing"}"#),
+            (GameStatus::Stalemate, r#"{"status":"Stalemate"}"#),
+            (
+                GameStatus::Check { side_to_move: Color::White },
+                r#"{"status":"Check","data":{"side_to_move":"White"}}"#,
+            ),
+            (
+                GameStatus::Checkmate { winner: Color::Black },
+                r#"{"status":"Checkmate","data":{"winner":"Black"}}"#,
+            ),
+        ];
+        for (status, want) in cases {
+            let json = serde_json::to_string(&status).unwrap();
+            assert_eq!(json, want, "shape for {status:?}");
+            assert_eq!(
+                serde_json::from_str::<GameStatus>(&json).unwrap(),
+                status,
+                "round-trip for {status:?}"
+            );
+        }
+    }
 }

@@ -38,7 +38,7 @@ macro_rules! dispatch {
     };
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum PieceType {
     Pawn(Pawn),
     Rook(Rook),

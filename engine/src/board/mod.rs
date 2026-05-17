@@ -168,7 +168,7 @@ pub enum TrainTickRate {
 /// Promotion target piece) is intentionally out of scope; if a piece
 /// needs that, it should consume the move at make-time, not read it
 /// back from `BoardFlags`.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct LastMove {
     pub mover_color: Color,
     pub from: Coord,
@@ -209,7 +209,7 @@ pub enum LastMoveKind {
     PlaceTornado,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct BoardFlags {
     pub side_to_move: Color,
     pub white_can_castle_kingside: bool,
@@ -235,7 +235,8 @@ pub struct BoardFlags {
     pub last_move: Option<LastMove>,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status", content = "data")]
 pub enum GameStatus {
     Ongoing,
     Check { side_to_move: Color },
@@ -406,7 +407,12 @@ impl std::fmt::Display for MoveError {
 
 impl std::error::Error for MoveError {}
 
-#[derive(PartialEq, Debug, Clone)]
+// `Deserialize` is a *free, unvalidated* constructor (plan 06): it can
+// build a ragged grid or out-of-range fairy state that the FEN parser
+// rejects. Memory-safe (all grid access is bounds-checked) but
+// engine-invalid. No `Board`-from-JSON ingress exists today (the API
+// takes `board_fen`); any future one must validate before use.
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Board {
     pub grid: Vec<Vec<Square>>,
     pub flags: BoardFlags,

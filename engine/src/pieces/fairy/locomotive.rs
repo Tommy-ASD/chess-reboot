@@ -39,7 +39,7 @@ impl TrainHeading {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Locomotive {
     pub train_id: u32,
     pub heading: TrainHeading,

@@ -8,7 +8,8 @@ These coordinates are highlighted in the frontend.
 Upon pressing one of these allowed squares, a request is sent to `http://localhost:8080/board/new_state`
 This endpoint takes in an initial board FEN, where a piece moves from, where it moves to, and returns the new FEN.
 The frontend renders the new FEN.
-This endpoint doesn't currently check whether the move is valid. If it isn't, the endpoint returns the old FEN, unaltered.
+This endpoint now validates the move. An illegal move returns a 400, a malformed FEN returns a 400 — it no longer just echoes the old FEN back. On success it returns the new FEN plus the post-move game status (ongoing / check / checkmate / stalemate).
+There's also a third endpoint, `http://localhost:8080/board/status`, which just takes a FEN and returns that game status without making a move.
 The API is currently *completely* stateless.
 
 How allowed moves are fetched;
