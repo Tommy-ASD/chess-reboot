@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    board::square::Square,
+    board::square::{Square, SquareCondition},
     pieces::{Color, piecetype::PieceType},
 };
 
@@ -235,6 +235,11 @@ pub enum GameStatus {
     /// endpoint) — `Board::status()` never produces this, since resignation
     /// isn't derivable from the board.
     Resigned { winner: Color },
+    /// `winner`'s Skibidi has brainrot-locked the opponent: the side to move
+    /// has no legal move and every one of its pieces sits on a Brainrot
+    /// square (plan 04). Reported instead of `Stalemate`. The detection is
+    /// intentionally approximate — see `Board::is_brainrot_win_against`.
+    BrainrotWin { winner: Color },
 }
 
 impl GameStatus {
@@ -248,7 +253,8 @@ impl GameStatus {
             GameStatus::Ongoing | GameStatus::Check { .. } => false,
             GameStatus::Checkmate { .. }
             | GameStatus::Stalemate
-            | GameStatus::Resigned { .. } => true,
+            | GameStatus::Resigned { .. }
+            | GameStatus::BrainrotWin { .. } => true,
         }
     }
 }
@@ -647,9 +653,10 @@ impl Board {
         crate::movement::stack::default_stack().resolve_legal_moves(self, from)
     }
 
-    /// Overall status from the perspective of `side_to_move`. `BrainrotWin`
-    /// is intentionally absent — plan 04 will fold that in once the
-    /// distinguish-stalemate-from-brainrot heuristic lands.
+    /// Overall status from the perspective of `side_to_move`. When the side
+    /// to move has no legal move, distinguishes checkmate, brainrot-win
+    /// (plan 04 — the opponent's Skibidi has locked every piece), and
+    /// stalemate.
     pub fn status(&self) -> GameStatus {
         let to_move = self.flags.side_to_move;
         // Same-color pieces are the primary source of legal moves. But
@@ -688,9 +695,40 @@ impl Board {
             GameStatus::Checkmate {
                 winner: to_move.opposite(),
             }
+        } else if self.is_brainrot_win_against(to_move) {
+            GameStatus::BrainrotWin {
+                winner: to_move.opposite(),
+            }
         } else {
             GameStatus::Stalemate
         }
+    }
+
+    /// Plan 04 (approximate): `stuck` (the side to move) has no legal move —
+    /// decide whether that's a *brainrot win* for the opponent rather than a
+    /// plain stalemate. True iff every one of `stuck`'s pieces sits on a
+    /// `Brainrot` square AND the opponent has a Skibidi past phase 1 (the
+    /// brainrot source). Intentionally approximate: a piece can be immobile
+    /// for reasons other than brainrot, and "all pieces on a brainrot square"
+    /// is a heuristic, not a proof the brainrot caused the lock (see plan 04).
+    /// Returns false when `stuck` has no pieces.
+    fn is_brainrot_win_against(&self, stuck: Color) -> bool {
+        let stuck_coords: Vec<Coord> = self
+            .iter_pieces()
+            .filter(|(_, p)| p.get_color() == stuck)
+            .map(|(c, _)| c)
+            .collect();
+        if stuck_coords.is_empty() {
+            return false;
+        }
+        let all_on_brainrot = stuck_coords.iter().all(|coord| {
+            self.get_square_at(coord)
+                .is_some_and(|sq| sq.conditions.contains(&SquareCondition::Brainrot))
+        });
+        all_on_brainrot
+            && self.iter_pieces().any(|(_, p)| {
+                matches!(p, PieceType::Skibidi(sk) if sk.color != stuck && sk.phase > 1)
+            })
     }
 
     pub fn all_pieces(&self) -> Vec<(Coord, PieceType)> {

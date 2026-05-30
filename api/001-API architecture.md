@@ -122,8 +122,10 @@ resp (409): { "error": "game_over" }
   (`"Ongoing"`, `"Stalemate"`); data variants wrap an object
   (`{ "Check": { "side_to_move": "White" } }`,
   `{ "Checkmate": { "winner": "Black" } }`,
-  `{ "Resigned": { "winner": "White" } }`). `Resigned` only comes from the
-  stateful resign path — `Board::status()` never produces it.
+  `{ "BrainrotWin": { "winner": "Black" } }`,
+  `{ "Resigned": { "winner": "White" } }`). `BrainrotWin` is the
+  win-by-brainrot terminal status from `Board::status()`; `Resigned` only
+  comes from the stateful resign path (`Board::status()` never produces it).
 
 The whole `Board` (grid + flags + every piece and square-type payload)
 also derives `Serialize`/`Deserialize` (plan 06 step 1) — the wire format

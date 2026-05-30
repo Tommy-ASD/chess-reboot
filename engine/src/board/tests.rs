@@ -233,6 +233,9 @@ mod tests {
             GameStatus::Resigned {
                 winner: Color::White,
             },
+            GameStatus::BrainrotWin {
+                winner: Color::Black,
+            },
         ] {
             let json = serde_json::to_string(&status).expect("serialize");
             let back: GameStatus = serde_json::from_str(&json).expect("deserialize");
@@ -274,6 +277,203 @@ mod tests {
                 winner: Color::Black
             }
             .is_terminal()
+        );
+        assert!(
+            GameStatus::BrainrotWin {
+                winner: Color::Black
+            }
+            .is_terminal()
+        );
+    }
+
+    /// Plan 04: the side to move has no legal move because all its pieces sit
+    /// on Brainrot squares and the opponent has a Skibidi past phase 1 —
+    /// that's a brainrot win for the opponent, not a stalemate.
+    #[test]
+    fn test_brainrot_win_when_all_pieces_locked_by_opposing_skibidi() {
+        let mut board = empty_board();
+        board.set_piece_at(
+            &Coord { file: 4, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        board.set_piece_at(
+            &Coord { file: 4, rank: 0 },
+            PieceType::new_king(Color::Black),
+        );
+        // Black Skibidi actively brainrotting (phase 2).
+        board.set_piece_at(
+            &Coord { file: 4, rank: 3 },
+            PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 2,
+            }),
+        );
+        // White's only piece (its king) is locked on a Brainrot square, so it
+        // has no legal move.
+        board
+            .get_square_mut(&Coord { file: 4, rank: 7 })
+            .unwrap()
+            .conditions
+            .push(SquareCondition::Brainrot);
+        board.flags.side_to_move = Color::White;
+
+        assert_eq!(
+            board.status(),
+            GameStatus::BrainrotWin {
+                winner: Color::Black
+            }
+        );
+    }
+
+    /// Same lock, but the opponent's Skibidi is only phase 1 (no active
+    /// brainrot source) — the heuristic falls back to Stalemate.
+    #[test]
+    fn test_locked_without_active_skibidi_is_stalemate() {
+        let mut board = empty_board();
+        board.set_piece_at(
+            &Coord { file: 4, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        board.set_piece_at(
+            &Coord { file: 4, rank: 0 },
+            PieceType::new_king(Color::Black),
+        );
+        board.set_piece_at(
+            &Coord { file: 4, rank: 3 },
+            PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 1,
+            }),
+        );
+        board
+            .get_square_mut(&Coord { file: 4, rank: 7 })
+            .unwrap()
+            .conditions
+            .push(SquareCondition::Brainrot);
+        board.flags.side_to_move = Color::White;
+
+        assert_eq!(board.status(), GameStatus::Stalemate);
+    }
+
+    /// A plain stalemate (no Brainrot squares) must NOT be misreported as a
+    /// brainrot win. Black king a8 stalemated by white king a6 + queen b6.
+    #[test]
+    fn test_plain_stalemate_is_not_brainrot_win() {
+        let board = fen_to_board("k7/8/KQ6/8/8/8/8/8 b - -");
+        assert_eq!(board.status(), GameStatus::Stalemate);
+    }
+
+    /// Plan 04: only SOME of the stuck side's pieces are on Brainrot squares
+    /// — that's a plain Stalemate, not a brainrot win. Isolates the
+    /// every-piece-on-brainrot gate (`.all()`, not `.any()`) while the
+    /// opposing-Skibidi gate is satisfied.
+    #[test]
+    fn test_partial_brainrot_lock_is_stalemate() {
+        let mut board = empty_board();
+        // White king locked on a Brainrot square...
+        board.set_piece_at(
+            &Coord { file: 4, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        board
+            .get_square_mut(&Coord { file: 4, rank: 7 })
+            .unwrap()
+            .conditions
+            .push(SquareCondition::Brainrot);
+        // ...plus a White pawn on a NON-Brainrot square, immobilized by a
+        // blocker (not by brainrot).
+        board.set_piece_at(
+            &Coord { file: 0, rank: 6 },
+            PieceType::new_pawn(Color::White),
+        );
+        board.set_piece_at(
+            &Coord { file: 0, rank: 5 },
+            PieceType::new_pawn(Color::Black),
+        );
+        board.set_piece_at(
+            &Coord { file: 7, rank: 0 },
+            PieceType::new_king(Color::Black),
+        );
+        board.set_piece_at(
+            &Coord { file: 4, rank: 3 },
+            PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 2,
+            }),
+        );
+        board.flags.side_to_move = Color::White;
+        assert_eq!(board.status(), GameStatus::Stalemate);
+    }
+
+    /// Plan 04: the only active Skibidi belongs to the STUCK side — a
+    /// self-inflicted lock is a Stalemate, not a brainrot win for the loser
+    /// (exercises the `sk.color != stuck` winner-attribution gate).
+    #[test]
+    fn test_stuck_sides_own_skibidi_is_stalemate() {
+        let mut board = empty_board();
+        board.set_piece_at(
+            &Coord { file: 4, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        // White's own Skibidi, also locked on a Brainrot square.
+        board.set_piece_at(
+            &Coord { file: 4, rank: 6 },
+            PieceType::Skibidi(Skibidi {
+                color: Color::White,
+                phase: 2,
+            }),
+        );
+        board.set_piece_at(
+            &Coord { file: 7, rank: 0 },
+            PieceType::new_king(Color::Black),
+        );
+        for sq in [Coord { file: 4, rank: 7 }, Coord { file: 4, rank: 6 }] {
+            board
+                .get_square_mut(&sq)
+                .unwrap()
+                .conditions
+                .push(SquareCondition::Brainrot);
+        }
+        board.flags.side_to_move = Color::White;
+        assert_eq!(board.status(), GameStatus::Stalemate);
+    }
+
+    /// Plan 04: checkmate takes precedence over brainrot-win — a mated king
+    /// on a Brainrot square with an opposing Skibidi is still Checkmate.
+    #[test]
+    fn test_checkmate_takes_precedence_over_brainrot() {
+        let mut board = empty_board();
+        // White king mated in the corner: Black queen b2 (protected by Kc3).
+        board.set_piece_at(
+            &Coord { file: 0, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        board.set_piece_at(
+            &Coord { file: 1, rank: 6 },
+            PieceType::new_queen(Color::Black),
+        );
+        board.set_piece_at(
+            &Coord { file: 2, rank: 5 },
+            PieceType::new_king(Color::Black),
+        );
+        board
+            .get_square_mut(&Coord { file: 0, rank: 7 })
+            .unwrap()
+            .conditions
+            .push(SquareCondition::Brainrot);
+        board.set_piece_at(
+            &Coord { file: 5, rank: 3 },
+            PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 2,
+            }),
+        );
+        board.flags.side_to_move = Color::White;
+        assert_eq!(
+            board.status(),
+            GameStatus::Checkmate {
+                winner: Color::Black
+            }
         );
     }
 

@@ -62,8 +62,10 @@ plan you want to act on.
 
 In rough priority order:
 
-1. **Custom-piece spec gaps** — Skibidi win-by-brainrot, passenger Pawn
-   double-push semantics, a few smaller items.
+1. **Custom-piece spec gaps** — Skibidi win-by-brainrot
+   (`GameStatus::BrainrotWin`) has landed; remaining: Goblin
+   capture-while-kidnapping extra move, Skibidi phase-4 lockout,
+   passenger-Pawn double-push, Monkey capture-chain (a few smaller items).
    → [04-custom-piece-spec-gaps.md](04-custom-piece-spec-gaps.md)
 2. **FEN parser hardening** — most paths now warn loudly on malformed
    input; remaining gaps tracked in the plan.
