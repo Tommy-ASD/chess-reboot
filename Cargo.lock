@@ -27,6 +27,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tower-http",
 ]
 
@@ -145,6 +146,7 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

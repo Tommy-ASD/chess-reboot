@@ -20,7 +20,7 @@ use crate::{
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Skibidi {
     pub color: Color,
     pub phase: u8, // 1 to 4

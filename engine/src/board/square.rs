@@ -4,7 +4,7 @@ use crate::board::SignalId;
 use crate::pieces::{Color, piecetype::PieceType};
 
 /// ------------- Square logic -------------
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Square {
     pub piece: Option<PieceType>,
     pub square_type: SquareType,
@@ -12,7 +12,7 @@ pub struct Square {
 }
 
 /// ------------- Square types -------------
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum SquareType {
     Standard,
     Turret,
@@ -104,7 +104,7 @@ impl TrackDir {
 }
 
 /// What triggers a `PressurePlate` to fire when a piece settles on it.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum PressureTrigger {
     AnyPiece,
     OnlyColor(Color),
@@ -148,7 +148,7 @@ impl SquareType {
 /// ------------- End Square types -------------
 
 /// ------------- Square conditions -------------
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum SquareCondition {
     Frozen,
     Brainrot,

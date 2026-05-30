@@ -4,7 +4,7 @@ use crate::{
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct King {
     pub color: Color,
 }

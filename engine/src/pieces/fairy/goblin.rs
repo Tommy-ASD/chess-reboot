@@ -36,7 +36,7 @@ use crate::{
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum GoblinState {
     Free, // hasn't kidnapped any piece
     Kidnapping {
@@ -44,7 +44,7 @@ pub enum GoblinState {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Goblin {
     pub color: Color,
     pub state: GoblinState,
@@ -196,10 +196,11 @@ impl Goblin {
                     // home arrival — converting a king or a carrier
                     // is nonsensical.
                     if let Some(ref p) = kidnapped_piece {
-                        if matches!(p, PieceType::King(_)) || p.can_carry_piece() {
+                        if matches!(p, PieceType::King(_) | PieceType::Goblin(_)) || p.can_carry_piece()
+                        {
                             warn!(
                                 val,
-                                "Goblin kidnap-payload cannot be a king or carrier; dropping payload"
+                                "Goblin kidnap-payload cannot be a king, goblin, or carrier; dropping payload"
                             );
                             kidnapped_piece = None;
                         }

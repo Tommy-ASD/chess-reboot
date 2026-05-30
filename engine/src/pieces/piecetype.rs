@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::sync::Arc;
 
 use crate::{
@@ -36,7 +37,7 @@ macro_rules! dispatch {
     };
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum PieceType {
     Pawn(Pawn),
     Rook(Rook),
@@ -94,6 +95,36 @@ impl PieceType {
     }
 
     pub fn symbol_to_piece(symbol: &str) -> Option<PieceType> {
+        // Bound parse recursion. Carrier passenger lists (Bus/Loco/Carriage
+        // `P=(...)`) and Goblin kidnap payloads (`P=...`) recurse through
+        // this function, and each parses its child *before* rejecting it —
+        // so a hand-rolled FEN with deeply nested parens (e.g.
+        // `g(P=g(P=g(...)))` or `bus(P=(bus(P=(...))))`) would recurse
+        // unboundedly and overflow the stack: an uncatchable abort (DoS).
+        // Legit nesting is shallow (a carrier holding a kidnapping goblin
+        // holding a plain piece is depth 3), so a cap of 8 drops only
+        // pathological input.
+        const MAX_PARSE_DEPTH: u32 = 8;
+        thread_local! {
+            static PARSE_DEPTH: Cell<u32> = Cell::new(0);
+        }
+        struct DepthGuard;
+        impl Drop for DepthGuard {
+            fn drop(&mut self) {
+                PARSE_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+            }
+        }
+        let depth = PARSE_DEPTH.with(|d| {
+            let next = d.get() + 1;
+            d.set(next);
+            next
+        });
+        let _depth_guard = DepthGuard;
+        if depth > MAX_PARSE_DEPTH {
+            tracing::warn!(symbol, depth, "FEN piece nesting too deep; dropping payload");
+            return None;
+        }
+
         // get initial symbol (before first bracket, if any)
         // can't just be first character, as some symbols may be multiple characters
         let sym = symbol.split('(').next().unwrap();

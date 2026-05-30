@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Carriage {
     pub train_id: u32,
     /// 1..255; 0 is the locomotive at the head of the same `train_id`.

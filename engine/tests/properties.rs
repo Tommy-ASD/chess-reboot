@@ -79,7 +79,7 @@ fn train_start() -> Board {
 /// exit moves and must be included, otherwise the property net is
 /// strictly weaker than the engine's `status()` invariant.
 fn collect_all_legal(board: &Board) -> Vec<GameMove> {
-    use engine::pieces::{Color, Piece};
+    use engine::pieces::Color;
     let mut out = Vec::new();
     for (coord, piece) in board.all_pieces() {
         let counts = piece.get_color() == board.flags.side_to_move

@@ -159,7 +159,7 @@ pub enum TrainTickRate {
 /// Promotion target piece) is intentionally out of scope; if a piece
 /// needs that, it should consume the move at make-time, not read it
 /// back from `BoardFlags`.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct LastMove {
     pub mover_color: Color,
     pub from: Coord,
@@ -199,7 +199,7 @@ pub enum LastMoveKind {
     PieceInCarrier,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct BoardFlags {
     pub side_to_move: Color,
     pub white_can_castle_kingside: bool,
@@ -225,12 +225,32 @@ pub struct BoardFlags {
     pub last_move: Option<LastMove>,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum GameStatus {
     Ongoing,
     Check { side_to_move: Color },
     Checkmate { winner: Color },
     Stalemate,
+    /// A player resigned. Set by the session layer (e.g. the API's resign
+    /// endpoint) — `Board::status()` never produces this, since resignation
+    /// isn't derivable from the board.
+    Resigned { winner: Color },
+}
+
+impl GameStatus {
+    /// Does this status represent a finished game (no further moves
+    /// possible)? Single source of truth for terminal-vs-ongoing, so
+    /// session layers (e.g. the API's `GameRecord::is_over`) don't
+    /// re-list the terminal variants. Exhaustive on purpose: a new
+    /// variant won't compile until it's classified here.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            GameStatus::Ongoing | GameStatus::Check { .. } => false,
+            GameStatus::Checkmate { .. }
+            | GameStatus::Stalemate
+            | GameStatus::Resigned { .. } => true,
+        }
+    }
 }
 
 /// Helper used by `Board::find_king` and tests. Lives at module scope so
@@ -373,7 +393,7 @@ impl std::fmt::Display for MoveError {
 
 impl std::error::Error for MoveError {}
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Board {
     pub grid: Vec<Vec<Square>>,
     pub flags: BoardFlags,

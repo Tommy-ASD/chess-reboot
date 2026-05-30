@@ -93,6 +93,16 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
     while let Some(&ch) = chars.peek() {
         trace!(index, ?ch, "char");
 
+        // A row is truncated to 255 squares (Coord uses `u8`), so stop
+        // building it once full. This bounds the allocation for adversarial
+        // rows — many runs ("255p255p…"), many single pieces ("pppp…"), or
+        // many extended blocks — each of which would otherwise grow the Vec
+        // linearly with the (untrusted, ~2 MB) input before the post-hoc
+        // `truncate(255)` runs (a memory-exhaustion DoS).
+        if squares.len() >= 255 {
+            break;
+        }
+
         // -------------------------------
         // 1. DIGITS → run-length empties (multi-digit, e.g. "10" → 10 empty
         //    squares on a 10-wide board). Consume the full digit run greedily.
@@ -109,6 +119,16 @@ fn fen_row_to_squares(row: &str) -> Vec<Square> {
                 }
             }
             trace!(count, "digit run-length");
+
+            // Clamp the run to the row's remaining capacity. Rows are
+            // truncated to 255 (Coord uses `u8`), so neither a single
+            // oversized run ("9999999999", which saturates `count` to
+            // `u32::MAX`) nor a row of many runs ("255p255p…") may build a
+            // multi-GB Vec before the post-hoc truncate. With the
+            // `squares.len() >= 255` break above, a row never allocates more
+            // than 255 squares.
+            let remaining = 255usize.saturating_sub(squares.len());
+            let count = (count as usize).min(remaining);
 
             for _ in 0..count {
                 squares.push(Square {

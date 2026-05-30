@@ -9,7 +9,7 @@ plan you want to act on.
 - **Engine** (`engine/`): move generation, FEN serialization, move execution,
   and brainrot recalculation work for standard pieces + the custom set
   (Goblin, Skibidi, Bus, Monkey) plus train carts (Locomotive, Carriage).
-  Engine test suite at 200+ tests across lib + integration (perft,
+  Engine test suite at 280+ tests across lib + integration (perft,
   properties, fairy scenarios, standard game), 0 compile warnings.
   Property tests cover both standard chess and an active train loop
   (the train property's helper now descends into Neutral carts so
@@ -19,9 +19,11 @@ plan you want to act on.
   PieceInCarrier envelope, Bus direction, Skibidi captures, Brainrot
   shape/neutralization), and converted the reachable `panic!`/`todo!`
   paths to `Err` returns.
-- **API** (`api/`): basic axum service with two endpoints
-  (`POST /board/moves`, `POST /board/new_state`). Now returns
-  `400 Bad Request` on illegal moves instead of silently echoing.
+- **API** (`api/`): axum service with two endpoint families — stateless
+  `/board/*` (`moves`, `new_state`, `status`; client owns the FEN) and
+  stateful `/games/*` (server-owned games with move history + resignation,
+  plan 06 step 4). Structured `400 Bad Request` JSON on illegal moves.
+  See [api/001-API architecture.md](../api/001-API%20architecture.md).
 - **Frontend** (`frontend/vite-dev/`): exists, mostly an editor /
   rendering surface. Out of scope of this engine-focused project work
   unless the API contract changes.
@@ -44,9 +46,17 @@ plan you want to act on.
   detection, three-phase commit, train-tick rate flags (`tr=full|ply|Nply`).
   v1 explicitly defers: per-piece collision hooks, carriage detaching,
   heading reversal, boarding-from-adjacent.
+- **Plan 10 — movement stack**: generic modifier pipeline; `get_moves`,
+  `is_attacked_by`, and `legal_moves` all resolve through an ordered
+  registry (`movement::stack`). Brainrot/frozen/walkability, train threats,
+  and the king-safety filter are modifiers now, not scattered conditionals.
 - **Plan 12 — Block square**: payload-free, semantics-free impassable
   tile (`T=BLOCK`). `is_walkable()` returns `false`; FEN round-trips;
   frontend brush + brick-pattern SVG + `.type-block` CSS shipped.
+- **Plan 06 — API evolution** (steps 1/2/4): serde on the whole `Board`;
+  `GameStatus` in responses + `/board/status`; stateful `/games/*` with
+  history + resignation. Step 3 (structured `FenError` JSON) waits on
+  plan 05.
 
 ## What's still missing
 
@@ -58,33 +68,28 @@ In rough priority order:
 2. **FEN parser hardening** — most paths now warn loudly on malformed
    input; remaining gaps tracked in the plan.
    → [05-fen-hardening.md](05-fen-hardening.md)
-3. **API evolution** — the API is still stateless and tiny.
+3. **API evolution** — steps 1/2/4 shipped (see above); step 3 (structured
+   `FenError` JSON) is all that remains, blocked on plan 05.
    → [06-api-evolution.md](06-api-evolution.md)
-4. **Test strategy** — 190+ tests now (lib + perft + property +
-   integration), but coverage is still uneven.
+4. **Test strategy** — 280+ lib tests + perft + property + integration,
+   but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-5. **Movement stack** — generic modifier pipeline that absorbs the
-   per-piece / per-square conditionals (brainrot, gate walkability,
-   train threats, king-safety filter) into one ordered registry.
-   Lands incrementally; each migration step is a working commit.
-   → [10-movement-stack.md](10-movement-stack.md)
-6. **Duck Chess + variant infrastructure** — first true rule-variant,
-   plus the per-position `variants` flag future variants hook into.
-   Independent of plan 10; conditionals migrate to modifiers when
-   plan 10 absorbs them.
+5. **Duck Chess + variant infrastructure** — first true rule-variant,
+   plus the per-position `variants` flag future variants hook into. With
+   plan 10 landed, its variant gates can be written directly as
+   movement-stack modifiers.
    → [11-duck-chess.md](11-duck-chess.md)
-7. **Trains v2** — the deferred items from plan 09 (collision-hook
+6. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
-Plans **04 / 05 / 06 / 07** can proceed in parallel. Plan **10** is the
-biggest structural piece left and unlocks cleaner future-piece work.
-Plan **11** (Duck Chess + variant infra) is independent of plan 10 —
-the chokepoint conditionals it adds collapse into modifiers when plan
-10 reaches step 8. Trains v2 (plan 09's deferred items) is the natural
-follow-up to plan 10.
+Plans **04 / 05** can proceed in parallel; **06** has only step 3 left
+(blocked on **05**). Plan **10** (movement stack) has landed, so plan
+**11** (Duck Chess + variant infra) can write its variant gates directly
+as movement-stack modifiers rather than as conditionals to migrate later.
+Trains v2 (plan 09's deferred items) is the natural follow-up to plan 10.
 
 ## Open questions
 
@@ -127,7 +132,7 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 | `OPEN` | Gate state (default open; `OPEN=garbage` parses as closed) | `OPEN=1` |
 | `FIRES` | Pressure plate trigger (default `ANY`) | `FIRES=ANY`, `FIRES=W`, `FIRES=B`, `FIRES=N` |
 | `D`  | Track exit direction (default `E`) | `D=N`, `D=E`, `D=S`, `D=W` |
-| `DUCK` | Duck on this square (plan 11; value-less flag) | `(DUCK)` |
+| `DUCK` | Duck on this square (plan 11 — **planned, not yet parsed**; value-less flag) | `(DUCK)` |
 
 ### Piece-payload keys (inside `P=...` for carriers)
 | Key | Meaning | Example |
@@ -146,8 +151,8 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 |-------|---------|---------|
 | `tr=full` / `tr=ply` / `tr=<n>ply` | Train tick rate | `tr=full`, `tr=2ply` |
 | `p=<n>` | Plies elapsed (for `EveryNPly` gate alignment) | `p=42` |
-| `variants=<id>,<id>,…` | Active rule variants (plan 11; default empty = standard chess) | `variants=duck_chess` |
-| `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11; default `piece`) | `duck_phase=placing` |
+| `variants=<id>,<id>,…` | Active rule variants (plan 11 — **planned, not yet parsed**; default empty = standard chess) | `variants=duck_chess` |
+| `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11 — **planned, not yet parsed**; default `piece`) | `duck_phase=placing` |
 | `lm=(C=…,F=…,K=…[,T=…][,V=…],P=…)` | Last-move snapshot (plan 10; default absent = no prior move). `C` is mover color (W/B/N), `F` is from coord, `K` is move kind (MOVE / MIC / PROMO / CASTLE / EP / PS / TS / PIC), `T` is to coord (omitted for ThrowSwitch / PhaseShift), `V` is captured-piece symbol (omitted on non-captures), `P` is primary piece symbol (post-promotion for Promote moves) | `lm=(C=W,F=4-6,K=MOVE,T=4-5,P=P)` |
 
 Canonical implementer: `engine/src/board/fen.rs`. Frontend parser:

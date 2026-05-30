@@ -37,6 +37,291 @@ mod tests {
         }
     }
 
+    /// Plan 06 step 1: a realistic mixed `Board` (grid + flags + pieces +
+    /// a square type + a condition) survives a serde JSON round-trip — the
+    /// capability the API's future JSON board format rides on. Exercises the
+    /// awkward corners: a Goblin mid-kidnap (`Arc<PieceType>`, needs serde's
+    /// `rc` feature), a carrier with a passenger (`Vec<PieceType>`), a
+    /// payload-free non-walkable square + a condition, and non-default flags.
+    /// Exhaustive per-variant coverage (all piece types, all square types,
+    /// all `GameStatus`es) lives in the three tests below.
+    #[test]
+    fn test_board_json_roundtrip() {
+        let mut board = empty_board();
+        board.set_piece_at(
+            &Coord { file: 4, rank: 7 },
+            PieceType::new_king(Color::White),
+        );
+        board.set_piece_at(
+            &Coord { file: 0, rank: 0 },
+            PieceType::new_king(Color::Black),
+        );
+
+        // Goblin carrying a kidnapped black knight -> the
+        // `GoblinState::Kidnapping { piece: Arc<PieceType> }` path.
+        let goblin = Goblin {
+            color: Color::White,
+            state: GoblinState::Kidnapping {
+                piece: std::sync::Arc::new(PieceType::new_knight(Color::Black)),
+            },
+            home_square: Coord { file: 0, rank: 7 },
+        };
+        board.set_piece_at(&Coord { file: 3, rank: 3 }, PieceType::Goblin(goblin));
+
+        // Bus carrying a pawn passenger -> carrier `Vec<PieceType>`.
+        let mut bus = Bus::new(Color::Black);
+        bus.pieces.push(PieceType::new_pawn(Color::Black));
+        board.set_piece_at(&Coord { file: 5, rank: 5 }, PieceType::Bus(bus));
+
+        // Skibidi with a non-default phase + a payload-free square type and
+        // a square condition.
+        board.set_piece_at(&Coord { file: 6, rank: 1 }, PieceType::Skibidi(Skibidi { color: Color::White, phase: 3 }));
+        if let Some(sq) = board.get_square_mut(&Coord { file: 2, rank: 2 }) {
+            sq.square_type = SquareType::Block;
+            sq.conditions.push(SquareCondition::Brainrot);
+        }
+
+        // Non-default flags.
+        board.flags.side_to_move = Color::Black;
+        board.flags.ply_count = 7;
+        board.flags.en_passant_target = Some(Coord { file: 3, rank: 2 });
+
+        let json = serde_json::to_string(&board).expect("Board serializes to JSON");
+        let back: Board = serde_json::from_str(&json).expect("Board deserializes from JSON");
+        assert_eq!(board, back, "Board did not survive a JSON round-trip");
+    }
+
+    /// Every `PieceType` variant survives a JSON round-trip — including the
+    /// train carts (richest payloads: heading, last_dir, passenger lists)
+    /// and both `GoblinState` arms (unit `Free` and `Kidnapping`'s `Arc`).
+    #[test]
+    fn test_all_piece_types_json_roundtrip() {
+        use crate::pieces::fairy::{
+            carriage::Carriage,
+            locomotive::{Locomotive, TrainHeading},
+        };
+        let mut board = empty_board();
+        let pieces: Vec<PieceType> = vec![
+            PieceType::new_king(Color::White),
+            PieceType::new_queen(Color::Black),
+            PieceType::new_rook(Color::White),
+            PieceType::new_bishop(Color::Black),
+            PieceType::new_knight(Color::White),
+            PieceType::new_pawn(Color::Black),
+            PieceType::Monkey(Monkey {
+                color: Color::White,
+            }),
+            PieceType::Skibidi(Skibidi {
+                color: Color::Black,
+                phase: 4,
+            }),
+            PieceType::Goblin(Goblin {
+                color: Color::White,
+                state: GoblinState::Free,
+                home_square: Coord { file: 0, rank: 7 },
+            }),
+            PieceType::Goblin(Goblin {
+                color: Color::Black,
+                state: GoblinState::Kidnapping {
+                    piece: std::sync::Arc::new(PieceType::new_rook(Color::White)),
+                },
+                home_square: Coord { file: 7, rank: 0 },
+            }),
+            PieceType::Bus({
+                let mut b = Bus::new(Color::White);
+                b.pieces.push(PieceType::new_knight(Color::White));
+                b
+            }),
+            PieceType::Locomotive(Locomotive {
+                train_id: 3,
+                heading: TrainHeading::Reverse,
+                passengers: vec![PieceType::new_king(Color::Black)],
+                last_dir: Some(TrackDir::N),
+            }),
+            PieceType::Carriage(Carriage {
+                train_id: 3,
+                chain_index: 2,
+                passengers: vec![PieceType::new_pawn(Color::White)],
+            }),
+            // A second locomotive with the default Forward heading so both
+            // `TrainHeading` variants are exercised by the round-trip.
+            PieceType::Locomotive(Locomotive {
+                train_id: 4,
+                heading: TrainHeading::Forward,
+                passengers: vec![],
+                last_dir: None,
+            }),
+        ];
+        // Serde doesn't validate legality, so one piece per square is fine.
+        for (i, p) in pieces.into_iter().enumerate() {
+            board.set_piece_at(
+                &Coord {
+                    file: (i % 8) as u8,
+                    rank: (i / 8) as u8,
+                },
+                p,
+            );
+        }
+        let json = serde_json::to_string(&board).expect("serialize");
+        let back: Board = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(board, back, "piece-types board failed JSON round-trip");
+    }
+
+    /// Every `SquareType` variant — including the payload-carrying ones
+    /// (Switch/Junction/Gate/PressurePlate/Track) and both conditions —
+    /// survives a JSON round-trip.
+    #[test]
+    fn test_all_square_types_json_roundtrip() {
+        use crate::board::square::{PressureTrigger, TrackDir};
+        let mut board = empty_board();
+        let types = vec![
+            SquareType::Standard,
+            SquareType::Turret,
+            SquareType::Vent,
+            SquareType::Block,
+            SquareType::Switch {
+                targets: vec![3, 7],
+            },
+            SquareType::Junction {
+                id: 5,
+                state: 1,
+                branches: vec![TrackDir::N, TrackDir::E, TrackDir::S],
+            },
+            SquareType::Gate { id: 2, open: false },
+            SquareType::PressurePlate {
+                targets: vec![9],
+                fires_for: PressureTrigger::OnlyColor(Color::Black),
+            },
+            SquareType::PressurePlate {
+                targets: vec![1],
+                fires_for: PressureTrigger::AnyPiece,
+            },
+            SquareType::Track {
+                direction: TrackDir::W,
+            },
+        ];
+        for (i, t) in types.into_iter().enumerate() {
+            if let Some(sq) = board.get_square_mut(&Coord {
+                file: (i % 8) as u8,
+                rank: (i / 8) as u8,
+            }) {
+                sq.square_type = t;
+            }
+        }
+        if let Some(sq) = board.get_square_mut(&Coord { file: 0, rank: 4 }) {
+            sq.conditions.push(SquareCondition::Frozen);
+            sq.conditions.push(SquareCondition::Brainrot);
+        }
+        let json = serde_json::to_string(&board).expect("serialize");
+        let back: Board = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(board, back, "square-types board failed JSON round-trip");
+    }
+
+    /// Every `GameStatus` variant round-trips, the wire shapes the API
+    /// depends on are pinned, and `is_terminal` classifies each correctly.
+    #[test]
+    fn test_game_status_variants_json_roundtrip() {
+        for status in [
+            GameStatus::Ongoing,
+            GameStatus::Check {
+                side_to_move: Color::White,
+            },
+            GameStatus::Checkmate {
+                winner: Color::Black,
+            },
+            GameStatus::Stalemate,
+            GameStatus::Resigned {
+                winner: Color::White,
+            },
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize");
+            let back: GameStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(status, back, "round-trip failed for {status:?}");
+        }
+        // Pin the exact wire shapes the API/clients depend on.
+        assert_eq!(
+            serde_json::to_string(&GameStatus::Ongoing).unwrap(),
+            "\"Ongoing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GameStatus::Stalemate).unwrap(),
+            "\"Stalemate\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GameStatus::Resigned {
+                winner: Color::White
+            })
+            .unwrap(),
+            "{\"Resigned\":{\"winner\":\"White\"}}"
+        );
+        // Terminal classification (single source of truth on the enum).
+        assert!(!GameStatus::Ongoing.is_terminal());
+        assert!(
+            !GameStatus::Check {
+                side_to_move: Color::White
+            }
+            .is_terminal()
+        );
+        assert!(
+            GameStatus::Checkmate {
+                winner: Color::White
+            }
+            .is_terminal()
+        );
+        assert!(GameStatus::Stalemate.is_terminal());
+        assert!(
+            GameStatus::Resigned {
+                winner: Color::Black
+            }
+            .is_terminal()
+        );
+    }
+
+    /// A pathological FEN digit run-length must not allocate unboundedly:
+    /// it's clamped to 255 (Coord is `u8`) rather than the saturated
+    /// `u32::MAX`, so this parses promptly instead of OOM-ing. Regression
+    /// guard for the run-length DoS.
+    #[test]
+    fn test_fen_run_length_is_clamped() {
+        // A single oversized run is clamped.
+        let board = fen_to_board("9999999999/8/8/8/8/8/8/8 w - -");
+        assert_eq!(board.grid[0].len(), 255);
+        // A row of many runs/pieces is bounded at the ROW level too (not
+        // just per-run), so it can't build a huge Vec before truncation.
+        let board = fen_to_board("255p255p255p255p255p/8/8/8/8/8/8/8 w - -");
+        assert_eq!(board.grid[0].len(), 255);
+        // Many single-square pieces in one row are likewise bounded.
+        let board = fen_to_board(&format!("{}/8 w - -", "p".repeat(5000)));
+        assert_eq!(board.grid[0].len(), 255);
+    }
+
+    /// Deeply-nested carrier/kidnap FEN payloads must not overflow the stack
+    /// (an uncatchable abort = DoS). Parse recursion is capped, so even a
+    /// 3000-deep goblin nest parses promptly; the over-deep payload is
+    /// dropped, leaving the outer goblin Free. Regression guard.
+    #[test]
+    fn test_symbol_to_piece_bounds_recursion() {
+        let mut sym = String::from("n");
+        for _ in 0..3000 {
+            sym = format!("g(H=0-0,P={sym})");
+        }
+        assert!(matches!(
+            PieceType::symbol_to_piece(&sym),
+            Some(PieceType::Goblin(_))
+        ));
+    }
+
+    /// A Goblin kidnapping a Goblin is illegal at capture time; the FEN
+    /// parser drops such a payload too (parse/capture parity), so the outer
+    /// goblin ends up Free.
+    #[test]
+    fn test_goblin_cannot_kidnap_goblin_in_fen() {
+        match PieceType::symbol_to_piece("g(H=0-0,P=g(H=1-1,P=n))") {
+            Some(PieceType::Goblin(g)) => assert!(matches!(g.state, GoblinState::Free)),
+            other => panic!("expected a Goblin, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_empty_board_fen() {
         let board = Board {
