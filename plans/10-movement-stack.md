@@ -12,6 +12,41 @@ commit. It defines the abstraction, lists which existing rules each
 layer would absorb, and prescribes a migration sequence small enough
 to land one layer at a time.
 
+## Status — shipped
+
+The migration below has **landed** (commit `abef180`); the modifier
+pipeline is the live code path. `Board::get_moves` (`resolve_moves`),
+`legal_moves` (`resolve_legal_moves`), `is_attacked_by`
+(`resolve_threats`), and the capture path all delegate to
+`movement::stack::default_stack()`. Registered modifiers:
+
+- `PieceMovesModifier` — piece-intrinsic move emission (priority 30).
+- `piece_attacks` — per-piece threat modifiers (one per piece type +
+  a Neutral-carrier passenger modifier), replacing the single bridge
+  `LegacyPieceAttacksModifier` the migration sketched as a stepping
+  stone.
+- `SquareConditionFilter` / `WalkabilityFilter` / `SwitchTileAugment` —
+  square gates (brainrot/frozen, walkability, switch augmentation).
+- `TrainHeadCrushModifier` / `TrainCartCaptureFilter` /
+  `TwoTrainCollisionFilter` — train geometry.
+- `KingSafetyFilter` (priority 300) — the step-8 payoff; king-safety is
+  one registry entry, skipped by `resolve_moves` (capped 299) and
+  applied by `resolve_legal_moves`.
+- `TornadoCompulsionFilter` (priority 305, plan 13).
+- The capture pipeline lives in `movement::stack::capture`
+  (`GoblinDropVictimCapture`, etc.).
+
+**One sketch item deliberately NOT taken:** removing `Piece::attacks` /
+`Piece::initial_moves` / `Piece::would_capture_at` from the trait. They
+are kept as the per-piece primitives the modifiers compose — this keeps
+each piece's overrides discoverable from its own file (see the note in
+`piece_attacks.rs`). So wherever the migration sequence below says "the
+trait no longer has the method," treat that as **superseded** — the
+methods stay; only the *iteration/dispatch* moved into the stack.
+
+The rest of this file is the original design + migration plan, kept for
+context.
+
 ## Why now
 
 The trigger is plan 09 (trains) — each new train interaction (same-

@@ -9,7 +9,9 @@ plan you want to act on.
 - **Engine** (`engine/`): move generation, FEN serialization, move execution,
   and brainrot recalculation work for standard pieces + the custom set
   (Goblin, Skibidi, Bus, Monkey, Stormcaller) plus train carts
-  (Locomotive, Carriage).
+  (Locomotive, Carriage). Move/threat generation, square-condition gates,
+  train geometry, king-safety, and captures all run through the plan-10
+  movement-stack modifier pipeline (`movement::stack`).
   Engine test suite at 340+ tests across lib + integration (perft,
   properties, fairy scenarios, standard game) + doctests, 0 compile
   warnings.
@@ -76,6 +78,19 @@ plan you want to act on.
   detection, three-phase commit, train-tick rate flags (`tr=full|ply|Nply`).
   v1 explicitly defers: per-piece collision hooks, carriage detaching,
   heading reversal, boarding-from-adjacent.
+- **Plan 10 — movement stack**: the unified modifier pipeline is the
+  live path — `Board::get_moves` / `legal_moves` / `is_attacked_by` and
+  the capture path all delegate to `movement::stack::default_stack()`.
+  Registered modifiers: `PieceMovesModifier` (piece-intrinsic moves),
+  per-piece `piece_attacks` threat modifiers (one per piece type +
+  Neutral-carrier passengers), square gates (`SquareConditionFilter` /
+  `WalkabilityFilter` / `SwitchTileAugment`), train geometry (head-crush
+  + cart-capture + two-train collision), `KingSafetyFilter` (priority
+  300), and the plan-13 `TornadoCompulsionFilter` (305); the capture
+  pipeline lives in `movement::stack::capture`. The one sketch item
+  deliberately not taken: removing `Piece::attacks` / `initial_moves`
+  from the trait — they're kept as the per-piece primitives the
+  modifiers compose (see `piece_attacks.rs`).
 - **Plan 12 — Block square**: payload-free, semantics-free impassable
   tile (`T=BLOCK`). `is_walkable()` returns `false`; FEN round-trips;
   frontend brush + brick-pattern SVG + `.type-block` CSS shipped.
@@ -98,29 +113,22 @@ In rough priority order:
 1. **Test strategy** — 340+ tests now (328 lib + perft + property +
    integration + doctests), but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-2. **Movement stack** — generic modifier pipeline that absorbs the
-   per-piece / per-square conditionals (brainrot, gate walkability,
-   train threats, king-safety filter) into one ordered registry.
-   Lands incrementally; each migration step is a working commit.
-   → [10-movement-stack.md](10-movement-stack.md)
-3. **Duck Chess + variant infrastructure** — first true rule-variant,
+2. **Duck Chess + variant infrastructure** — first true rule-variant,
    plus the per-position `variants` flag future variants hook into.
-   Independent of plan 10; conditionals migrate to modifiers when
-   plan 10 absorbs them.
+   The movement stack (plan 10) is shipped, so the chokepoint
+   conditionals it adds can land directly as modifiers.
    → [11-duck-chess.md](11-duck-chess.md)
-4. **Trains v2** — the deferred items from plan 09 (collision-hook
+3. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
-Plan **07** (test coverage) can proceed now (plans **04**, **05**, **06**
-shipped). Plan **10** is the
-biggest structural piece left and unlocks cleaner future-piece work.
-Plan **11** (Duck Chess + variant infra) is independent of plan 10 —
-the chokepoint conditionals it adds collapse into modifiers when plan
-10 reaches step 8. Trains v2 (plan 09's deferred items) is the natural
-follow-up to plan 10.
+Plan **07** (test coverage) can proceed now (plans **04**, **05**, **06**,
+**10** shipped). With the movement stack landed, **Plan 11** (Duck Chess
++ variant infra) is the natural next structural piece — its chokepoint
+conditionals land directly as modifiers. Trains v2 (plan 09's deferred
+items) is the other follow-up, composing as train modifiers in the stack.
 
 ## Open questions
 
