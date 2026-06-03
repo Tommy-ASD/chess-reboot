@@ -400,6 +400,65 @@ button {
       transparent 6px);
 }
 
+/* Plan 13: a tornado on the square. A translucent swirl overlay (the
+   piece beneath stays visible — a tornado can trap a piece) plus a
+   countdown badge for the remaining ticks (added in JS, value-bearing). */
+.square.cond-tornado::after {
+  content: "🌪";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(55cqw / var(--cols));
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.square .tornado-countdown {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: calc(20cqw / var(--cols));
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 2px #000, 0 0 3px #000;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* -------------------------------------------------- */
+/* Game-status banner (plans 04/06)                    */
+/* -------------------------------------------------- */
+
+.game-status {
+  margin: 0.5rem 1rem;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.game-status.hidden {
+  display: none;
+}
+
+/* Non-terminal: a side is in check. */
+.game-status.info {
+  background: #fff3cd;
+  color: #664d03;
+  border: 1px solid #ffe69c;
+}
+
+/* Terminal: checkmate / stalemate / brainrot outcome. */
+.game-status.over {
+  background: #0f5132;
+  color: #d1e7dd;
+  border: 1px solid #146c43;
+}
+
 /* -------------------------------------------------- */
 /* Substrate squares: per-type accent + SVG-icon hook */
 /* -------------------------------------------------- */

@@ -16,6 +16,10 @@
     </nav>
   </header>
 
+  <!-- Game-status banner (plans 04/06): hidden while Ongoing; shows
+       check + the terminal outcomes (checkmate / stalemate / brainrot). -->
+  <div id="game-status" class="game-status hidden" role="status" aria-live="polite"></div>
+
   <div id="layout">
     <div id="left-panel">
       <input id="fen-input" type="text" placeholder="Enter FEN here" />

@@ -140,6 +140,11 @@ export const pieceToSymbol = (p: string): string => {
     "B": "♗", "N": "♘", "P": "♙",
     "k": "♚", "q": "♛", "r": "♜",
     "b": "♝", "n": "♞", "p": "♟",
+    // Plan 13: the Stormcaller (W/w) has no sprite asset yet — render a
+    // storm glyph so it reads as the storm piece rather than a bare
+    // letter. Both colors share the glyph; drop a sprite into
+    // `pieceToImage` to color-distinguish it later.
+    "W": "🌩", "w": "🌩",
   };
   return map[p] ?? p;
 };

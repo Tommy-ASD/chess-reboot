@@ -9,7 +9,7 @@ import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
 import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
-import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove } from "./variables";
+import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove, type GameStatus } from "./variables";
 
 
 
@@ -20,6 +20,10 @@ import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, set
 function renderBoard(fen: string) {
   const boardEl = document.getElementById("board")!;
   boardEl.innerHTML = ""; // clear previous board
+
+  // Reset the status banner on every re-render; callers that know the
+  // post-position status (Load, post-move) re-show it immediately after.
+  renderStatus(null);
 
   setCurrentBoard(parseFEN(fen));
   const rows = currentBoard.length;
@@ -67,6 +71,23 @@ function renderBoard(fen: string) {
         }
         if (square_data.conditions.includes("BRAINROT")) {
           square.classList.add("cond-brainrot");
+        }
+        // Plan 13: `TORNADO` carries a `:<remaining>` countdown payload,
+        // so match the prefix rather than exact equality. The swirl is a
+        // CSS overlay (.cond-tornado::after); the countdown is value-
+        // bearing, so the badge is built here.
+        const tornado = square_data.conditions.find(
+          (c) => c === "TORNADO" || c.startsWith("TORNADO:"),
+        );
+        if (tornado) {
+          square.classList.add("cond-tornado");
+          const remaining = tornado.split(":")[1];
+          if (remaining) {
+            const badge = document.createElement("span");
+            badge.className = "tornado-countdown";
+            badge.textContent = remaining;
+            square.appendChild(badge);
+          }
         }
         // Plan 08: substrate types render with a per-type accent border
         // (via `type-{lowercase}`) plus an SVG icon overlay.
@@ -118,12 +139,13 @@ async function handleSquareClick(rank: number, file: number) {
 
     try {
       const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-      const newFen = moveToExecute.move_type.kind === "MoveTo"
+      const result = moveToExecute.move_type.kind === "MoveTo"
         ? await makeMove(fen, selectedSquare!, clicked)
         : await makeSpecialMove(fen, moveToExecute);
-      console.log("New FEN:", newFen);
-      (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
-      renderBoard(newFen);
+      console.log("New FEN:", result.newFen);
+      (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
+      renderBoard(result.newFen);
+      renderStatus(result.status);
       clearSelection();
     } catch (err) {
       showError(err);
@@ -207,6 +229,13 @@ function renderSpecialActions(moves: GameMove[]) {
         li.textContent = "Throw Switch";
         break;
 
+      // Plan 13: the Stormcaller's tornado placement. Each candidate
+      // targets a distinct in-range square, so label it with the target.
+      // (Struct variant → coord nests under `target.target`.)
+      case "PlaceTornado":
+        li.textContent = `Place Tornado → (${m.move_type.target.target.file}, ${m.move_type.target.target.rank})`;
+        break;
+
       default:
         li.textContent = JSON.stringify(m.move_type);
         break;
@@ -215,9 +244,10 @@ function renderSpecialActions(moves: GameMove[]) {
     li.onclick = async () => {
       const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
       try {
-        const newFen = await makeSpecialMove(fen, m);
-        (document.getElementById("fen-input") as HTMLInputElement).value = newFen;
-        renderBoard(newFen);
+        const result = await makeSpecialMove(fen, m);
+        (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
+        renderBoard(result.newFen);
+        renderStatus(result.status);
         clearSelection();
       } catch (err) {
         showError(err);
@@ -347,6 +377,45 @@ function showError(err: unknown) {
   alert(msg);
 }
 
+/// Render the game-status banner (plans 04/06). `Ongoing` or `null` hides
+/// it; `Check` shows an info banner; the terminal outcomes
+/// (checkmate / stalemate / brainrot win / brainrot lockout) show a
+/// game-over banner.
+function renderStatus(status: GameStatus | null) {
+  const el = document.getElementById("game-status")!;
+  const described = status ? describeStatus(status) : null;
+  if (!described) {
+    el.className = "game-status hidden";
+    el.textContent = "";
+    return;
+  }
+  el.className = `game-status ${described.kind}`;
+  el.textContent = described.text;
+}
+
+/// Map a `GameStatus` to banner text + severity. Returns `null` for
+/// `Ongoing` (nothing to show). The `switch` is exhaustive over the
+/// engine's `GameStatus` variants — adding one there surfaces a TS error
+/// here until it's handled.
+function describeStatus(
+  status: GameStatus,
+): { text: string; kind: "info" | "over" } | null {
+  switch (status.status) {
+    case "Ongoing":
+      return null;
+    case "Check":
+      return { text: `Check — ${status.data.side_to_move} to move`, kind: "info" };
+    case "Checkmate":
+      return { text: `Checkmate — ${status.data.winner} wins`, kind: "over" };
+    case "Stalemate":
+      return { text: "Stalemate — draw", kind: "over" };
+    case "BrainrotWin":
+      return { text: `Brainrot win — ${status.data.winner} wins`, kind: "over" };
+    case "BrainrotLockout":
+      return { text: `Brainrot lockout — ${status.data.winner} wins`, kind: "over" };
+  }
+}
+
 /// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
 async function fetchMoves(fen: string, rank: number, file: number): Promise<GameMove[]> {
   const response = await fetch("http://localhost:8080/board/moves", {
@@ -366,7 +435,30 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Game
   return data.moves; // Vec<Coord> from Rust
 }
 
-async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
+/// Query the post-position game status for a FEN (plan 06 `/board/status`).
+/// Used on explicit Load so a terminal position surfaces its banner
+/// without first requiring a move. (Live-edit previews skip this to avoid
+/// a request per keystroke.)
+async function fetchStatus(fen: string): Promise<GameStatus> {
+  const response = await fetch("http://localhost:8080/board/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ board_fen: fen }),
+  });
+
+  if (!response.ok) {
+    throw await consumeError(response, "fetchStatus");
+  }
+
+  const data = await response.json();
+  return data.status;
+}
+
+/// Result of a state-changing API call: the post-move FEN plus the
+/// engine's post-move `GameStatus` (folded into `/board/new_state`).
+type MoveResult = { newFen: string; status: GameStatus };
+
+async function makeSpecialMove(fen: string, move: GameMove): Promise<MoveResult> {
   const response = await fetch("http://localhost:8080/board/new_state", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -381,7 +473,7 @@ async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
   }
 
   const data = await response.json();
-  return data.new_board_fen;
+  return { newFen: data.new_board_fen, status: data.status };
 }
 
 
@@ -393,7 +485,7 @@ async function makeSpecialMove(fen: string, move: GameMove): Promise<string> {
 ///   to: { file: number, rank: number }
 /// }
 /// Returns the new FEN string on success
-async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
+async function makeMove(fen: string, from: Coord, to: Coord): Promise<MoveResult> {
   const body = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -415,7 +507,7 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
 
   const data = await response.json();
   console.log("Move response data:", data);
-  return data.new_board_fen; // new FEN string from Rust
+  return { newFen: data.new_board_fen, status: data.status };
 }
 
 
@@ -423,10 +515,13 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<string> {
 // UI Wiring
 // ---------------------------
 
-document.getElementById("load-btn")!.addEventListener("click", () => {
+document.getElementById("load-btn")!.addEventListener("click", async () => {
   const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
   try {
     renderBoard(fen);
+    // Surface the loaded position's status (e.g. loading an already-
+    // checkmated FEN shows the banner without needing to make a move).
+    renderStatus(await fetchStatus(fen));
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e));
   }

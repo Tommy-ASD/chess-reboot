@@ -61,10 +61,33 @@ export type MoveType =
     /// `switch` coord is currently always equal to `GameMove.from`, but
     /// the engine carries it explicitly so a future "throw an adjacent
     /// switch" mechanic doesn't break the wire format.
-    | { kind: "ThrowSwitch"; target: { switch: Coord } };
+    | { kind: "ThrowSwitch"; target: { switch: Coord } }
+    /// Plan 13: the Stormcaller stamps a tornado on the target square
+    /// without relocating. It's a *struct* variant (`PlaceTornado {
+    /// target }`), so adjacent tagging nests the coord under `target.
+    /// target` — same shape as `ThrowSwitch`, not the bare-coord shape of
+    /// `MoveTo`. Wire: `{ kind: "PlaceTornado", target: { target: { file,
+    /// rank } } }`.
+    | { kind: "PlaceTornado"; target: { target: Coord } };
 
 
 export type GameMove = { from: Coord; move_type: MoveType };
+
+/// Mirrors the engine's `Color` — serde renders the bare variant name.
+export type Color = "White" | "Black" | "Neutral";
+
+/// Mirrors the engine's `GameStatus`, adjacently tagged
+/// `#[serde(tag = "status", content = "data")]`. The API folds this into
+/// every `/board/new_state` response and serves it from `/board/status`.
+/// `Check` carries the side *in* check; the terminal variants carry the
+/// `winner`. See `engine/src/board/mod.rs::GameStatus`.
+export type GameStatus =
+    | { status: "Ongoing" }
+    | { status: "Check"; data: { side_to_move: Color } }
+    | { status: "Checkmate"; data: { winner: Color } }
+    | { status: "Stalemate" }
+    | { status: "BrainrotWin"; data: { winner: Color } }
+    | { status: "BrainrotLockout"; data: { winner: Color } };
 
 export let selectedSquare: Coord | null = null;
 
