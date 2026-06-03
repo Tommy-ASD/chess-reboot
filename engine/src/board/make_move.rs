@@ -763,7 +763,22 @@ impl Board {
             );
             self.flags.side_to_move = crate::pieces::Color::White;
         }
-        self.flags.side_to_move = self.flags.side_to_move.opposite();
+
+        // Plan 04 (Goblin spec, mechanic 2): "the taking piece can move
+        // again." If this move captured an enemy Kidnapping Goblin (the
+        // same capture that drops the kidnap victim), the moving side
+        // takes another turn — suppress the flip so `side_to_move` stays.
+        // Modelled as flip-suppression rather than a counter: the side
+        // simply stays put and serialises to FEN that way, so a stateless
+        // client submits the next move for the same side. See
+        // `move_grants_extra_turn`.
+        if move_grants_extra_turn(ctx.before_state, ctx.game_move) {
+            tracing::trace!(
+                "goblin kidnap-capture grants the captor another move; not flipping side_to_move"
+            );
+        } else {
+            self.flags.side_to_move = self.flags.side_to_move.opposite();
+        }
 
         // PreMover fires AFTER the side flip — "start of opponent's
         // turn" handlers (Magnet pull, Bell-Ringer toll) want to see
@@ -1007,6 +1022,33 @@ pub(crate) fn capture_targets(before: &Board, game_move: &GameMove) -> Vec<Captu
         victim_coord,
         victim,
     }]
+}
+
+/// Plan 04 (Goblin spec, mechanic 2): does this move earn the moving
+/// side another turn? True when the move captured an enemy Goblin in
+/// `Kidnapping` state via a real outer-board capture — the *same*
+/// condition under which `GoblinDropVictimCapture` drops the kidnap
+/// victim (`captor_origin.is_some()`). PIC passenger-exit captures and
+/// train run-overs (`captor_origin = None`) lose the victim silently and
+/// likewise grant no extra move.
+///
+/// Pure — reads only `before` + the move, mirroring `compute_last_move`.
+/// The caller expresses the extra move as *suppressing the side flip* in
+/// `apply_environment_reactions_with`; "move again" is just "stay the
+/// side to move," which round-trips through FEN for free. (The plan-04
+/// sketch proposed a persistent `BoardFlags.extra_moves` counter + FEN
+/// token; flip-suppression is equivalent for the single-capture case —
+/// at most one Goblin is captured per move — and avoids threading
+/// transient state through the board type and every FEN round-trip.)
+fn move_grants_extra_turn(before: &Board, game_move: &GameMove) -> bool {
+    use crate::pieces::fairy::goblin::GoblinState;
+    capture_targets(before, game_move).iter().any(|cap| {
+        cap.captor_origin.is_some()
+            && matches!(
+                &cap.victim,
+                PieceType::Goblin(g) if matches!(g.state, GoblinState::Kidnapping { .. })
+            )
+    })
 }
 
 /// Plan 08 step 4 helper: every board-square where a piece settled as a

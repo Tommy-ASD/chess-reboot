@@ -242,6 +242,24 @@ pub enum GameStatus {
     Check { side_to_move: Color },
     Checkmate { winner: Color },
     Stalemate,
+    /// Plan 04 (Skibidi spec, lines 13-14): the side to move has no
+    /// legal move and is *not* in check, but the paralysis is caused by
+    /// an opponent's Brainrot rather than an ordinary stalemate. The
+    /// brainrotting side wins. Adjacently tagged like `Checkmate`:
+    /// `{"status":"BrainrotWin","data":{"winner":"White"}}`. See
+    /// `Board::is_brainrot_win` for the (deliberately approximate)
+    /// discrimination heuristic.
+    BrainrotWin { winner: Color },
+    /// Plan 04 (Skibidi spec, line 15): "If your Skibidi is captured
+    /// while your opponent's Skibidi is in phase 4, there is nothing you
+    /// can do." The side that lost its Skibidi to an enemy phase-4
+    /// Skibidi is locked out — the opponent wins. Distinct from
+    /// `BrainrotWin` (which fires only once the loser is literally out of
+    /// moves): the lockout ends the game even with legal moves still
+    /// available. Adjacently tagged like `Checkmate`:
+    /// `{"status":"BrainrotLockout","data":{"winner":"White"}}`. See
+    /// `Board::is_brainrot_lockout`.
+    BrainrotLockout { winner: Color },
 }
 
 /// Helper used by `Board::find_king` and tests. Lives at module scope so
@@ -694,9 +712,14 @@ impl Board {
         crate::movement::stack::default_stack().resolve_legal_moves(self, from)
     }
 
-    /// Overall status from the perspective of `side_to_move`. `BrainrotWin`
-    /// is intentionally absent — plan 04 will fold that in once the
-    /// distinguish-stalemate-from-brainrot heuristic lands.
+    /// Overall status from the perspective of `side_to_move`. When the
+    /// side to move has no legal move, the not-in-check branch
+    /// distinguishes an ordinary `Stalemate` from a `BrainrotWin`
+    /// (plan 04) via `is_brainrot_win`. `is_brainrot_lockout` can also
+    /// return `BrainrotLockout` (plan 04, spec line 15) from *either*
+    /// branch: even with legal moves available it ends the game (it is
+    /// checked before `Check`/`Ongoing`), and in the no-moves branch it
+    /// converts a would-be `Stalemate` into a loss.
     pub fn status(&self) -> GameStatus {
         let to_move = self.flags.side_to_move;
         // Same-color pieces are the primary source of legal moves. But
@@ -724,6 +747,15 @@ impl Board {
             .any(|coord| !self.legal_moves(coord).is_empty());
 
         if any_legal {
+            // Plan 04 (spec line 15): even with legal moves on the board,
+            // having lost your Skibidi to a phase-4 enemy is an
+            // unrecoverable lockout — checked before Check/Ongoing because
+            // it ends the game regardless of those moves.
+            if self.is_brainrot_lockout(to_move) {
+                return GameStatus::BrainrotLockout {
+                    winner: to_move.opposite(),
+                };
+            }
             if self.is_in_check(to_move) {
                 return GameStatus::Check {
                     side_to_move: to_move,
@@ -731,13 +763,127 @@ impl Board {
             }
             return GameStatus::Ongoing;
         }
+
+        // No legal moves. Checkmate and a brainrot *wall* (the side is
+        // literally frozen, `is_brainrot_win`) are the precise terminal
+        // labels and take precedence over the lockout — all three name
+        // the same winner anyway. The lockout still matters in this
+        // branch to convert what would otherwise be a drawn `Stalemate`
+        // into a loss.
         if self.is_in_check(to_move) {
             GameStatus::Checkmate {
+                winner: to_move.opposite(),
+            }
+        } else if self.is_brainrot_win(to_move) {
+            GameStatus::BrainrotWin {
+                winner: to_move.opposite(),
+            }
+        } else if self.is_brainrot_lockout(to_move) {
+            GameStatus::BrainrotLockout {
                 winner: to_move.opposite(),
             }
         } else {
             GameStatus::Stalemate
         }
+    }
+
+    /// Plan 04: distinguish a "win by Brainrot" from an ordinary
+    /// stalemate. Called only from `status()`'s no-legal-moves /
+    /// not-in-check branch. Returns true when `to_move` is paralysed
+    /// *because of* an opponent's Brainrot:
+    ///
+    /// 1. `to_move` has at least one (top-level) piece on the board, and
+    /// 2. every one of those pieces sits on a `Brainrot` square — so the
+    ///    side is genuinely frozen, not merely pinned or blocked, and
+    /// 3. an *opposing* Skibidi is actively radiating (`phase > 1`) to
+    ///    take credit for the win.
+    ///
+    /// Deliberately approximate (plan 04 documents this): a side with
+    /// one brainrot-frozen piece and one independently-pinned piece
+    /// reads as `Stalemate`, not a brainrot win. Self-inflicted brainrot
+    /// (only `to_move`'s own Skibidi radiates) also falls through to
+    /// `Stalemate` — condition 3 requires an opposing Skibidi. A king
+    /// riding a Neutral cart is not counted as a top-level piece of
+    /// `to_move`, so that nested edge case also resolves to `Stalemate`
+    /// rather than risk a false win.
+    fn is_brainrot_win(&self, to_move: Color) -> bool {
+        use crate::board::square::SquareCondition;
+
+        let mut saw_own_piece = false;
+        for (coord, piece) in self.iter_pieces() {
+            if piece.get_color() != to_move {
+                continue;
+            }
+            saw_own_piece = true;
+            let on_brainrot = self
+                .get_square_at(&coord)
+                .is_some_and(|sq| sq.conditions.contains(&SquareCondition::Brainrot));
+            if !on_brainrot {
+                return false;
+            }
+        }
+        if !saw_own_piece {
+            return false;
+        }
+        // An opposing Skibidi must be radiating to claim the win. Use the
+        // opponent colour explicitly (not `!= to_move`): with three Color
+        // variants, `!=` would also match a *Neutral* Skibidi, crediting
+        // the opponent a win a neutral/unaligned aura caused. Mirrors
+        // `is_brainrot_lockout`'s opponent-only discrimination; a Neutral
+        // aura falls through to `Stalemate`.
+        let opponent = to_move.opposite();
+        self.iter_pieces().any(|(_, p)| {
+            matches!(p, PieceType::Skibidi(sk) if sk.color == opponent && sk.phase > 1)
+        })
+    }
+
+    /// Plan 04 (Skibidi spec, line 15): "If your Skibidi is captured
+    /// while your opponent's Skibidi is in phase 4, there is nothing you
+    /// can do." Detected positionally: `loser` has no Skibidi anywhere on
+    /// the board while the opponent holds at least one *radiating*
+    /// (top-level) phase-4 Skibidi. Reaching phase 4 requires some
+    /// other-colour Skibidi to be present (`make_move` caps PhaseShift at
+    /// 3 otherwise — and that cap treats a Neutral Skibidi as "other-
+    /// colour" too), so this positionally *approximates* the spec's "your
+    /// Skibidi was captured": it fires whenever `loser` has no Skibidi
+    /// while a top-level *enemy* Skibidi sits at phase 4 — including the
+    /// corner case where `loser` never owned a Skibidi at all.
+    ///
+    /// A Skibidi riding inside a carrier still belongs to `loser` (it
+    /// wasn't captured), so the descent below counts it and suppresses
+    /// the lockout. The opponent's phase-4 check stays top-level only: a
+    /// carried Skibidi does not radiate (`recalc_brainrot` scans
+    /// top-level pieces), so it can't be the unstoppable aura.
+    ///
+    /// Deliberately a positional heuristic with no lookahead: it declares
+    /// the loss even if `loser` could in principle capture the phase-4
+    /// Skibidi or deliver mate first. This matches the spec's literal
+    /// "there is nothing you can do" and the project's keep-it-
+    /// approximate-and-document convention — `status()` reports the
+    /// current position, it does not search. Restricted to the actual
+    /// opponent colour, so a Neutral phase-4 Skibidi never triggers it.
+    fn is_brainrot_lockout(&self, loser: Color) -> bool {
+        let opponent = loser.opposite();
+        let mut loser_has_skibidi = false;
+        let mut opponent_phase4 = false;
+        for (_, p) in self.iter_pieces() {
+            if let PieceType::Skibidi(sk) = p {
+                if sk.color == loser {
+                    loser_has_skibidi = true;
+                } else if sk.color == opponent && sk.phase == 4 {
+                    opponent_phase4 = true;
+                }
+            }
+            // A carried Skibidi of the loser's colour isn't captured.
+            if p.passengers().is_some_and(|passengers| {
+                passengers
+                    .iter()
+                    .any(|q| matches!(q, PieceType::Skibidi(s) if s.color == loser))
+            }) {
+                loser_has_skibidi = true;
+            }
+        }
+        !loser_has_skibidi && opponent_phase4
     }
 
     pub fn all_pieces(&self) -> Vec<(Coord, PieceType)> {

@@ -24,9 +24,14 @@ use tracing::{trace, warn};
 /// are pinned by tests in `engine/src/board/tests.rs`.
 ///
 /// The "taking piece can move again" half of the spec (plan-04
-/// mechanic 2) is NOT implemented in this refactor. Tracked as a
-/// follow-up; needs `extra_moves: u8` on `BoardFlags` + gated side-
-/// flip in `apply_environment_reactions`.
+/// mechanic 2) is implemented as flip-suppression in
+/// `apply_environment_reactions_with`: a move that captures a
+/// Kidnapping Goblin with a clean `captor_origin` leaves `side_to_move`
+/// unchanged, so the captor moves again. Detected by
+/// `move_grants_extra_turn` (which reuses `capture_targets`, the same
+/// detection that drives the victim drop). The two silent-loss cases
+/// above (`captor_origin = None`: PIC capture, train run-over) grant no
+/// extra move, consistent with their losing the kidnap victim.
 use crate::{
     board::{
         Board, Coord, GameMove, MoveType,

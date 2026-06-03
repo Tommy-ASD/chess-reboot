@@ -9465,6 +9465,14 @@ mod tests {
                 GameStatus::Checkmate { winner: Color::Black },
                 r#"{"status":"Checkmate","data":{"winner":"Black"}}"#,
             ),
+            (
+                GameStatus::BrainrotWin { winner: Color::White },
+                r#"{"status":"BrainrotWin","data":{"winner":"White"}}"#,
+            ),
+            (
+                GameStatus::BrainrotLockout { winner: Color::White },
+                r#"{"status":"BrainrotLockout","data":{"winner":"White"}}"#,
+            ),
         ];
         for (status, want) in cases {
             let json = serde_json::to_string(&status).unwrap();

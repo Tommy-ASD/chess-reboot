@@ -84,9 +84,15 @@ pub struct GetNewBoardStateResponse {
     /// evaluated for the side now to move: `Check`/`Stalemate` refer to
     /// that player and `Ongoing` means the game continues. Note
     /// `Checkmate { winner }` names the side that *delivered* mate — the
-    /// player who just moved, **not** the side now to move. Folded in so
-    /// a client gets check/checkmate/stalemate with every move without a
-    /// follow-up `/board/status` round-trip. Adjacently tagged (see
+    /// player who just moved, **not** the side now to move; `BrainrotWin
+    /// { winner }` and `BrainrotLockout { winner }` (plan 04) carry the
+    /// same winner semantics for the two Skibidi terminal cases — a
+    /// brainrot stalemate-wall (the loser is frozen with no legal move)
+    /// vs. losing your Skibidi to a phase-4 enemy (`BrainrotLockout`,
+    /// which ends the game even if the loser still has legal moves).
+    /// Folded in so a client gets
+    /// check/checkmate/stalemate/brainrot-win with every move without
+    /// a follow-up `/board/status` round-trip. Adjacently tagged (see
     /// `GameStatus`): `{"status":"Checkmate","data":{"winner":"White"}}`
     /// means White just gave mate and won.
     pub status: GameStatus,

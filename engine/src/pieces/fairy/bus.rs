@@ -227,6 +227,25 @@ impl Piece for Bus {
             }
         }
 
+        // Passenger move-gen. Each passenger is evaluated *as if standing
+        // on the Bus's square* (`from`): we drop it onto a board clone at
+        // `from` and run normal move-gen. This is a deliberate design
+        // choice (plan 04 — "passenger Pawn semantics"), not a bug:
+        // rank-dependent rules see the Bus's coordinate, not the
+        // passenger's original square. Concretely, a carried Pawn gets its
+        // double-push only when the *Bus* sits on that Pawn's starting
+        // rank (`Pawn::initial_moves` checks `from.rank == starting_rank`)
+        // and pushes in its own colour's direction. It CANNOT promote
+        // while aboard, though: a `Promotion` move is generated when the
+        // Bus sits one step from the back rank, but the passenger
+        // whitelist below forwards only `MoveTo`/`MoveIntoCarrier` and
+        // drops `Promotion`, so a carried pawn can't even advance onto the
+        // back rank until it disembarks. Rationale: the Bus is a transporter —
+        // once you board, your positional rights (starting-square
+        // privileges, en-passant eligibility) are the Bus's, not the ones
+        // you had before boarding. The spec is silent here; if it later
+        // wants passengers to retain origin-rank rights, that needs a
+        // `has_moved`/origin field on the piece, tracked as plan 04-bis.
         for (idx, piece) in self.pieces.iter().enumerate() {
             let mut board_clone = board.clone();
             board_clone.set_piece_at(from, piece.clone());
