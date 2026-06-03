@@ -677,7 +677,12 @@ mod game_tests {
             state.join(&g.code, &eve),
             Err(GameActionError::Full)
         ));
-        assert!(state.join(&g.code, &alice).is_ok());
+        // Idempotent re-join returns the seated player's snapshot with the
+        // correct colour (not just Ok).
+        assert_eq!(
+            state.join(&g.code, &alice).unwrap().your_color,
+            Some(Color::White)
+        );
 
         // A non-seated player can't resign the game.
         assert!(matches!(
@@ -921,5 +926,217 @@ mod game_tests {
             "blank starting FEN falls back to the standard position"
         );
         assert_eq!(g.name, "Alice's game", "blank name falls back to the default");
+    }
+
+    #[test]
+    fn duck_chess_two_part_turn_over_the_wire() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob"); // Black
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("4k3/8/8/8/8/8/8/4K3 w KQkq - variants=duck_chess".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+
+        // White's PIECE half-move (king e1-e2) keeps White on the move.
+        let king = GameMove {
+            from: Coord { file: 4, rank: 7 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 6 }),
+        };
+        assert_eq!(
+            state.apply_move(&id, &alice, king).unwrap().side_to_move,
+            Color::White,
+            "a Duck-Chess piece move does not pass the turn"
+        );
+        // Black still can't move during White's duck phase.
+        let bk = GameMove {
+            from: Coord { file: 4, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 1 }),
+        };
+        assert!(matches!(
+            state.apply_move(&id, &bob, bk),
+            Err(GameActionError::NotYourTurn)
+        ));
+        // White's DUCK half-move completes the turn → flips to Black.
+        let duck = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 3, rank: 3 },
+            },
+        };
+        assert_eq!(
+            state.apply_move(&id, &alice, duck).unwrap().side_to_move,
+            Color::Black,
+            "the duck half-move passes the turn"
+        );
+    }
+
+    #[test]
+    fn move_broadcasts_a_snapshot_to_subscribers() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+
+        // Subscribe (as a WS handler would), then move and confirm the push.
+        let (_initial, mut rx) = state.subscribe_game(&id).unwrap();
+        state.apply_move(&id, &alice, e2e4()).unwrap();
+        let pushed = rx
+            .try_recv()
+            .expect("a snapshot is broadcast to subscribers on a move");
+        assert_eq!(pushed.ply, 1);
+        assert_eq!(pushed.side_to_move, Color::Black);
+        assert_eq!(
+            pushed.your_color, None,
+            "broadcast snapshots are viewer-agnostic"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_player_extractor_requires_a_player_id() {
+        use axum::extract::FromRequestParts;
+        use axum::http::Request;
+
+        // Missing X-Player-Id → 401.
+        let (mut parts, _) = Request::builder().body(()).unwrap().into_parts();
+        let err = AuthPlayer::from_request_parts(&mut parts, &())
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+
+        // Valid id, no name → "Anonymous".
+        let id = Uuid::new_v4();
+        let (mut parts, _) = Request::builder()
+            .header("x-player-id", id.to_string())
+            .body(())
+            .unwrap()
+            .into_parts();
+        let p = AuthPlayer::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
+        assert_eq!(p.id, id);
+        assert_eq!(p.name, "Anonymous");
+
+        // A provided name is trimmed.
+        let (mut parts, _) = Request::builder()
+            .header("x-player-id", id.to_string())
+            .header("x-player-name", "  Bob  ")
+            .body(())
+            .unwrap()
+            .into_parts();
+        let p = AuthPlayer::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
+        assert_eq!(p.name, "Bob");
+    }
+
+    #[test]
+    fn resign_by_black_makes_white_the_winner() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob"); // Black
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let r = state.resign(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(
+            r.result,
+            Some(GameResult::Resignation {
+                winner: Color::White
+            })
+        );
+    }
+
+    #[test]
+    fn a_seated_player_may_move_before_the_opponent_joins() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White, alone
+        let g = state.create(&alice, req(true)).unwrap();
+        let after = state.apply_move(&g.id.to_string(), &alice, e2e4()).unwrap();
+        assert_eq!(after.ply, 1);
+        assert_eq!(after.side_to_move, Color::Black);
+    }
+
+    #[test]
+    fn join_codes_are_uppercase_hex_and_case_insensitive() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+
+        // 6 uppercase-hex characters.
+        assert_eq!(g.code.len(), 6);
+        assert!(
+            g.code.chars().all(|c| c.is_ascii_digit() || ('A'..='F').contains(&c)),
+            "code is 6 uppercase hex chars: {}",
+            g.code
+        );
+        // Resolution lower-cases the lookup key, and a non-UUID falls through
+        // to the code map (→ None when absent).
+        assert_eq!(state.join(&g.code.to_lowercase(), &bob).unwrap().id, g.id);
+        assert!(state.get("not-a-uuid", None).is_none());
+    }
+
+    #[test]
+    fn get_reflects_the_viewer_color() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let eve = player("Eve");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+        assert_eq!(
+            state.get(&id, Some(alice.id)).unwrap().your_color,
+            Some(Color::White)
+        );
+        assert_eq!(
+            state.get(&id, Some(bob.id)).unwrap().your_color,
+            Some(Color::Black)
+        );
+        assert_eq!(
+            state.get(&id, Some(eve.id)).unwrap().your_color,
+            None,
+            "a non-seated viewer has no colour"
+        );
+    }
+
+    #[test]
+    fn list_public_excludes_full_games() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let open = state.create(&alice, req(true)).unwrap();
+        let to_fill = state.create(&alice, req(true)).unwrap();
+        state.join(&to_fill.code, &bob).unwrap(); // fill the second game
+        let listed: Vec<_> = state.list_public().into_iter().map(|g| g.id).collect();
+        assert_eq!(listed, vec![open.id], "only the un-filled public game is listed");
+    }
+
+    #[test]
+    fn ply_increments_across_sequential_moves() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+        let mv = |ff, fr, tf, tr| GameMove {
+            from: Coord { file: ff, rank: fr },
+            move_type: MoveType::MoveTo(Coord { file: tf, rank: tr }),
+        };
+        assert_eq!(state.apply_move(&id, &alice, mv(4, 6, 4, 4)).unwrap().ply, 1); // e2-e4
+        assert_eq!(state.apply_move(&id, &bob, mv(4, 1, 4, 3)).unwrap().ply, 2); // e7-e5
+        assert_eq!(state.apply_move(&id, &alice, mv(6, 7, 5, 5)).unwrap().ply, 3); // Ng1-f3
     }
 }
