@@ -1,11 +1,13 @@
 use axum::{
     Json, Router,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use http::Method;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tower_http::cors::CorsLayer;
 
 use engine::board::{
@@ -13,6 +15,9 @@ use engine::board::{
     fen::{FenError, board_to_fen, fen_to_board},
 };
 use engine::pieces::Color;
+
+mod game;
+use game::{AppState, AuthPlayer, CreateGame, GameActionError};
 
 #[derive(Debug, Deserialize)]
 pub struct GetMovesRequest {
@@ -184,20 +189,167 @@ async fn get_status_handler(Json(req): Json<GetStatusRequest>) -> Response {
     Json(GetStatusResponse { status: board.status() }).into_response()
 }
 
+// ---------------------------------------------------------------------
+// Online multiplayer handlers (Phase 1: REST backbone over the game store)
+// ---------------------------------------------------------------------
+
+/// Map a `GameActionError` to an HTTP response. Move rejections reuse the
+/// same `code` / `message` / `details` shape as `/board/new_state` so a
+/// client has one error contract for both local and online play.
+fn game_error_response(err: GameActionError) -> Response {
+    match err {
+        GameActionError::NotFound => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "code": "game_not_found", "message": "no such game" })),
+        )
+            .into_response(),
+        GameActionError::BadFen(msg) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": "bad_starting_fen", "message": msg })),
+        )
+            .into_response(),
+        GameActionError::NotSeated => (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "code": "not_seated", "message": "you are not a player in this game" })),
+        )
+            .into_response(),
+        GameActionError::Full => (
+            StatusCode::CONFLICT,
+            Json(json!({ "code": "game_full", "message": "both seats are already taken" })),
+        )
+            .into_response(),
+        GameActionError::NotYourTurn => (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "code": "not_your_turn", "message": "it is not your turn" })),
+        )
+            .into_response(),
+        GameActionError::Over => (
+            StatusCode::CONFLICT,
+            Json(json!({ "code": "game_over", "message": "the game has already ended" })),
+        )
+            .into_response(),
+        GameActionError::Move(move_err) => {
+            let body = json!({
+                "code": move_error_code(&move_err),
+                "message": move_err.message(),
+                "details": move_err,
+            });
+            (StatusCode::BAD_REQUEST, Json(body)).into_response()
+        }
+        GameActionError::Internal(msg) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": "internal", "message": msg })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /games` — create a game; the caller is seated (white by default).
+#[axum::debug_handler]
+async fn create_game_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Json(req): Json<CreateGame>,
+) -> Response {
+    match state.create(&player, req) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
+/// `GET /games` — public, joinable games for the lobby.
+#[axum::debug_handler]
+async fn list_games_handler(State(state): State<AppState>) -> Response {
+    Json(state.list_public()).into_response()
+}
+
+/// `GET /games/{id}` — a snapshot (the path token may be a game id or a
+/// join code). Requires an identity so `your_color` can be filled.
+#[axum::debug_handler]
+async fn get_game_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.get(&id, Some(player.id)) {
+        Some(s) => Json(s).into_response(),
+        None => game_error_response(GameActionError::NotFound),
+    }
+}
+
+/// `POST /games/{id}/join` — seat the caller in the open colour.
+#[axum::debug_handler]
+async fn join_game_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.join(&id, &player) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmitMoveRequest {
+    game_move: GameMove,
+}
+
+/// `POST /games/{id}/move` — submit a move; the store enforces colour/turn
+/// before the engine validates legality.
+#[axum::debug_handler]
+async fn move_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+    Json(req): Json<SubmitMoveRequest>,
+) -> Response {
+    match state.apply_move(&id, &player, req.game_move) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
+/// `POST /games/{id}/resign` — the caller forfeits.
+#[axum::debug_handler]
+async fn resign_game_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.resign(&id, &player) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
 pub async fn serve_api() {
     let cors = CorsLayer::new()
         .allow_origin("*".parse::<http::HeaderValue>().unwrap()) // allow all — dev only
         .allow_methods([Method::GET, Method::POST])
-        .allow_headers([http::header::CONTENT_TYPE]);
+        .allow_headers([
+            http::header::CONTENT_TYPE,
+            http::HeaderName::from_static("x-player-id"),
+            http::HeaderName::from_static("x-player-name"),
+        ]);
 
     let port = 8080;
     let binding_address = format!("0.0.0.0:{port}");
 
+    let state = AppState::new();
     let app = Router::new()
+        // Stateless engine endpoints (local play + legal-move queries).
         .route("/board/moves", post(get_moves_handler))
         .route("/board/new_state", post(get_new_board_state_handler))
         .route("/board/status", post(get_status_handler))
-        .layer(cors);
+        // Online multiplayer (Phase 1 REST; WS added in Phase 2).
+        .route("/games", post(create_game_handler).get(list_games_handler))
+        .route("/games/{id}", get(get_game_handler))
+        .route("/games/{id}/join", post(join_game_handler))
+        .route("/games/{id}/move", post(move_handler))
+        .route("/games/{id}/resign", post(resign_game_handler))
+        .layer(cors)
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&binding_address)
         .await
@@ -323,5 +475,118 @@ mod tests {
             "expected post-move Checkmate(Black), got {:?}",
             body.status
         );
+    }
+}
+
+#[cfg(test)]
+mod game_tests {
+    use super::*;
+    use crate::game::{AppState, AuthPlayer, CreateGame, GameResult};
+    use engine::board::MoveType;
+    use uuid::Uuid;
+
+    fn player(name: &str) -> AuthPlayer {
+        AuthPlayer {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+        }
+    }
+
+    fn req(public: bool) -> CreateGame {
+        CreateGame {
+            name: None,
+            public,
+            starting_fen: None,
+            color: None,
+        }
+    }
+
+    /// e2-e4 for White (engine coords: white pawns on rank 6, advancing to
+    /// lower ranks).
+    fn e2e4() -> GameMove {
+        GameMove {
+            from: Coord { file: 4, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 4 }),
+        }
+    }
+
+    #[test]
+    fn create_join_and_first_move() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+
+        let g = state.create(&alice, req(true)).unwrap();
+        assert_eq!(g.your_color, Some(Color::White));
+        assert!(g.white.is_some() && g.black.is_none());
+        assert_eq!(state.list_public().len(), 1, "open public game is listed");
+
+        // Bob joins as Black via the share code.
+        let j = state.join(&g.code, &bob).unwrap();
+        assert_eq!(j.your_color, Some(Color::Black));
+        assert!(
+            state.list_public().is_empty(),
+            "a full game leaves the lobby"
+        );
+
+        let after = state.apply_move(&g.id.to_string(), &alice, e2e4()).unwrap();
+        assert_eq!(after.side_to_move, Color::Black, "turn passed to Black");
+        assert_eq!(after.ply, 1);
+    }
+
+    #[test]
+    fn turn_and_seat_enforcement() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob"); // Black
+        let eve = player("Eve"); // not seated
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+
+        // Black can't move on White's turn; a stranger can't move at all.
+        assert!(matches!(
+            state.apply_move(&id, &bob, e2e4()),
+            Err(GameActionError::NotYourTurn)
+        ));
+        assert!(matches!(
+            state.apply_move(&id, &eve, e2e4()),
+            Err(GameActionError::NotSeated)
+        ));
+        // White can.
+        assert!(state.apply_move(&id, &alice, e2e4()).is_ok());
+    }
+
+    #[test]
+    fn join_full_is_rejected_and_resign_ends_the_game() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let eve = player("Eve");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+
+        // A third player can't take a full game; re-joining as a seated
+        // player is idempotent.
+        assert!(matches!(
+            state.join(&g.code, &eve),
+            Err(GameActionError::Full)
+        ));
+        assert!(state.join(&g.code, &alice).is_ok());
+
+        // Resigning ends the game with the opponent as winner; further
+        // moves are rejected.
+        let r = state.resign(&id, &alice).unwrap();
+        assert_eq!(
+            r.result,
+            Some(GameResult::Resignation {
+                winner: Color::Black
+            })
+        );
+        assert!(matches!(
+            state.apply_move(&id, &alice, e2e4()),
+            Err(GameActionError::Over)
+        ));
     }
 }
