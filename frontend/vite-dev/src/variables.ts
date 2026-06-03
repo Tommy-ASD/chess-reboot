@@ -87,7 +87,9 @@ export type GameStatus =
     | { status: "Checkmate"; data: { winner: Color } }
     | { status: "Stalemate" }
     | { status: "BrainrotWin"; data: { winner: Color } }
-    | { status: "BrainrotLockout"; data: { winner: Color } };
+    | { status: "BrainrotLockout"; data: { winner: Color } }
+    /// Plan 11 (Duck Chess): terminal win by king capture (no checkmate).
+    | { status: "Win"; data: { winner: Color } };
 
 export let selectedSquare: Coord | null = null;
 

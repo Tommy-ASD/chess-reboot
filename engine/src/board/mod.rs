@@ -337,6 +337,12 @@ pub enum GameStatus {
     /// `{"status":"BrainrotLockout","data":{"winner":"White"}}`. See
     /// `Board::is_brainrot_lockout`.
     BrainrotLockout { winner: Color },
+    /// Plan 11 (Duck Chess): terminal win by king *capture*. Duck Chess
+    /// has no check / checkmate / stalemate — the game ends when a side's
+    /// king is taken, and `winner` is the side whose king survived.
+    /// Adjacently tagged like the others:
+    /// `{"status":"Win","data":{"winner":"White"}}`.
+    Win { winner: Color },
 }
 
 /// Helper used by `Board::find_king` and tests. Lives at module scope so
@@ -926,6 +932,15 @@ impl Board {
     /// checked before `Check`/`Ongoing`), and in the no-moves branch it
     /// converts a would-be `Stalemate` into a loss.
     pub fn status(&self) -> GameStatus {
+        // Plan 11 (Duck Chess): no check / checkmate / stalemate. The game
+        // is either Ongoing or won by king *capture*. Detected here
+        // (post-move) as a pure function of king presence, rather than
+        // short-circuiting `make_move` — the king-capturing move applies
+        // like any capture, and the very next `status()` reports the win.
+        if self.flags.has_variant(VariantId::DuckChess) {
+            return self.duck_chess_status();
+        }
+
         let to_move = self.flags.side_to_move;
         // Same-color pieces are the primary source of legal moves. But
         // a Neutral cart carrying a passenger of `to_move` also has
@@ -989,6 +1004,27 @@ impl Board {
             }
         } else {
             GameStatus::Stalemate
+        }
+    }
+
+    /// Plan 11: Duck Chess terminal check — `Win` for the side whose king
+    /// still stands once the opponent's has been captured, else `Ongoing`.
+    /// Never `Check` / `Checkmate` / `Stalemate` (the variant has no
+    /// check). `find_king` descends into carriers, so a boarded king still
+    /// counts as alive — only a captured (off-board) king loses.
+    fn duck_chess_status(&self) -> GameStatus {
+        let white_king = self.find_king(Color::White).is_some();
+        let black_king = self.find_king(Color::Black).is_some();
+        match (white_king, black_king) {
+            (true, false) => GameStatus::Win {
+                winner: Color::White,
+            },
+            (false, true) => GameStatus::Win {
+                winner: Color::Black,
+            },
+            // Both kings present → the game continues. Both absent can't
+            // arise in normal play (one capture ends it); treat as Ongoing.
+            _ => GameStatus::Ongoing,
         }
     }
 

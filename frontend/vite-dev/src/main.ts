@@ -413,6 +413,8 @@ function describeStatus(
       return { text: `Brainrot win — ${status.data.winner} wins`, kind: "over" };
     case "BrainrotLockout":
       return { text: `Brainrot lockout — ${status.data.winner} wins`, kind: "over" };
+    case "Win":
+      return { text: `King captured — ${status.data.winner} wins`, kind: "over" };
   }
 }
 

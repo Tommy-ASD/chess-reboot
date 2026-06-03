@@ -1329,3 +1329,34 @@ fn duck_placement_legality_after_first_piece_move() {
         "with a duck on the board, relocations are MoveDuck from its square"
     );
 }
+
+/// Plan 11 (Duck Chess) commit 6/7: the win condition is king *capture*,
+/// not checkmate. A white queen slides up the file and takes the black
+/// king (legal — no check in Duck Chess); `status()` reports
+/// `Win { winner: White }`, never Checkmate/Stalemate.
+#[test]
+fn king_capture_wins_in_duck_chess() {
+    let mut board = empty_board();
+    board.flags.variants = vec![VariantId::DuckChess];
+    board.grid[7][0] = Square::new().set_piece(PieceType::new_queen(Color::White));
+    board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+    board.grid[7][7] = Square::new().set_piece(PieceType::new_king(Color::White));
+
+    // Both kings on the board → the game is ongoing.
+    assert_eq!(board.status(), GameStatus::Ongoing);
+
+    // The queen captures the black king — geometrically a normal glider
+    // capture, legal because Duck Chess skips king-safety.
+    board
+        .make_move(mv((0, 7), (0, 0)))
+        .expect("queen captures the king (no check in Duck Chess)");
+
+    assert!(board.find_king(Color::Black).is_none(), "black king captured");
+    assert_eq!(
+        board.status(),
+        GameStatus::Win {
+            winner: Color::White
+        },
+        "king capture wins; Duck Chess never returns Checkmate/Stalemate"
+    );
+}
