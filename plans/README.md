@@ -178,7 +178,7 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 | `OPEN` | Gate state (default open; `OPEN=garbage` parses as closed) | `OPEN=1` |
 | `FIRES` | Pressure plate trigger (default `ANY`) | `FIRES=ANY`, `FIRES=W`, `FIRES=B`, `FIRES=N` |
 | `D`  | Track exit direction (default `E`) | `D=N`, `D=E`, `D=S`, `D=W` |
-| `DUCK` | Duck on this square (plan 11; value-less flag) — **reserved; not yet parsed** (the parser ignores it today) | `(DUCK)` |
+| `DUCK` | Duck on this square (plan 11; value-less flag). Mutually exclusive with `P` — a piece+duck square is a parse error | `(DUCK)` |
 
 ### Piece-payload keys (inside `P=...` for carriers)
 | Key | Meaning | Example |

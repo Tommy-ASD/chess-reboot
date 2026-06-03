@@ -257,6 +257,58 @@ mod tests {
         );
     }
 
+    /// Plan 11 (Duck Chess): a square holding the duck serializes to the
+    /// value-less `(DUCK)` block and round-trips byte-identically.
+    #[test]
+    fn test_duck_fen_roundtrip() {
+        let mut board = Board {
+            grid: vec![vec![Square::new(); 8]; 8],
+            flags: BoardFlags {
+                side_to_move: Color::White,
+                white_can_castle_kingside: true,
+                white_can_castle_queenside: true,
+                black_can_castle_kingside: true,
+                black_can_castle_queenside: true,
+                en_passant_target: None,
+                train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
+                ply_count: 0,
+                last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
+            },
+        };
+
+        board.grid[1][1] = Square::new().set_duck(true);
+
+        let fen = board_to_fen(&board);
+        assert_eq!(fen, "8/1(DUCK)6/8/8/8/8/8/8 w KQkq - tr=full p=0");
+
+        let board2 = fen_to_board(&fen).unwrap();
+        assert_eq!(board2, board);
+        assert!(board2.grid[1][1].duck);
+        assert!(board2.grid[1][1].piece.is_none());
+    }
+
+    /// Plan 11: `(DUCK)` parses to a duck-occupied, piece-free square.
+    #[test]
+    fn test_duck_fen_parses() {
+        let board = fen_to_board("(DUCK)7/8/8/8/8/8/8/8 w KQkq -").unwrap();
+        assert!(board.grid[0][0].duck);
+        assert!(board.grid[0][0].piece.is_none());
+        assert!(!board.square_is_empty(&crate::board::Coord { file: 0, rank: 0 }));
+    }
+
+    /// Plan 11: a piece and the duck cannot share a square — `(P=N,DUCK)`
+    /// is malformed input, rejected rather than silently dropping one.
+    #[test]
+    fn test_piece_plus_duck_fen_is_error() {
+        let result = fen_to_board("(P=N,DUCK)7/8/8/8/8/8/8/8 w KQkq -");
+        assert!(matches!(
+            result,
+            Err(crate::board::fen::FenError::BadExtendedSquare { .. })
+        ));
+    }
+
     #[test]
     fn test_fen_roundtrip() {
         let mut board = Board {

@@ -495,9 +495,14 @@ impl Board {
         }
     }
 
+    /// Plan 11 (Duck Chess): a square holding the duck is *not* empty —
+    /// neither a piece nor the duck itself may land there, and gliders
+    /// cannot slide through it. The `!duck` clause is behaviour-neutral
+    /// on a duck-free board (every square defaults `duck: false`) and
+    /// only bites once a duck is on the board.
     pub fn square_is_empty(&self, coord: &Coord) -> bool {
         if let Some(square) = self.get_square_at(coord) {
-            square.square_type.is_walkable() && square.piece.is_none()
+            square.square_type.is_walkable() && square.piece.is_none() && !square.duck
         } else {
             false
         }

@@ -9,6 +9,14 @@ pub struct Square {
     pub piece: Option<PieceType>,
     pub square_type: SquareType,
     pub conditions: Vec<SquareCondition>,
+    /// Plan 11 (Duck Chess): the colourless duck occupies this square.
+    /// Mutually exclusive with `piece` (a piece+duck square is a FEN
+    /// parse error). A dedicated bool, not a `SquareCondition`, because
+    /// the duck is mobile (relocates every turn) whereas conditions are
+    /// static terrain. Defaults `false`; `Board::square_is_empty` treats a
+    /// duck square as occupied, so neither a piece nor the duck can land
+    /// there and gliders cannot slide through it.
+    pub duck: bool,
 }
 
 /// ------------- Square types -------------
@@ -195,6 +203,7 @@ impl Square {
             piece: None,
             square_type: SquareType::Standard,
             conditions: vec![],
+            duck: false,
         }
     }
     pub fn set_piece(mut self, piece: PieceType) -> Self {
@@ -211,6 +220,14 @@ impl Square {
     }
     pub fn add_square_condition(mut self, square_condition: SquareCondition) -> Self {
         self.conditions.push(square_condition);
+        self
+    }
+    /// Plan 11 (Duck Chess): place or clear the duck on this square.
+    /// Builder counterpart to `set_piece`, used by tests and the
+    /// duck-relocation move handler. Callers are responsible for the
+    /// piece/duck mutual-exclusion invariant (the FEN parser enforces it).
+    pub fn set_duck(mut self, duck: bool) -> Self {
+        self.duck = duck;
         self
     }
 

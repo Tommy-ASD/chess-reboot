@@ -197,6 +197,7 @@ fn fen_row_to_squares(row: &str, row_idx: usize) -> Result<Vec<Square>, FenError
                     piece: None,
                     square_type: SquareType::Standard,
                     conditions: vec![],
+                    duck: false,
                 });
             }
             continue;
@@ -751,7 +752,7 @@ pub fn square_to_fen(square: &Square) -> String {
     let is_standard_square =
         matches!(square.square_type, SquareType::Standard) && square.conditions.is_empty();
 
-    if piece_symbol.len() == 1 && is_standard_square {
+    if piece_symbol.len() == 1 && is_standard_square && !square.duck {
         return piece_symbol; // e.g., "P" or "r"
     }
 
@@ -801,6 +802,13 @@ pub fn square_to_fen(square: &Square) -> String {
 
     for cond in &square.conditions {
         parts.push(format!("C={}", cond.to_fen()));
+    }
+
+    // Plan 11 (Duck Chess): value-less `DUCK` flag. A duck-only square
+    // serializes to `(DUCK)`; a duck never co-occurs with a piece (the
+    // parser rejects that combination).
+    if square.duck {
+        parts.push("DUCK".to_string());
     }
 
     format!("({})", parts.join(","))
@@ -971,6 +979,7 @@ pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
             piece: None,
             square_type: SquareType::Standard,
             conditions: vec![],
+            duck: false,
         });
     }
 
@@ -979,6 +988,8 @@ pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
         let inner = &fen[1..fen.len() - 1];
         let mut piece: Option<PieceType> = None;
         let mut conditions = Vec::new();
+        // Plan 11 (Duck Chess): value-less `DUCK` flag accumulator.
+        let mut duck = false;
 
         // Variant payload accumulators — buffered through the loop and
         // collapsed into the right `SquareType` by `type_tag` once every
@@ -1091,6 +1102,8 @@ pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
                         _ => warn!(value, "unknown square condition"),
                     }
                 }
+                // Plan 11 (Duck Chess): value-less flag, no `=value`.
+                "DUCK" => duck = true,
                 _ => warn!(field, "unknown field"),
             }
         }
@@ -1148,10 +1161,21 @@ pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
             }
         };
 
+        // Plan 11 (Duck Chess): a piece and the duck cannot share a
+        // square. Reject the combination rather than silently dropping
+        // one — a `(P=N,DUCK)` FEN is malformed input, not a default.
+        if duck && piece.is_some() {
+            return Err(FenError::BadExtendedSquare {
+                content: fen.to_string(),
+                reason: "a square cannot hold both a piece and the duck",
+            });
+        }
+
         return Ok(Square {
             piece,
             square_type,
             conditions,
+            duck,
         });
     }
 
@@ -1163,6 +1187,7 @@ pub fn fen_to_square(fen: &str) -> Result<Square, FenError> {
             piece: Some(p),
             square_type: SquareType::Standard,
             conditions: vec![],
+            duck: false,
         }),
         None => Err(FenError::UnknownPieceSymbol(fen.to_string())),
     }
