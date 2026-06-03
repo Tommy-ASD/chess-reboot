@@ -341,6 +341,25 @@ impl AppState {
         store.games.get(&id).map(|e| e.game.snapshot(viewer))
     }
 
+    /// Subscribe to a game's live updates: the current snapshot plus a
+    /// receiver for every subsequent change. `None` if the game is unknown.
+    /// Used by the `/ws/games/{id}` push loop.
+    pub fn subscribe_game(
+        &self,
+        key: &str,
+    ) -> Option<(GameState, broadcast::Receiver<GameState>)> {
+        let store = self.lock();
+        let id = Self::resolve(&store, key)?;
+        let entry = store.games.get(&id)?;
+        Some((entry.game.snapshot(None), entry.tx.subscribe()))
+    }
+
+    /// Subscribe to lobby-changed pings; the `/ws/lobby` loop re-lists on
+    /// each one.
+    pub fn subscribe_lobby(&self) -> broadcast::Receiver<()> {
+        self.lobby_tx.subscribe()
+    }
+
     pub fn join(&self, key: &str, player: &AuthPlayer) -> Result<GameState, GameActionError> {
         let mut store = self.lock();
         let id = Self::resolve(&store, key).ok_or(GameActionError::NotFound)?;

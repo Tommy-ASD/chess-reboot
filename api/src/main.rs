@@ -1,6 +1,9 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{
+        Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -8,6 +11,7 @@ use axum::{
 use http::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
 use engine::board::{
@@ -17,7 +21,7 @@ use engine::board::{
 use engine::pieces::Color;
 
 mod game;
-use game::{AppState, AuthPlayer, CreateGame, GameActionError};
+use game::{AppState, AuthPlayer, CreateGame, GameActionError, GameState};
 
 #[derive(Debug, Deserialize)]
 pub struct GetMovesRequest {
@@ -323,6 +327,87 @@ async fn resign_game_handler(
     }
 }
 
+// ---------------------------------------------------------------------
+// Phase 2: WebSocket live updates (server -> client push)
+// ---------------------------------------------------------------------
+
+/// Serialize `value` to a WS text frame. `Err(())` (serialize or send
+/// failure) tells the caller to drop the connection.
+async fn send_json<T: Serialize>(socket: &mut WebSocket, value: &T) -> Result<(), ()> {
+    let txt = serde_json::to_string(value).map_err(|_| ())?;
+    socket.send(Message::Text(txt.into())).await.map_err(|_| ())
+}
+
+/// `GET /ws/games/{id}` — push a `GameState` snapshot on connect and on
+/// every change. Read-only / spectator-friendly; moves go over REST.
+#[axum::debug_handler]
+async fn game_ws_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    match state.subscribe_game(&id) {
+        Some((initial, rx)) => ws.on_upgrade(move |socket| game_ws_loop(socket, initial, rx)),
+        None => game_error_response(GameActionError::NotFound),
+    }
+}
+
+async fn game_ws_loop(
+    mut socket: WebSocket,
+    initial: GameState,
+    mut rx: broadcast::Receiver<GameState>,
+) {
+    if send_json(&mut socket, &initial).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            update = rx.recv() => match update {
+                Ok(state) => {
+                    if send_json(&mut socket, &state).await.is_err() { break; }
+                }
+                // Slow client dropped some snapshots — the next recv carries
+                // the latest, so just continue.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                // Push-only channel: ignore anything the client sends.
+                Some(Ok(_)) => {}
+            },
+        }
+    }
+}
+
+/// `GET /ws/lobby` — push the public-games list on connect and whenever the
+/// lobby changes (game created / joined / ended).
+#[axum::debug_handler]
+async fn lobby_ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| lobby_ws_loop(socket, state))
+}
+
+async fn lobby_ws_loop(mut socket: WebSocket, state: AppState) {
+    let mut rx = state.subscribe_lobby();
+    if send_json(&mut socket, &state.list_public()).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            tick = rx.recv() => match tick {
+                Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if send_json(&mut socket, &state.list_public()).await.is_err() { break; }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
+}
+
 pub async fn serve_api() {
     let cors = CorsLayer::new()
         .allow_origin("*".parse::<http::HeaderValue>().unwrap()) // allow all — dev only
@@ -348,6 +433,9 @@ pub async fn serve_api() {
         .route("/games/{id}/join", post(join_game_handler))
         .route("/games/{id}/move", post(move_handler))
         .route("/games/{id}/resign", post(resign_game_handler))
+        // Live updates (Phase 2): per-game + lobby pushes.
+        .route("/ws/games/{id}", get(game_ws_handler))
+        .route("/ws/lobby", get(lobby_ws_handler))
         .layer(cors)
         .with_state(state);
 
