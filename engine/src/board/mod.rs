@@ -211,6 +211,29 @@ pub enum LastMoveKind {
     PlaceTornado,
 }
 
+/// Plan 11: identifier for an active rule-variant. Pure discriminator —
+/// per-position activation lives in `BoardFlags::variants`; the rule code
+/// is global (movement-stack modifiers / `status()` branches that read
+/// `BoardFlags::has_variant`). Serialized in FEN as `variants=duck_chess,…`.
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum VariantId {
+    DuckChess,
+    // future: Atomic, Antichess, KingOfTheHill, ThreeCheck, …
+}
+
+/// Plan 11 (Duck Chess): which half of the two-part turn the side to move
+/// is in. Only meaningful when `VariantId::DuckChess` is active. Per-
+/// position state (changes every half-turn), so it lives on `BoardFlags`
+/// rather than inside `VariantId` (which stays a pure discriminator).
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub enum DuckPhase {
+    /// The mover hasn't moved a piece yet this turn.
+    #[default]
+    PieceMove,
+    /// The mover moved a piece; now they must place or move the duck.
+    DuckPlacement,
+}
+
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct BoardFlags {
     pub side_to_move: Color,
@@ -235,6 +258,20 @@ pub struct BoardFlags {
     /// opponent's next turn this field describes the opponent's last
     /// move (which is what the consuming pieces want).
     pub last_move: Option<LastMove>,
+    /// Plan 11: active rule-variants for this game. Empty = standard
+    /// chess. Serialized in FEN as `variants=<id>,<id>,…`.
+    pub variants: Vec<VariantId>,
+    /// Plan 11 (Duck Chess): the current half-turn phase. Only meaningful
+    /// when `VariantId::DuckChess` is in `variants`; defaults to
+    /// `PieceMove` (start of turn).
+    pub duck_phase: DuckPhase,
+}
+
+impl BoardFlags {
+    /// Plan 11: is rule-variant `v` active for this position?
+    pub fn has_variant(&self, v: VariantId) -> bool {
+        self.variants.contains(&v)
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]

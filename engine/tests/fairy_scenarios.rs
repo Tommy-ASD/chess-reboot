@@ -68,6 +68,8 @@ fn empty_board() -> Board {
             train_tick_rate: TrainTickRate::EveryFullTurn,
             ply_count: 0,
             last_move: None,
+            variants: Vec::new(),
+            duck_phase: engine::board::DuckPhase::PieceMove,
         },
     }
 }

@@ -735,6 +735,8 @@ pub fn fen_to_board(fen: &str) -> Result<Board, FenError> {
         train_tick_rate,
         ply_count,
         last_move,
+        variants: Vec::new(),
+        duck_phase: crate::board::DuckPhase::PieceMove,
     };
 
     Ok(Board { grid, flags })

@@ -33,6 +33,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         }
     }
@@ -51,6 +53,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -75,6 +79,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -102,6 +108,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -131,6 +139,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -159,6 +169,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -190,6 +202,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -257,6 +271,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
 
@@ -2951,6 +2967,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         }
     }
@@ -7506,6 +7524,8 @@ mod tests {
                 train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
                 ply_count: 0,
                 last_move: None,
+                variants: Vec::new(),
+                duck_phase: crate::board::DuckPhase::PieceMove,
             },
         };
         board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::White));
