@@ -197,8 +197,8 @@ mod `BRANCHES.len()`, and >255-branch lists are truncated with a warn.
 |-------|---------|---------|
 | `tr=full` / `tr=ply` / `tr=<n>ply` | Train tick rate | `tr=full`, `tr=2ply` |
 | `p=<n>` | Plies elapsed (for `EveryNPly` gate alignment) | `p=42` |
-| `variants=<id>,<id>,…` | Active rule variants (plan 11; default empty = standard chess) — **reserved; not yet parsed** | `variants=duck_chess` |
-| `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11; default `piece`) — **reserved; not yet parsed** | `duck_phase=placing` |
+| `variants=<id>,<id>,…` | Active rule variants (plan 11; default empty = standard chess). Omitted when empty | `variants=duck_chess` |
+| `duck_phase=piece` / `duck_phase=placing` | Duck Chess half-turn (plan 11; default `piece`, only meaningful under `duck_chess`). Emitted only for the non-default `placing` | `duck_phase=placing` |
 | `lm=(C=…,F=…,K=…[,T=…][,V=…],P=…)` | Last-move snapshot (plan 10; default absent = no prior move). `C` is mover color (W/B/N), `F` is from coord, `K` is move kind (MOVE / MIC / PROMO / CASTLE / EP / PS / TS / PIC / PT), `T` is to coord (omitted for ThrowSwitch / PhaseShift / PlaceTornado), `V` is captured-piece symbol (omitted on non-captures), `P` is primary piece symbol (post-promotion for Promote moves) | `lm=(C=W,F=4-6,K=MOVE,T=4-5,P=P)` |
 
 Canonical implementer: `engine/src/board/fen.rs`. Frontend parser:

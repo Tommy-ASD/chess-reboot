@@ -761,6 +761,20 @@ impl Board {
 
         let mut env_ctx = EnvReactionCtx::default();
 
+        // Plan 11 (Duck Chess): a turn is two half-moves — a piece move
+        // then a duck move. Only the *duck* half completes the turn: the
+        // tick fires (ply advances, trains tick) and the side flips on it.
+        // The piece half just advances `duck_phase` to DuckPlacement —
+        // same side keeps the move. Outside Duck Chess every move
+        // completes the turn, so `completes_turn` is always true and
+        // behaviour is unchanged.
+        let duck_chess = self.flags.has_variant(crate::board::VariantId::DuckChess);
+        let is_duck_move = matches!(
+            ctx.game_move.move_type,
+            MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. }
+        );
+        let completes_turn = !duck_chess || is_duck_move;
+
         // Round-3 audit fix: stamp `last_move` BEFORE the PostMover
         // phase. Auto-action handlers at PostMover (Boy Who Followed
         // Geese, future "react to the just-applied move" pieces) read
@@ -779,8 +793,14 @@ impl Board {
         // point `side_to_move` is still the mover; the flip happens
         // after the tick.
         reg.run_phase(self, EnvPhase::PostMover, false, &mut env_ctx);
-        reg.run_phase(self, EnvPhase::TickGate, false, &mut env_ctx);
-        reg.run_phase(self, EnvPhase::PostTick, false, &mut env_ctx);
+        // Plan 11: the tick (ply bump + train/tornado tick + brainrot
+        // recalc) fires once per *turn* — on the duck half-move in Duck
+        // Chess, on every move otherwise. Skipping it on the piece half
+        // is what makes `ply_count` advance only on the duck half.
+        if completes_turn {
+            reg.run_phase(self, EnvPhase::TickGate, false, &mut env_ctx);
+            reg.run_phase(self, EnvPhase::PostTick, false, &mut env_ctx);
+        }
 
         // Plan 01: flip turn after env reactions so the train tick
         // and other auto-mechanics still see the mover as the
@@ -819,8 +839,23 @@ impl Board {
             tracing::trace!(
                 "goblin kidnap-capture grants the captor another move; not flipping side_to_move"
             );
-        } else {
+        } else if completes_turn {
+            // Plan 11: in Duck Chess only the duck half-move flips the
+            // side; the piece half keeps the same side (it still owes a
+            // duck move). Non-Duck-Chess: always flips (unchanged).
             self.flags.side_to_move = self.flags.side_to_move.opposite();
+        }
+
+        // Plan 11 (Duck Chess): advance the half-turn marker. A piece move
+        // hands the same side the duck (→ DuckPlacement); a duck move ends
+        // the turn (→ PieceMove). Inert outside Duck Chess (the field is
+        // ignored there, but keep it at the default to avoid drift).
+        if duck_chess {
+            self.flags.duck_phase = if is_duck_move {
+                crate::board::DuckPhase::PieceMove
+            } else {
+                crate::board::DuckPhase::DuckPlacement
+            };
         }
 
         // PreMover fires AFTER the side flip — "start of opponent's

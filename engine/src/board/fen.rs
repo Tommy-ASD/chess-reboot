@@ -2,7 +2,8 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     board::{
-        Board, BoardFlags, Coord, LastMove, LastMoveKind, SignalId, TrainTickRate,
+        Board, BoardFlags, Coord, DuckPhase, LastMove, LastMoveKind, SignalId, TrainTickRate,
+        VariantId,
         square::{PressureTrigger, Square, SquareCondition, SquareType, TrackDir},
     },
     pieces::{Color, piecetype::PieceType},
@@ -329,7 +330,32 @@ pub fn board_to_fen(board: &Board) -> String {
         .map(format_last_move)
         .map(|s| format!(" {s}"))
         .unwrap_or_default();
-    format!("{grid} {stm} {castling} {ep} {tr} {p}{lm}")
+    // Plan 11: active variants + duck half-turn phase. Both are omitted
+    // for standard chess (empty variants) so pre-plan-11 FENs are
+    // byte-identical; `duck_phase` is emitted only for its non-default
+    // `placing` value, and only while Duck Chess is active.
+    let variants = if board.flags.variants.is_empty() {
+        String::new()
+    } else {
+        format!(" variants={}", format_variant_list(&board.flags.variants))
+    };
+    let duck_phase = if board.flags.has_variant(VariantId::DuckChess)
+        && board.flags.duck_phase == DuckPhase::DuckPlacement
+    {
+        " duck_phase=placing"
+    } else {
+        ""
+    };
+    format!("{grid} {stm} {castling} {ep} {tr} {p}{lm}{variants}{duck_phase}")
+}
+
+/// Plan 11: comma-separated variant ids for the FEN `variants=` field.
+fn format_variant_list(variants: &[VariantId]) -> String {
+    variants
+        .iter()
+        .map(|v| v.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn format_train_tick_rate(rate: &TrainTickRate) -> String {
@@ -725,6 +751,21 @@ pub fn fen_to_board(fen: &str) -> Result<Board, FenError> {
         .unwrap_or(TrainTickRate::EveryFullTurn);
     let ply_count = ply_part.and_then(parse_ply_count).unwrap_or(0);
     let last_move = lm_part.and_then(parse_last_move);
+    // Plan 11: `variants=` and `duck_phase=` are prefix-identified — found
+    // by scanning all tokens rather than by fixed position, so they
+    // compose with the optional `lm=` regardless of order. Absent →
+    // empty variants (= standard chess) and the default `PieceMove`
+    // phase, keeping pre-plan-11 FENs unchanged.
+    let variants = fen
+        .split_whitespace()
+        .find(|t| t.starts_with("variants="))
+        .map(parse_variant_list)
+        .unwrap_or_default();
+    let duck_phase = fen
+        .split_whitespace()
+        .find(|t| t.starts_with("duck_phase="))
+        .map(parse_duck_phase)
+        .unwrap_or(DuckPhase::PieceMove);
 
     let flags = BoardFlags {
         side_to_move,
@@ -736,11 +777,42 @@ pub fn fen_to_board(fen: &str) -> Result<Board, FenError> {
         train_tick_rate,
         ply_count,
         last_move,
-        variants: Vec::new(),
-        duck_phase: crate::board::DuckPhase::PieceMove,
+        variants,
+        duck_phase,
     };
 
     Ok(Board { grid, flags })
+}
+
+/// Plan 11: parse a FEN `variants=<id>,<id>,…` token into `VariantId`s.
+/// Lenient — unknown ids warn and are dropped, empty entries skipped.
+fn parse_variant_list(token: &str) -> Vec<VariantId> {
+    let body = token.strip_prefix("variants=").unwrap_or(token);
+    body.split(',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| match VariantId::parse_tag(s) {
+            Some(v) => Some(v),
+            None => {
+                warn!(s, "unknown variant id; dropping");
+                None
+            }
+        })
+        .collect()
+}
+
+/// Plan 11: parse a FEN `duck_phase=piece|placing` token. Anything else
+/// (including an unknown value) defaults to `PieceMove` — the start-of-
+/// turn phase — matching the field's documented default-when-absent.
+fn parse_duck_phase(token: &str) -> DuckPhase {
+    let body = token.strip_prefix("duck_phase=").unwrap_or(token);
+    match body {
+        "placing" => DuckPhase::DuckPlacement,
+        "piece" => DuckPhase::PieceMove,
+        other => {
+            warn!(other, "unknown duck_phase; defaulting to piece");
+            DuckPhase::PieceMove
+        }
+    }
 }
 
 pub fn square_to_fen(square: &Square) -> String {

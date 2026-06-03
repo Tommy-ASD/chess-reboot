@@ -309,6 +309,52 @@ mod tests {
         ));
     }
 
+    /// Plan 11 commit 4/7: a Duck Chess board round-trips the `variants=`
+    /// and `duck_phase=` flag tokens (alongside the `(DUCK)` square)
+    /// byte-identically. `duck_phase=placing` is the non-default value, so
+    /// it's emitted; `PieceMove` would be omitted (defaults on parse).
+    #[test]
+    fn test_duck_chess_fen_roundtrip() {
+        let mut board = Board {
+            grid: vec![vec![Square::new(); 8]; 8],
+            flags: BoardFlags {
+                side_to_move: Color::White,
+                white_can_castle_kingside: true,
+                white_can_castle_queenside: true,
+                black_can_castle_kingside: true,
+                black_can_castle_queenside: true,
+                en_passant_target: None,
+                train_tick_rate: crate::board::TrainTickRate::EveryFullTurn,
+                ply_count: 0,
+                last_move: None,
+                variants: vec![crate::board::VariantId::DuckChess],
+                duck_phase: crate::board::DuckPhase::DuckPlacement,
+            },
+        };
+        board.grid[3][4] = Square::new().set_duck(true);
+
+        let fen = board_to_fen(&board);
+        assert_eq!(
+            fen,
+            "8/8/8/4(DUCK)3/8/8/8/8 w KQkq - tr=full p=0 variants=duck_chess duck_phase=placing"
+        );
+
+        let board2 = fen_to_board(&fen).unwrap();
+        assert_eq!(board2, board);
+    }
+
+    /// Plan 11: a standard-chess board (empty variants, default phase)
+    /// emits neither `variants=` nor `duck_phase=`, so pre-plan-11 FENs
+    /// stay byte-identical.
+    #[test]
+    fn test_standard_board_omits_duck_flags() {
+        let board = fen_to_board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -").unwrap();
+        let fen = board_to_fen(&board);
+        assert!(!fen.contains("variants="), "no variants= for standard chess");
+        assert!(!fen.contains("duck_phase="), "no duck_phase= for standard chess");
+        assert!(board.flags.variants.is_empty());
+    }
+
     #[test]
     fn test_fen_roundtrip() {
         let mut board = Board {

@@ -239,6 +239,26 @@ pub enum VariantId {
     // future: Atomic, Antichess, KingOfTheHill, ThreeCheck, …
 }
 
+impl VariantId {
+    /// Lowercase snake_case tag used in the FEN `variants=` list.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VariantId::DuckChess => "duck_chess",
+        }
+    }
+
+    /// Inverse of `as_str`. Named `parse_tag` (not `from_str`) to match
+    /// `TrackDir`'s convention and sidestep the `FromStr` trait for a
+    /// one-variant enum. Unknown tags return `None` (the FEN parser
+    /// warns and drops them, staying lenient).
+    pub fn parse_tag(s: &str) -> Option<Self> {
+        match s {
+            "duck_chess" => Some(VariantId::DuckChess),
+            _ => None,
+        }
+    }
+}
+
 /// Plan 11 (Duck Chess): which half of the two-part turn the side to move
 /// is in. Only meaningful when `VariantId::DuckChess` is active. Per-
 /// position state (changes every half-turn), so it lives on `BoardFlags`

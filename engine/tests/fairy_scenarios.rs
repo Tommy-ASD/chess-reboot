@@ -3,7 +3,7 @@
 //! than single-rule unit checks, and run against the engine's public
 //! API only.
 
-use engine::board::{Board, Coord, GameMove, GameStatus, MoveType};
+use engine::board::{Board, Coord, DuckPhase, GameMove, GameStatus, MoveType, VariantId};
 use engine::pieces::Color;
 use engine::pieces::piecetype::PieceType;
 
@@ -1125,4 +1125,89 @@ fn duck_move_clears_prior_square() {
     assert!(!board.grid[4][4].duck, "prior duck square is cleared");
     assert!(board.grid[6][1].duck, "duck is on its new square");
     assert_eq!(count_ducks(&board), 1, "still exactly one duck");
+}
+
+/// Build a Duck Chess board: an empty board with `DuckChess` active and a
+/// free white rook + both kings, so a validated piece move is legal.
+fn duck_chess_board() -> Board {
+    let mut board = empty_board();
+    board.flags.variants = vec![VariantId::DuckChess];
+    board.grid[4][4] =
+        engine::board::square::Square::new().set_piece(PieceType::new_rook(Color::White));
+    board.grid[7][0] =
+        engine::board::square::Square::new().set_piece(PieceType::new_king(Color::White));
+    board.grid[0][7] =
+        engine::board::square::Square::new().set_piece(PieceType::new_king(Color::Black));
+    board
+}
+
+/// Plan 11 (Duck Chess) commit 4/7: a turn is two half-moves. After the
+/// PIECE move the same side still holds the move (`duck_phase` →
+/// DuckPlacement, side unchanged); after the DUCK move the turn ends
+/// (`duck_phase` → PieceMove, side flips). The piece move goes through
+/// validated `make_move`; the duck move uses `make_move_unchecked` (no
+/// legality gate until 5/7).
+#[test]
+fn duck_chess_turn_alternates_phase_and_flips_only_on_duck() {
+    let mut board = duck_chess_board();
+
+    // Piece half-move (rook (4,4) → (4,3)): same side, phase advances.
+    board.make_move(mv((4, 4), (4, 3))).expect("legal rook move");
+    assert_eq!(
+        board.flags.side_to_move,
+        Color::White,
+        "a piece move keeps the same side (it still owes a duck move)"
+    );
+    assert_eq!(
+        board.flags.duck_phase,
+        DuckPhase::DuckPlacement,
+        "after the piece move the side must place the duck"
+    );
+
+    // Duck half-move: turn ends — phase resets, side flips.
+    board
+        .make_move_unchecked(GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 2, rank: 2 },
+            },
+        })
+        .expect("duck placement");
+    assert_eq!(
+        board.flags.side_to_move,
+        Color::Black,
+        "the duck move completes the turn and flips the side"
+    );
+    assert_eq!(
+        board.flags.duck_phase,
+        DuckPhase::PieceMove,
+        "new turn starts in the piece-move phase"
+    );
+}
+
+/// Plan 11 commit 4/7: `ply_count` advances once per turn — on the duck
+/// half-move only. The piece half-move must not bump it.
+#[test]
+fn duck_chess_ply_increments_only_on_duck_move() {
+    let mut board = duck_chess_board();
+    assert_eq!(board.flags.ply_count, 0);
+
+    board.make_move(mv((4, 4), (4, 3))).expect("legal rook move");
+    assert_eq!(
+        board.flags.ply_count, 0,
+        "the piece half-move does not bump ply"
+    );
+
+    board
+        .make_move_unchecked(GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 2, rank: 2 },
+            },
+        })
+        .expect("duck placement");
+    assert_eq!(
+        board.flags.ply_count, 1,
+        "the duck half-move bumps ply once per turn"
+    );
 }
