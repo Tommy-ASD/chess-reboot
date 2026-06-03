@@ -1343,13 +1343,21 @@ mod game_tests {
     #[test]
     fn game_error_response_maps_each_variant_to_its_status() {
         use crate::game::GameActionError as E;
-        let cases: [(E, StatusCode); 7] = [
+        let cases: [(E, StatusCode); 8] = [
             (E::NotFound, StatusCode::NOT_FOUND),
             (E::BadFen("x".to_string()), StatusCode::BAD_REQUEST),
             (E::NotSeated, StatusCode::FORBIDDEN),
             (E::Full, StatusCode::CONFLICT),
             (E::NotYourTurn, StatusCode::FORBIDDEN),
             (E::Over, StatusCode::CONFLICT),
+            // The engine-rejection arm builds the richest body (code +
+            // message + serialized `details`); exercise its full mapping.
+            (
+                E::Move(MoveError::NoSourceSquare {
+                    from: Coord { file: 0, rank: 0 },
+                }),
+                StatusCode::BAD_REQUEST,
+            ),
             (E::Internal("x".to_string()), StatusCode::INTERNAL_SERVER_ERROR),
         ];
         for (err, status) in cases {
