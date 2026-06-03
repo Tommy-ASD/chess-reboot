@@ -698,6 +698,11 @@ mod game_tests {
             state.apply_move(&id, &alice, e2e4()),
             Err(GameActionError::Over)
         ));
+        // Resigning an already-finished game is likewise Over.
+        assert!(matches!(
+            state.resign(&id, &alice),
+            Err(GameActionError::Over)
+        ));
     }
 
     #[test]
@@ -839,5 +844,82 @@ mod game_tests {
             state.list_public().is_empty(),
             "the drawn game leaves the lobby"
         );
+    }
+
+    #[test]
+    fn snapshot_without_viewer_has_no_your_color() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let g = state.create(&alice, req(true)).unwrap();
+        // Viewerless snapshots (lobby list, WS broadcasts) carry no your_color.
+        assert_eq!(state.get(&g.id.to_string(), None).unwrap().your_color, None);
+        assert_eq!(state.list_public()[0].your_color, None);
+    }
+
+    #[test]
+    fn join_seats_white_when_creator_chose_black() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: None,
+                    color: Some(Color::Black),
+                },
+            )
+            .unwrap();
+        let j = state.join(&g.code, &bob).unwrap();
+        assert_eq!(
+            j.your_color,
+            Some(Color::White),
+            "the joiner takes the open White seat"
+        );
+        assert!(
+            j.black.as_ref().is_some_and(|p| p.id == alice.id),
+            "the creator stays Black"
+        );
+    }
+
+    #[test]
+    fn cannot_join_a_finished_game() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        // Alice creates and resigns while alone → finished, one seat open.
+        let g = state.create(&alice, req(false)).unwrap();
+        state.resign(&g.id.to_string(), &alice).unwrap();
+        // A new player can't take the open seat in a finished game.
+        assert!(matches!(
+            state.join(&g.code, &bob),
+            Err(GameActionError::Over)
+        ));
+        // But the seated player may still re-fetch their snapshot.
+        assert!(state.join(&g.code, &alice).is_ok());
+    }
+
+    #[test]
+    fn create_defaults_for_blank_fen_and_name() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: Some("   ".to_string()),
+                    public: true,
+                    starting_fen: Some("  ".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        assert!(
+            g.fen.starts_with("rnbqkbnr/pppppppp"),
+            "blank starting FEN falls back to the standard position"
+        );
+        assert_eq!(g.name, "Alice's game", "blank name falls back to the default");
     }
 }

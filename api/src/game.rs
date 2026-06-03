@@ -369,9 +369,15 @@ impl AppState {
         let mut store = self.lock();
         let id = Self::resolve(&store, key).ok_or(GameActionError::NotFound)?;
         let entry = store.games.get_mut(&id).ok_or(GameActionError::NotFound)?;
-        // Idempotent: already seated → just hand back your snapshot.
+        // Idempotent: already seated → hand back your snapshot (even after
+        // the game has ended — a seated player may still re-fetch it).
         if entry.game.color_of(player.id).is_some() {
             return Ok(entry.game.snapshot(Some(player.id)));
+        }
+        // A new player can't take a seat in a finished game — mirrors the
+        // game-over guard in `apply_move` / `resign`.
+        if entry.game.result.is_some() {
+            return Err(GameActionError::Over);
         }
         if entry.game.is_full() {
             return Err(GameActionError::Full);
