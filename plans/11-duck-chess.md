@@ -1,5 +1,11 @@
 # Plan 11: Duck Chess + variant infrastructure
 
+**Status: shipped — all 7 commits landed (`793e6f5`…`4420cd4`).** Engine
+complete and a Duck Chess game is playable end-to-end through the public
+API; the `GameStatus::Win` banner is wired on the frontend, but the duck
+sprite + placement UI is deferred (engine scope). See the
+[README](README.md#whats-shipped).
+
 Add the engine's first true rule-variant — Duck Chess — and the
 per-position scaffolding (`variants: Vec<VariantId>`) that future
 variants (Atomic, Antichess, King-of-the-Hill, …) will hook into.

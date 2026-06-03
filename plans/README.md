@@ -91,6 +91,19 @@ plan you want to act on.
   deliberately not taken: removing `Piece::attacks` / `initial_moves`
   from the trait — they're kept as the per-piece primitives the
   modifiers compose (see `piece_attacks.rs`).
+- **Plan 11 — Duck Chess + variant infrastructure**: the first true
+  rule-variant. `VariantId` (per-position `BoardFlags.variants` +
+  `has_variant`) and `DuckPhase` (the two-part turn). `Square.duck` +
+  `(DUCK)` FEN, plus `variants=` / `duck_phase=` board-flag round-trip.
+  `MoveType::PlaceDuck` / `MoveDuck` apply via `relocate_duck`. The duck
+  blocks every mover (glider ray-stop + `DuckBlockerFilter`); the turn
+  gate flips side / bumps ply only on the duck half-move; king-safety is
+  disabled (`KingSafetyFilter` + `validate_move` short-circuit), so the
+  win is by king *capture* (`GameStatus::Win`, detected in `status()`)
+  and the king may castle through "check". `Board::duck_moves` generates
+  placements; `validate_duck_move` gates legality. Frontend: the
+  `GameStatus` banner handles `Win`; the duck sprite / placement UI is
+  deferred (engine scope).
 - **Plan 12 — Block square**: payload-free, semantics-free impassable
   tile (`T=BLOCK`). `is_walkable()` returns `false`; FEN round-trips;
   frontend brush + brick-pattern SVG + `.type-block` CSS shipped.
@@ -110,25 +123,20 @@ plan you want to act on.
 
 In rough priority order:
 
-1. **Test strategy** — 340+ tests now (328 lib + perft + property +
+1. **Test strategy** — 340+ tests now (333 lib + perft + property +
    integration + doctests), but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-2. **Duck Chess + variant infrastructure** — first true rule-variant,
-   plus the per-position `variants` flag future variants hook into.
-   The movement stack (plan 10) is shipped, so the chokepoint
-   conditionals it adds can land directly as modifiers.
-   → [11-duck-chess.md](11-duck-chess.md)
-3. **Trains v2** — the deferred items from plan 09 (collision-hook
+2. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
 Plan **07** (test coverage) can proceed now (plans **04**, **05**, **06**,
-**10** shipped). With the movement stack landed, **Plan 11** (Duck Chess
-+ variant infra) is the natural next structural piece — its chokepoint
-conditionals land directly as modifiers. Trains v2 (plan 09's deferred
-items) is the other follow-up, composing as train modifiers in the stack.
+**10**, **11** shipped). **Trains v2** (plan 09's deferred items) is the
+main remaining structural follow-up, composing as train modifiers in the
+stack. Plan 13's commit 5 (tornado frontend) and the Duck Chess frontend
+(duck sprite + placement UI) are the deferred presentation-layer pieces.
 
 ## Open questions
 
