@@ -37,7 +37,12 @@ impl King {
         if from.file != 4 || from.rank != back_rank {
             return moves;
         }
-        if board.is_in_check(self.color) {
+        // Plan 11 (Duck Chess): no check exists, so the king may castle
+        // out of, through, and into "attacked" squares. Gate both the
+        // in-check guard here and the path-attacked checks below on the
+        // variant being off. The duck still blocks the path (see `empty`).
+        let duck_chess = board.flags.has_variant(crate::board::VariantId::DuckChess);
+        if !duck_chess && board.is_in_check(self.color) {
             return moves;
         }
         let opp = self.color.opposite();
@@ -86,7 +91,9 @@ impl King {
         let empty = |board: &Board, sq: &Coord| -> bool {
             matches!(
                 board.get_square_at(sq),
-                Some(s) if s.piece.is_none() && s.square_type.is_walkable()
+                // Plan 11: the duck blocks the castle path too — a duck
+                // square is not empty for the king's/rook's traversal.
+                Some(s) if s.piece.is_none() && s.square_type.is_walkable() && !s.duck
             )
         };
 
@@ -108,8 +115,8 @@ impl King {
             if empty(board, &p5)
                 && empty(board, &p6)
                 && rook_is_friendly(board, &p_rook)
-                && !board.is_attacked_by(&p5, opp)
-                && !board.is_attacked_by(&p6, opp)
+                && (duck_chess || !board.is_attacked_by(&p5, opp))
+                && (duck_chess || !board.is_attacked_by(&p6, opp))
             {
                 moves.push(GameMove {
                     from: from.clone(),
@@ -141,8 +148,8 @@ impl King {
                 && empty(board, &p2)
                 && empty(board, &p3)
                 && rook_is_friendly(board, &p0)
-                && !board.is_attacked_by(&p3, opp)
-                && !board.is_attacked_by(&p2, opp)
+                && (duck_chess || !board.is_attacked_by(&p3, opp))
+                && (duck_chess || !board.is_attacked_by(&p2, opp))
             {
                 moves.push(GameMove {
                     from: from.clone(),

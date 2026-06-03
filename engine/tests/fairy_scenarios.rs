@@ -4,7 +4,9 @@
 //! API only.
 
 use engine::board::square::Square;
-use engine::board::{Board, Coord, DuckPhase, GameMove, GameStatus, MoveType, VariantId};
+use engine::board::{
+    Board, CastleSide, Coord, DuckPhase, GameMove, GameStatus, MoveType, VariantId,
+};
 use engine::pieces::Color;
 use engine::pieces::piecetype::PieceType;
 
@@ -1358,5 +1360,51 @@ fn king_capture_wins_in_duck_chess() {
             winner: Color::White
         },
         "king capture wins; Duck Chess never returns Checkmate/Stalemate"
+    );
+}
+
+/// Plan 11 (Duck Chess) commit 7/7: with no check, the king may castle
+/// through an attacked square. A black bishop rakes the king's f-file
+/// traversal square; kingside castling is legal in Duck Chess but
+/// forbidden once the variant is off (the path-attacked guard returns).
+#[test]
+fn castle_through_check_in_duck_chess() {
+    let mut board = empty_board();
+    board.flags.variants = vec![VariantId::DuckChess];
+    board.flags.white_can_castle_kingside = true;
+    // White king e1 = (4,7), kingside rook h1 = (7,7).
+    board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+    board.grid[7][7] = Square::new().set_piece(PieceType::new_rook(Color::White));
+    // Black bishop at (7,5) rakes f1 = (5,7) via (6,6) — the king's
+    // kingside traversal square is under attack.
+    board.grid[5][7] = Square::new().set_piece(PieceType::new_bishop(Color::Black));
+    board.grid[0][0] = Square::new().set_piece(PieceType::new_king(Color::Black));
+
+    assert!(
+        board.is_attacked_by(&Coord { file: 5, rank: 7 }, Color::Black),
+        "precondition: the bishop attacks the king's f-file traversal square"
+    );
+
+    let castles_ks = |b: &Board| {
+        b.legal_moves(&Coord { file: 4, rank: 7 }).iter().any(|m| {
+            matches!(
+                m.move_type,
+                MoveType::Castle {
+                    side: CastleSide::Kingside
+                }
+            )
+        })
+    };
+
+    assert!(
+        castles_ks(&board),
+        "Duck Chess: the king may castle through the attacked square"
+    );
+
+    // Contrast: with the variant off, the same position forbids it.
+    board.flags.variants = vec![];
+    assert!(
+        !castles_ks(&board),
+        "standard chess forbids castling through an attacked square"
     );
 }
