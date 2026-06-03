@@ -197,9 +197,12 @@ async fn get_status_handler(Json(req): Json<GetStatusRequest>) -> Response {
 // Online multiplayer handlers (Phase 1: REST backbone over the game store)
 // ---------------------------------------------------------------------
 
-/// Map a `GameActionError` to an HTTP response. Move rejections reuse the
-/// same `code` / `message` / `details` shape as `/board/new_state` so a
-/// client has one error contract for both local and online play.
+/// Map a `GameActionError` to an HTTP response. Move rejections carry the
+/// `code` / `message` / `details` fields — that subset of
+/// `/board/new_state`'s `MakeMoveErrorBody`, not the full shape: the online
+/// client already holds the live `GameState`, so the `side_to_move` /
+/// `received` echoes are omitted. A client can branch on `code` for both
+/// local and online play.
 fn game_error_response(err: GameActionError) -> Response {
     match err {
         GameActionError::NotFound => (
@@ -1301,5 +1304,22 @@ mod game_tests {
             Err(GameActionError::NotFound)
         ));
         assert!(state.get(&unknown, Some(alice.id)).is_none());
+    }
+
+    #[test]
+    fn idempotent_rejoin_reflects_current_game_state() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+        state.apply_move(&id, &alice, e2e4()).unwrap(); // ply 1, Black to move
+
+        // Re-joining mid-game returns the *current* state, not the start.
+        let rejoin = state.join(&g.code, &alice).unwrap();
+        assert_eq!(rejoin.ply, 1);
+        assert_eq!(rejoin.side_to_move, Color::Black);
+        assert_eq!(rejoin.your_color, Some(Color::White));
     }
 }
