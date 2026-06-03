@@ -3,6 +3,7 @@
 //! than single-rule unit checks, and run against the engine's public
 //! API only.
 
+use engine::board::square::Square;
 use engine::board::{Board, Coord, DuckPhase, GameMove, GameStatus, MoveType, VariantId};
 use engine::pieces::Color;
 use engine::pieces::piecetype::PieceType;
@@ -1209,5 +1210,122 @@ fn duck_chess_ply_increments_only_on_duck_move() {
     assert_eq!(
         board.flags.ply_count, 1,
         "the duck half-move bumps ply once per turn"
+    );
+}
+
+/// Plan 11 (Duck Chess) commit 5/7: the duck is a hard blocker — a glider
+/// can't land on it and can't slide through it. A rook below a duck on the
+/// same file reaches the empty square before the duck but nothing at or
+/// beyond it; removing the duck restores the full ray (incl. the capture).
+#[test]
+fn duck_blocks_glider_path() {
+    let mut board = empty_board();
+    board.grid[7][0] = Square::new().set_piece(PieceType::new_rook(Color::White));
+    board.grid[5][0] = Square::new().set_duck(true);
+    board.grid[3][0] = Square::new().set_piece(PieceType::new_knight(Color::Black));
+
+    let reaches = |b: &Board, f: u8, r: u8| {
+        b.get_moves(&Coord { file: 0, rank: 7 })
+            .iter()
+            .any(|m| m.move_type == MoveType::MoveTo(Coord { file: f, rank: r }))
+    };
+
+    assert!(reaches(&board, 0, 6), "reaches the empty square before the duck");
+    assert!(!reaches(&board, 0, 5), "cannot land on the duck");
+    assert!(!reaches(&board, 0, 4), "cannot slide through the duck");
+    assert!(!reaches(&board, 0, 3), "cannot reach the enemy beyond the duck");
+
+    // Remove the duck — the ray now slides through to the capture.
+    board.grid[5][0].duck = false;
+    assert!(reaches(&board, 0, 5), "duck gone: (0,5) reachable");
+    assert!(reaches(&board, 0, 4), "duck gone: (0,4) reachable");
+    assert!(reaches(&board, 0, 3), "duck gone: enemy capture at (0,3) reachable");
+}
+
+/// Plan 11 commit 5/7: Duck Chess has no check, so king-safety is skipped
+/// — a king may legally step into an attacked square.
+#[test]
+fn king_walks_into_attack_in_duck_chess() {
+    let mut board = empty_board();
+    board.flags.variants = vec![VariantId::DuckChess];
+    // White king at (4,7); black rook at (0,6) rakes the whole of rank 6.
+    board.grid[7][4] = Square::new().set_piece(PieceType::new_king(Color::White));
+    board.grid[6][0] = Square::new().set_piece(PieceType::new_rook(Color::Black));
+
+    let moves = board.legal_moves(&Coord { file: 4, rank: 7 });
+    assert!(
+        moves
+            .iter()
+            .any(|m| m.move_type == MoveType::MoveTo(Coord { file: 4, rank: 6 })),
+        "a king may move into 'check' in Duck Chess; got {moves:?}"
+    );
+}
+
+/// Plan 11 commit 5/7: during the duck-placement phase pieces are immobile
+/// and only duck moves are legal. The first turn's duck moves are all
+/// `PlaceDuck` (no duck yet); placing onto a piece is rejected; placing
+/// onto an empty square ends the turn. Once a duck exists, subsequent duck
+/// moves are `MoveDuck` from the duck's square.
+#[test]
+fn duck_placement_legality_after_first_piece_move() {
+    let mut board = duck_chess_board();
+
+    // White's piece half-move → duck-placement phase.
+    board.make_move(mv((4, 4), (4, 3))).expect("piece move");
+    assert_eq!(board.flags.duck_phase, DuckPhase::DuckPlacement);
+
+    // Pieces are now immobile — the rook (now at (4,3)) has no moves.
+    assert!(
+        board.legal_moves(&Coord { file: 4, rank: 3 }).is_empty(),
+        "no piece may move during the duck-placement phase"
+    );
+
+    // First turn: no duck yet, so every duck move is a PlaceDuck.
+    let duck_moves = board.duck_moves();
+    assert!(!duck_moves.is_empty(), "there are empty squares to place on");
+    assert!(
+        duck_moves
+            .iter()
+            .all(|m| matches!(m.move_type, MoveType::PlaceDuck { .. })),
+        "first turn: all duck moves are PlaceDuck"
+    );
+
+    // Placing onto an occupied square (the white king at (0,7)) is illegal.
+    assert!(
+        board
+            .make_move(GameMove {
+                from: Coord { file: 0, rank: 0 },
+                move_type: MoveType::PlaceDuck {
+                    to: Coord { file: 0, rank: 7 },
+                },
+            })
+            .is_err(),
+        "cannot place the duck on a piece"
+    );
+
+    // Placing onto an empty square is legal and completes the turn.
+    board
+        .make_move(GameMove {
+            from: Coord { file: 2, rank: 2 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 2, rank: 2 },
+            },
+        })
+        .expect("place the duck on an empty square");
+    assert_eq!(board.flags.side_to_move, Color::Black, "turn passes to Black");
+    assert_eq!(board.flags.duck_phase, DuckPhase::PieceMove);
+    assert!(board.grid[2][2].duck, "duck landed at (2,2)");
+
+    // Black's piece move → duck phase again; now a duck exists, so the
+    // duck moves are MoveDuck originating from the duck's square.
+    board.make_move(mv((7, 0), (7, 1))).expect("black king move");
+    assert_eq!(board.flags.duck_phase, DuckPhase::DuckPlacement);
+    let duck_moves = board.duck_moves();
+    assert!(
+        duck_moves
+            .iter()
+            .all(|m| matches!(m.move_type, MoveType::MoveDuck { .. })
+                && m.from == Coord { file: 2, rank: 2 }),
+        "with a duck on the board, relocations are MoveDuck from its square"
     );
 }

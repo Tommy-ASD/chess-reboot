@@ -569,7 +569,23 @@ impl Board {
     /// - Train-threat modifiers and (future) king-safety filter sit
     ///   on the threat side and don't touch this path.
     pub fn get_moves(&self, from: &Coord) -> Vec<GameMove> {
+        // Plan 11 (Duck Chess): during the duck-placement half-turn no
+        // piece may move — the only legal moves are duck moves (see
+        // `duck_moves`), which aren't anchored to a source square. Return
+        // an empty piece-move set for every square in that phase.
+        if self.duck_phase_suppresses_piece_moves() {
+            return Vec::new();
+        }
         crate::movement::stack::default_stack().resolve_moves(self, from)
+    }
+
+    /// Plan 11: true when Duck Chess is active *and* it's the duck-
+    /// placement half of the turn — pieces can't move, only the duck.
+    /// Gates the per-square piece-move generators; duck moves come from
+    /// `duck_moves` instead.
+    fn duck_phase_suppresses_piece_moves(&self) -> bool {
+        self.flags.has_variant(VariantId::DuckChess)
+            && self.flags.duck_phase == DuckPhase::DuckPlacement
     }
 
     /// Takes a from and to coordinate and returns true if the move is valid.
@@ -615,6 +631,17 @@ impl Board {
     /// 4. Move is in the piece's raw move set (`get_moves`).
     /// 5. Applying the move doesn't leave the mover's own king in check.
     pub fn validate_move(&self, game_move: &GameMove) -> Result<(), MoveError> {
+        // Plan 11 (Duck Chess): duck half-moves have no source piece, so
+        // they bypass the piece-centric checks below and validate on their
+        // own terms (Duck Chess active, duck-placement phase, empty and
+        // unblocked destination, correct place-vs-move variant).
+        if matches!(
+            game_move.move_type,
+            MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. }
+        ) {
+            return self.validate_duck_move(game_move);
+        }
+
         let Some(square) = self.get_square_at(&game_move.from) else {
             return Err(MoveError::NoSourceSquare {
                 from: game_move.from.clone(),
@@ -673,7 +700,12 @@ impl Board {
                 // circuits to false and we'd never catch a passenger
                 // exiting into a square that leaves their own king
                 // in check.
-                if hypothetical.is_in_check(effective_color) {
+                // Plan 11 (Duck Chess): no concept of check — a king may
+                // move into attack and pinned pieces move freely. Skip the
+                // king-safety rejection entirely when the variant is on.
+                if !self.flags.has_variant(VariantId::DuckChess)
+                    && hypothetical.is_in_check(effective_color)
+                {
                     return Err(MoveError::WouldLeaveKingInCheck {
                         from: game_move.from.clone(),
                         piece_symbol,
@@ -791,7 +823,98 @@ impl Board {
     /// guarantee as the legacy inline filter; Duck Chess (plan 11)
     /// will opt out by reading the variant flag inside the modifier.
     pub fn legal_moves(&self, from: &Coord) -> Vec<GameMove> {
+        // Plan 11: see `get_moves` — pieces are immobile during the duck
+        // placement phase; the duck's own moves come from `duck_moves`.
+        if self.duck_phase_suppresses_piece_moves() {
+            return Vec::new();
+        }
         crate::movement::stack::default_stack().resolve_legal_moves(self, from)
+    }
+
+    /// Plan 11 (Duck Chess): the legal duck half-moves for the side to
+    /// move. Empty unless Duck Chess is active and it's the duck-placement
+    /// phase. The duck goes on any empty, walkable, duck-free square; the
+    /// first placement of the game (no duck on the board yet) is a
+    /// `PlaceDuck`, every relocation afterwards a `MoveDuck` from the
+    /// duck's current square. `PlaceDuck`'s wrapping `from` is cosmetic
+    /// (set to the destination) — there's no square to lift the duck from.
+    pub fn duck_moves(&self) -> Vec<GameMove> {
+        if !self.duck_phase_suppresses_piece_moves() {
+            return Vec::new();
+        }
+        let existing = self.find_duck();
+        let mut moves = Vec::new();
+        for rank in 0..self.height() {
+            for file in 0..self.width() {
+                let to = Coord { file, rank };
+                if !self.square_is_empty(&to) {
+                    continue;
+                }
+                let (from, move_type) = match &existing {
+                    Some(duck) => (duck.clone(), MoveType::MoveDuck { to: to.clone() }),
+                    None => (to.clone(), MoveType::PlaceDuck { to: to.clone() }),
+                };
+                moves.push(GameMove { from, move_type });
+            }
+        }
+        moves
+    }
+
+    /// Plan 11: the duck's current square, or `None` before its first
+    /// placement. O(board); the duck is a singleton so the first hit wins.
+    pub fn find_duck(&self) -> Option<Coord> {
+        for (rank, row) in self.grid.iter().enumerate() {
+            for (file, sq) in row.iter().enumerate() {
+                if sq.duck {
+                    return Some(Coord {
+                        file: file as u8,
+                        rank: rank as u8,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    /// Plan 11: validate a `PlaceDuck` / `MoveDuck`. Legal only in Duck
+    /// Chess during the duck-placement phase, onto an empty + walkable +
+    /// duck-free square, with the right variant for the board state:
+    /// `PlaceDuck` only before the duck exists, `MoveDuck` only from the
+    /// duck's current square (its `from` must match). Rejections reuse
+    /// `PieceCannotMakeMove` — the duck has no piece symbol, reported as
+    /// "DUCK" — and list the legal duck moves as alternatives.
+    fn validate_duck_move(&self, game_move: &GameMove) -> Result<(), MoveError> {
+        let reject = || MoveError::PieceCannotMakeMove {
+            from: game_move.from.clone(),
+            piece_symbol: "DUCK".to_string(),
+            piece_color: self.flags.side_to_move,
+            attempted: game_move.move_type.clone(),
+            candidate_alternatives: self
+                .duck_moves()
+                .into_iter()
+                .map(|m| m.move_type)
+                .collect(),
+        };
+
+        if !self.duck_phase_suppresses_piece_moves() {
+            // Not Duck Chess, or it's the piece-move half — no duck move
+            // is legal right now.
+            return Err(reject());
+        }
+        let to = match &game_move.move_type {
+            MoveType::PlaceDuck { to } | MoveType::MoveDuck { to } => to,
+            _ => return Err(reject()),
+        };
+        if !self.square_is_empty(to) {
+            return Err(reject());
+        }
+        match (&game_move.move_type, self.find_duck()) {
+            // First placement: legal only while no duck is on the board.
+            (MoveType::PlaceDuck { .. }, None) => Ok(()),
+            // Relocation: legal only from the duck's current square.
+            (MoveType::MoveDuck { .. }, Some(duck)) if duck == game_move.from => Ok(()),
+            _ => Err(reject()),
+        }
     }
 
     /// Overall status from the perspective of `side_to_move`. When the

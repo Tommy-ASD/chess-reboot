@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 
 pub mod capture;
+pub mod duck;
 pub mod king_safety;
 pub mod piece_attacks;
 pub mod piece_moves;
@@ -485,6 +486,9 @@ fn build_default_stack() -> MovementStack {
     s.register(Box::new(square_filters::SquareConditionFilter));
     s.register(Box::new(square_filters::WalkabilityFilter));
     s.register(Box::new(square_filters::SwitchTileAugment));
+    // Plan 11: the duck blocks any piece from landing on its square
+    // (priority 125, below the 299 cap so it runs in both resolve paths).
+    s.register(Box::new(duck::DuckBlockerFilter));
     // Steps 6-7: train geometry (head crush + cart-capture filter +
     // two-train collision filter).
     s.register(Box::new(train_modifiers::TrainHeadCrushModifier));

@@ -46,15 +46,13 @@ impl MovementModifier for KingSafetyFilter {
             return MovementEffect::Keep;
         };
 
-        // Plan 11 (Duck Chess) hook. When `BoardFlags.variants`
-        // contains `VariantId::DuckChess`, king-safety is disabled
-        // entirely (Duck Chess has no concept of check). The
-        // variants infrastructure isn't shipped yet; once it lands,
-        // replace this TODO with:
-        //   if board.flags.has_variant(VariantId::DuckChess) {
-        //       return MovementEffect::Keep;
-        //   }
-        // For now this is a no-op.
+        // Plan 11 (Duck Chess): king-safety is disabled entirely — the
+        // variant has no concept of check, so kings may move into attack,
+        // pinned pieces move freely, and the win is by king *capture*
+        // (handled in `make_move` / `status`), not checkmate.
+        if board.flags.has_variant(crate::board::VariantId::DuckChess) {
+            return MovementEffect::Keep;
+        }
 
         let Some(source_piece) = board.get_square_at(mover).and_then(|s| s.piece.as_ref())
         else {

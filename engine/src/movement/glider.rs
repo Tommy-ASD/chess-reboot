@@ -65,6 +65,14 @@ pub fn generate_glider_moves(
                 break;
             }
 
+            // Plan 11 (Duck Chess): the duck blocks gliders like
+            // impassable terrain — no piece may land on it (it can't be
+            // captured) and none may slide through it. Stop the ray here
+            // without emitting a move onto the duck's square.
+            if sq.map(|s| s.duck).unwrap_or(false) {
+                break;
+            }
+
             moves.push(GameMove {
                 from: from.clone(),
                 move_type: MoveType::MoveTo(coord.clone()),
