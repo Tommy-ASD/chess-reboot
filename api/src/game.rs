@@ -318,8 +318,12 @@ impl AppState {
             fen,
             side_to_move,
             history: Vec::new(),
+            // A starting position that is already terminal (a checkmate /
+            // stalemate FEN) opens already-finished — same `result` mapping
+            // as a move that ends the game, so the lobby/join/move guards
+            // treat it consistently.
+            result: result_from_status(&status),
             status,
-            result: None,
         };
         let snap = game.snapshot(Some(host.id));
         store.codes.insert(code, id);

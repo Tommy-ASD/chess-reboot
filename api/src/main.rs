@@ -1139,4 +1139,167 @@ mod game_tests {
         assert_eq!(state.apply_move(&id, &bob, mv(4, 1, 4, 3)).unwrap().ply, 2); // e7-e5
         assert_eq!(state.apply_move(&id, &alice, mv(6, 7, 5, 5)).unwrap().ply, 3); // Ng1-f3
     }
+
+    #[test]
+    fn black_to_move_fen_enforces_the_right_turn() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob"); // Black, to move first
+        // A Black-to-move position (Black can play Ka8-a7).
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("k7/8/8/8/8/1Q6/8/K7 b - -".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        state.join(&g.code, &bob).unwrap();
+        let id = g.id.to_string();
+        assert_eq!(g.side_to_move, Color::Black);
+        assert_eq!(g.your_color, Some(Color::White), "the creator is White");
+
+        // White can't move — it's Black's turn (the colour check fires first).
+        let wk = GameMove {
+            from: Coord { file: 0, rank: 7 },
+            move_type: MoveType::MoveTo(Coord { file: 1, rank: 7 }),
+        };
+        assert!(matches!(
+            state.apply_move(&id, &alice, wk),
+            Err(GameActionError::NotYourTurn)
+        ));
+        // Black moves Ka8-a7 → the turn passes to White.
+        let bk = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 0, rank: 1 }),
+        };
+        assert_eq!(
+            state.apply_move(&id, &bob, bk).unwrap().side_to_move,
+            Color::White
+        );
+    }
+
+    #[test]
+    fn black_creator_can_move_before_white_joins() {
+        let state = AppState::new();
+        let alice = player("Alice"); // Black creator, to move first
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("k7/8/8/8/8/1Q6/8/K7 b - -".to_string()),
+                    color: Some(Color::Black),
+                },
+            )
+            .unwrap();
+        assert_eq!(g.your_color, Some(Color::Black));
+        let bk = GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::MoveTo(Coord { file: 0, rank: 1 }),
+        };
+        let after = state.apply_move(&g.id.to_string(), &alice, bk).unwrap();
+        assert_eq!(after.side_to_move, Color::White);
+        assert_eq!(after.ply, 1);
+    }
+
+    #[test]
+    fn checkmate_by_move_sets_a_decisive_result() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White, delivers a back-rank mate
+        let bob = player("Bob");
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("6k1/5ppp/8/8/8/8/8/4R1K1 w - -".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        state.join(&g.code, &bob).unwrap();
+        // Re1-e8#.
+        let re8 = GameMove {
+            from: Coord { file: 4, rank: 7 },
+            move_type: MoveType::MoveTo(Coord { file: 4, rank: 0 }),
+        };
+        let after = state.apply_move(&g.id.to_string(), &alice, re8).unwrap();
+        assert!(
+            matches!(after.status, GameStatus::Checkmate { winner: Color::White }),
+            "expected checkmate, got {:?}",
+            after.status
+        );
+        assert_eq!(
+            after.result,
+            Some(GameResult::Decisive {
+                winner: Color::White
+            })
+        );
+        assert!(state.list_public().is_empty(), "a decided game leaves the lobby");
+    }
+
+    #[test]
+    fn terminal_starting_fen_opens_already_finished() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        // A FEN that is already checkmate (Black mated, White won).
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("k1R5/8/1K6/8/8/8/8/8 b - -".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            g.result,
+            Some(GameResult::Decisive {
+                winner: Color::White
+            }),
+            "a mated starting position opens finished"
+        );
+        assert!(state.list_public().is_empty(), "a finished game is never listed");
+        assert!(matches!(
+            state.join(&g.code, &bob),
+            Err(GameActionError::Over)
+        ));
+    }
+
+    #[test]
+    fn lobby_broadcasts_on_game_events() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let mut rx = state.subscribe_lobby();
+        let g = state.create(&alice, req(true)).unwrap();
+        assert!(rx.try_recv().is_ok(), "creating a game pings the lobby");
+        state.join(&g.code, &bob).unwrap();
+        assert!(rx.try_recv().is_ok(), "joining a game pings the lobby");
+    }
+
+    #[test]
+    fn actions_on_an_unknown_game_are_not_found() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let unknown = Uuid::new_v4().to_string();
+        assert!(matches!(
+            state.apply_move(&unknown, &alice, e2e4()),
+            Err(GameActionError::NotFound)
+        ));
+        assert!(matches!(
+            state.resign(&unknown, &alice),
+            Err(GameActionError::NotFound)
+        ));
+        assert!(state.get(&unknown, Some(alice.id)).is_none());
+    }
 }
