@@ -9,7 +9,11 @@ import { getBusPassengers, parseFEN, parseFENFlags, pieceToImage, pieceToSymbol 
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
 import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
-import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove, type GameStatus } from "./variables";
+import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Color, type Coord, type GameMove, type GameStatus } from "./variables";
+import { API_BASE } from "./config";
+import * as online from "./online";
+import type { CreateGameRequest, GameResult, GameState, Subscription } from "./online";
+import { getName, setName } from "./player";
 
 
 
@@ -135,6 +139,12 @@ async function handleSquareClick(rank: number, file: number) {
   // Any square click dismisses a pending promotion picker.
   hidePromotionPicker();
 
+  // Online mode: the board is view-only unless it's the player's turn
+  // (also blocks interaction while spectating or after game over). During
+  // the player's own Duck-Chess placement half-turn `side_to_move` stays
+  // on their colour, so the placement branch below still passes this gate.
+  if (onlineSession && !isMyTurnOnline()) return;
+
   // Plan 11 (Duck Chess) placement half-turn: clicking an empty square
   // places (first turn) or moves the duck. Piece selection is disabled —
   // pieces can't move this half, and the engine returns no piece moves.
@@ -197,7 +207,7 @@ async function handleSquareClick(rank: number, file: number) {
   squareEls[rank * cols + file]?.classList.add("selected");
 
   try {
-    const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+    const fen = currentFen();
     setAllowedMoves((await fetchMoves(fen, rank, file)));
 
     console.log("Legal moves:", allowedMoves);
@@ -242,13 +252,8 @@ function findMoveForTarget(clicked: Coord, moves: GameMove[], passengerIdx: numb
 /// `makeSpecialMove`, which posts the `GameMove` as-is.
 async function executeMove(move: GameMove) {
   try {
-    const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    const result =
-      move.move_type.kind === "MoveTo"
-        ? await makeMove(fen, move.from, move.move_type.target)
-        : await makeSpecialMove(fen, move);
+    const result = await submitMove(move);
     console.log("New FEN:", result.newFen);
-    (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
     // Clear the prior selection BEFORE re-rendering: `clearSelection`
     // strips `.highlight` from squares, so running it after `renderBoard`
     // would wipe the duck-placement highlights that `renderBoard` adds
@@ -256,9 +261,32 @@ async function executeMove(move: GameMove) {
     clearSelection();
     renderBoard(result.newFen);
     renderStatus(result.status);
+    if (onlineSession) renderGamePanel();
   } catch (err) {
     showError(err);
   }
+}
+
+/// The single move sink. Online: POST to the game (the server enforces
+/// turn/colour, the engine validates legality) and adopt the returned
+/// snapshot. Local: the original stateless `/board/new_state` dispatch
+/// (`MoveTo` → `makeMove`, everything else → `makeSpecialMove`). Either
+/// way `#fen-input` is updated so the FEN-reading helpers — and a later
+/// switch back to Local mode — see the current position.
+async function submitMove(move: GameMove): Promise<MoveResult> {
+  if (onlineSession) {
+    const state = await online.submitMove(onlineSession.gameId, move);
+    onlineSession.state = state;
+    (document.getElementById("fen-input") as HTMLInputElement).value = state.fen;
+    return { newFen: state.fen, status: state.status };
+  }
+  const fen = currentFen();
+  const result =
+    move.move_type.kind === "MoveTo"
+      ? await makeMove(fen, move.from, move.move_type.target)
+      : await makeSpecialMove(fen, move);
+  (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
+  return result;
 }
 
 /// Show the promotion picker for the four `Promotion` moves that share a
@@ -311,7 +339,7 @@ function hidePromotionPicker() {
 /// Plan 11: is the current position a Duck Chess duck-placement half-turn?
 /// Read straight off the FEN flags (variants + duck_phase).
 function duckPlacementActive(): boolean {
-  const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+  const fen = currentFen();
   const flags = parseFENFlags(fen);
   return flags.variants.includes("duck_chess") && flags.duckPhase === "placing";
 }
@@ -406,18 +434,9 @@ function renderSpecialActions(moves: GameMove[]) {
         break;
     }
 
-    li.onclick = async () => {
-      const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-      try {
-        const result = await makeSpecialMove(fen, m);
-        (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
-        renderBoard(result.newFen);
-        renderStatus(result.status);
-        clearSelection();
-      } catch (err) {
-        showError(err);
-      }
-    };
+    // Route through the shared sink so online games POST to the server
+    // (turn already gated) and local play keeps the stateless dispatch.
+    li.onclick = () => executeMove(m);
 
     list.appendChild(li);
   }
@@ -585,7 +604,7 @@ function describeStatus(
 
 /// Calls the backend API to get legal moves for a piece at (file, rank) on the board described by fen
 async function fetchMoves(fen: string, rank: number, file: number): Promise<GameMove[]> {
-  const response = await fetch("http://localhost:8080/board/moves", {
+  const response = await fetch(`${API_BASE}/board/moves`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -607,7 +626,7 @@ async function fetchMoves(fen: string, rank: number, file: number): Promise<Game
 /// without first requiring a move. (Live-edit previews skip this to avoid
 /// a request per keystroke.)
 async function fetchStatus(fen: string): Promise<GameStatus> {
-  const response = await fetch("http://localhost:8080/board/status", {
+  const response = await fetch(`${API_BASE}/board/status`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ board_fen: fen }),
@@ -626,7 +645,7 @@ async function fetchStatus(fen: string): Promise<GameStatus> {
 type MoveResult = { newFen: string; status: GameStatus };
 
 async function makeSpecialMove(fen: string, move: GameMove): Promise<MoveResult> {
-  const response = await fetch("http://localhost:8080/board/new_state", {
+  const response = await fetch(`${API_BASE}/board/new_state`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -665,7 +684,7 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<MoveResult
     })
   };
   console.log("Making move with body:", body);
-  const response = await fetch("http://localhost:8080/board/new_state", body);
+  const response = await fetch(`${API_BASE}/board/new_state`, body);
   console.log("Response:", response);
 
   if (!response.ok) {
@@ -677,6 +696,272 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<MoveResult
   return { newFen: data.new_board_fen, status: data.status };
 }
 
+
+// ---------------------------
+// Online multiplayer (lobby + live game)
+// ---------------------------
+
+/// Canonical Duck-Chess starting position (standard set + the variant
+/// flag; `duck_phase` defaults to "piece" — a piece moves first, then the
+/// duck is placed). Matches the engine's canonical FEN encoding.
+const DUCK_CHESS_FEN =
+  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - tr=full p=0 variants=duck_chess";
+
+/// The active online game (null in Local mode / the lobby). `myColor` is
+/// the seat captured from the create/join REST response — WS pushes carry
+/// `your_color: null`, so colour is never read off the live `state`.
+type OnlineSession = {
+  gameId: string;
+  code: string;
+  myColor: Color | null;
+  state: GameState;
+  sub: Subscription;
+};
+
+let onlineSession: OnlineSession | null = null;
+let lobbySub: Subscription | null = null;
+
+/// The FEN the board is currently showing: the online session's when
+/// seated in a game, else the local FEN input. Board helpers read this
+/// (not `#fen-input` directly) so online play drives off the server's
+/// authoritative position.
+function currentFen(): string {
+  if (onlineSession) return onlineSession.state.fen;
+  return (document.getElementById("fen-input") as HTMLInputElement).value;
+}
+
+/// Online turn gate: always true in Local mode; online, true only while
+/// seated, on-move, and the game is still live.
+function isMyTurnOnline(): boolean {
+  if (!onlineSession) return true;
+  const s = onlineSession.state;
+  if (s.result) return false;
+  return onlineSession.myColor != null && onlineSession.myColor === s.side_to_move;
+}
+
+/// Adopt a server `GameState` (initial snapshot or a WS push) as the live
+/// board: sync `#fen-input`, re-render the board + status, refresh the
+/// game panel. `myColor` is preserved (pushes carry `your_color: null`).
+function applyOnlineState(state: GameState) {
+  if (!onlineSession) return;
+  onlineSession.state = state;
+  (document.getElementById("fen-input") as HTMLInputElement).value = state.fen;
+  clearSelection();
+  renderBoard(state.fen);
+  renderStatus(state.status);
+  renderOnlineOutcome(state);
+  renderGamePanel();
+}
+
+/// The `#game-status` banner is driven by `GameStatus`, which has no
+/// variant for a resignation (the board isn't mated — the outcome lives in
+/// `result`). When a game has a `result` but `renderStatus` left the banner
+/// hidden (resignation / draw), surface the result here so game-over is
+/// unmistakable in the banner too. Board outcomes (checkmate / Win /
+/// stalemate) already showed via `renderStatus`, so leave those alone.
+function renderOnlineOutcome(state: GameState) {
+  if (!state.result) return;
+  const el = document.getElementById("game-status")!;
+  if (!el.classList.contains("hidden")) return;
+  const text =
+    state.result.kind === "Draw"
+      ? "Game over — draw"
+      : state.result.kind === "Resignation"
+        ? `${state.result.winner} wins by resignation`
+        : `${state.result.winner} wins`;
+  el.className = "game-status over";
+  el.textContent = text;
+}
+
+// --- mode + lobby ---
+
+function setMode(mode: "local" | "online") {
+  const isOnline = mode === "online";
+  document.body.classList.toggle("online", isOnline);
+  document.getElementById("online-panel")!.classList.toggle("hidden", !isOnline);
+  const tabOnline = document.getElementById("tab-online")!;
+  const tabLocal = document.getElementById("tab-local")!;
+  tabOnline.classList.toggle("active", isOnline);
+  tabLocal.classList.toggle("active", !isOnline);
+  tabOnline.setAttribute("aria-selected", String(isOnline));
+  tabLocal.setAttribute("aria-selected", String(!isOnline));
+  if (isOnline) {
+    startLobby();
+  } else {
+    stopLobby();
+    if (onlineSession) leaveOnlineGame();
+  }
+}
+
+function startLobby() {
+  refreshPublicGames();
+  if (!lobbySub) lobbySub = online.subscribeLobby(renderPublicGames);
+}
+
+function stopLobby() {
+  lobbySub?.close();
+  lobbySub = null;
+}
+
+async function refreshPublicGames() {
+  try {
+    renderPublicGames(await online.listGames());
+  } catch (err) {
+    console.error("listGames failed", err);
+  }
+}
+
+function hostName(g: GameState): string {
+  return (g.white ?? g.black)?.name || "Anonymous";
+}
+
+function describeGame(g: GameState): string {
+  const seat = g.white ? "Black seat open" : "White seat open";
+  const variant = g.fen.includes("variants=duck_chess") ? "Duck Chess" : "Chess";
+  return `${variant} · ${seat} · host ${hostName(g)}`;
+}
+
+function renderPublicGames(games: GameState[]) {
+  const list = document.getElementById("public-games")!;
+  const empty = document.getElementById("public-games-empty")!;
+  list.innerHTML = "";
+  empty.classList.toggle("hidden", games.length > 0);
+  for (const g of games) {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "game-label";
+    label.textContent = `${g.name || "Game"} — ${describeGame(g)}`;
+    const btn = document.createElement("button");
+    btn.className = "join-mini";
+    btn.textContent = "Join";
+    btn.onclick = () => joinByIdOrCode(g.id);
+    li.append(label, btn);
+    list.appendChild(li);
+  }
+}
+
+// --- create / join / leave ---
+
+function syncName() {
+  setName((document.getElementById("player-name") as HTMLInputElement).value);
+}
+
+async function createOnlineGame() {
+  syncName();
+  const preset = (document.getElementById("create-preset") as HTMLSelectElement).value;
+  const color = (document.getElementById("create-color") as HTMLSelectElement).value as Color;
+  const name = (document.getElementById("create-name") as HTMLInputElement).value.trim();
+  const isPublic = (document.getElementById("create-public") as HTMLInputElement).checked;
+  const req: CreateGameRequest = { public: isPublic, color };
+  if (name) req.name = name;
+  if (preset === "duck") req.starting_fen = DUCK_CHESS_FEN;
+  try {
+    enterOnlineGame(await online.createGame(req));
+  } catch (err) {
+    showError(err);
+  }
+}
+
+async function joinByIdOrCode(idOrCode: string) {
+  const key = idOrCode.trim();
+  if (!key) return;
+  syncName();
+  try {
+    enterOnlineGame(await online.joinGame(key));
+  } catch (err) {
+    showError(err);
+  }
+}
+
+function enterOnlineGame(state: GameState) {
+  onlineSession?.sub.close();
+  const sub = online.subscribeGame(state.id, applyOnlineState);
+  onlineSession = {
+    gameId: state.id,
+    code: state.code,
+    myColor: state.your_color,
+    state,
+    sub,
+  };
+  setGameUrlParam(state.id);
+  showGameView(true);
+  applyOnlineState(state);
+}
+
+function leaveOnlineGame() {
+  onlineSession?.sub.close();
+  onlineSession = null;
+  clearGameUrlParam();
+  showGameView(false);
+  refreshPublicGames();
+}
+
+function showGameView(inGame: boolean) {
+  document.getElementById("online-lobby")!.classList.toggle("hidden", inGame);
+  document.getElementById("online-game")!.classList.toggle("hidden", !inGame);
+}
+
+// --- live game panel ---
+
+function resultWinner(r: GameResult): Color | null {
+  return r.kind === "Draw" ? null : r.winner;
+}
+
+function turnPillText(s: GameState): string {
+  if (s.result) {
+    return s.result.kind === "Draw" ? "Draw" : `${s.result.winner} wins`;
+  }
+  if (!onlineSession?.myColor) return `${s.side_to_move} to move`;
+  return isMyTurnOnline() ? "Your move" : "Opponent's move";
+}
+
+function updateChip(id: string, color: Color, name: string | null, s: GameState) {
+  const chip = document.getElementById(id)!;
+  chip.querySelector(".chip-name")!.textContent = name ?? "waiting…";
+  chip.classList.toggle("active", !s.result && s.side_to_move === color);
+  chip.classList.toggle("winner", Boolean(s.result && resultWinner(s.result) === color));
+}
+
+function renderGamePanel() {
+  if (!onlineSession) return;
+  const s = onlineSession.state;
+  updateChip("chip-white", "White", s.white?.name ?? null, s);
+  updateChip("chip-black", "Black", s.black?.name ?? null, s);
+  const pill = document.getElementById("turn-pill")!;
+  pill.textContent = turnPillText(s);
+  pill.className =
+    "turn-pill" + (s.result ? " over" : isMyTurnOnline() ? " mine" : " theirs");
+  document.getElementById("share-line")!.textContent =
+    `Code ${s.code}` + (onlineSession.myColor ? ` · you are ${onlineSession.myColor}` : "");
+  const resignBtn = document.getElementById("resign-btn") as HTMLButtonElement;
+  resignBtn.disabled = Boolean(s.result) || onlineSession.myColor == null;
+}
+
+function flashCopied() {
+  const btn = document.getElementById("copy-link-btn")!;
+  const prev = btn.textContent;
+  btn.textContent = "Copied!";
+  setTimeout(() => (btn.textContent = prev), 1200);
+}
+
+// --- share URL ---
+
+function gameShareUrl(id: string): string {
+  const u = new URL(window.location.href);
+  u.searchParams.set("game", id);
+  return u.toString();
+}
+
+function setGameUrlParam(id: string) {
+  window.history.replaceState({}, "", gameShareUrl(id));
+}
+
+function clearGameUrlParam() {
+  const u = new URL(window.location.href);
+  u.searchParams.delete("game");
+  u.searchParams.delete("code");
+  window.history.replaceState({}, "", u.toString());
+}
 
 // ---------------------------
 // UI Wiring
@@ -756,3 +1041,48 @@ if (editorLink) {
 const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
 (document.getElementById("fen-input") as HTMLInputElement).value = DEFAULT_FEN;
 renderBoard(DEFAULT_FEN);
+
+
+// ---------------------------
+// Online UI wiring
+// ---------------------------
+
+(document.getElementById("player-name") as HTMLInputElement).value = getName();
+document.getElementById("player-name")!.addEventListener("change", syncName);
+document.getElementById("tab-local")!.addEventListener("click", () => setMode("local"));
+document.getElementById("tab-online")!.addEventListener("click", () => setMode("online"));
+document.getElementById("create-btn")!.addEventListener("click", () => createOnlineGame());
+document.getElementById("join-btn")!.addEventListener("click", () =>
+  joinByIdOrCode((document.getElementById("join-code") as HTMLInputElement).value),
+);
+document.getElementById("resign-btn")!.addEventListener("click", async () => {
+  if (!onlineSession || !confirm("Resign this game?")) return;
+  try {
+    applyOnlineState(await online.resignGame(onlineSession.gameId));
+  } catch (err) {
+    showError(err);
+  }
+});
+document.getElementById("leave-btn")!.addEventListener("click", () => leaveOnlineGame());
+document.getElementById("copy-link-btn")!.addEventListener("click", async () => {
+  if (!onlineSession) return;
+  const url = gameShareUrl(onlineSession.gameId);
+  try {
+    await navigator.clipboard.writeText(url);
+    flashCopied();
+  } catch {
+    window.prompt("Copy this link:", url);
+  }
+});
+
+// Deep link: `?game=<id>` (or `?code=<code>`) auto-opens Online mode and
+// joins, so a shared link / reload lands straight back in the game.
+{
+  const target =
+    new URLSearchParams(window.location.search).get("game") ??
+    new URLSearchParams(window.location.search).get("code");
+  if (target) {
+    setMode("online");
+    joinByIdOrCode(target);
+  }
+}

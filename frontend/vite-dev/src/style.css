@@ -1442,3 +1442,353 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* ================================================== */
+/* Online multiplayer (lobby + live game)              */
+/* ================================================== */
+
+/* Generic show/hide utility (components above predate it and ship their
+   own `.x.hidden`; this covers the online elements). */
+.hidden {
+  display: none !important;
+}
+
+/* Local | Online mode tabs in the header */
+.mode-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.mode-tab {
+  background: var(--surface-2);
+  border: none;
+  padding: 8px 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-soft);
+}
+
+.mode-tab:not(:last-child) {
+  border-right: 1px solid var(--border-strong);
+}
+
+.mode-tab:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.mode-tab.active {
+  background: var(--primary);
+  color: white;
+}
+
+/* The panel shell */
+.online-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin: 0 0 20px 0;
+}
+
+/* Identity row */
+.online-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.online-identity label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.online-identity input {
+  max-width: 240px;
+  margin: 0;
+}
+
+/* Lobby: create / join / public list, three columns */
+.online-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.online-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.online-card h3 {
+  margin: 0 0 12px 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.field input {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+/* Selects are scoped to the online panel so the editor's own selects keep
+   their styling untouched. */
+.online-panel select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.online-panel select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-soft);
+  margin-bottom: 14px;
+  cursor: pointer;
+}
+
+.checkbox input {
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+#create-btn,
+#join-btn {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--primary);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+#create-btn:hover,
+#join-btn:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.public-games {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.public-games li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.game-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.join-mini {
+  flex: none;
+  padding: 5px 12px;
+  background: var(--primary);
+  color: white;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.join-mini:hover {
+  background: var(--primary-hover);
+}
+
+.muted-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0 0 0;
+}
+
+/* Live game panel (shown once seated) */
+#online-game {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.players-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-soft);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+
+.player-chip.active {
+  border-color: var(--primary);
+  color: var(--text);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.player-chip.winner {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.player-chip .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+.player-chip .dot.white {
+  background: #f3ead6;
+}
+
+.player-chip .dot.black {
+  background: #2d2620;
+}
+
+.turn-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--surface-3);
+  color: var(--text-soft);
+}
+
+.turn-pill.mine {
+  background: var(--primary);
+  color: white;
+}
+
+.turn-pill.theirs {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.turn-pill.over {
+  background: var(--accent);
+  color: white;
+}
+
+.game-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.share-line {
+  font-size: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, Menlo, monospace;
+  color: var(--text-muted);
+}
+
+.game-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* "Copy link" / "Back to lobby" reuse the editor's existing `.ghost-btn`
+   style (defined above) — no online-specific override, so the editor's
+   buttons stay byte-for-byte unchanged. */
+
+.danger-btn {
+  padding: 8px 16px;
+  background: #b4452e;
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.danger-btn:hover {
+  background: #9c3a26;
+}
+
+.danger-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* In Online mode the server owns the position, so hide the local FEN
+   controls; the board + actions/carrier panels stay shared. */
+body.online #left-panel {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .online-columns {
+    grid-template-columns: 1fr;
+  }
+}

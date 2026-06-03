@@ -12,9 +12,82 @@
   <header id="page-header">
     <h1>FEN Renderer</h1>
     <nav id="page-nav">
+      <!-- Local | Online mode split (plan: multiplayer). "Local" is the
+           original hotseat board; "Online" reveals the lobby + live games. -->
+      <div id="mode-tabs" class="mode-tabs" role="tablist">
+        <button id="tab-local" class="mode-tab active" role="tab" aria-selected="true">Local</button>
+        <button id="tab-online" class="mode-tab" role="tab" aria-selected="false">Online</button>
+      </div>
       <a id="open-editor-nav" href="/editor.html">Open Editor &rarr;</a>
     </nav>
   </header>
+
+  <!-- Play Online surface (hidden in Local mode). Holds the lobby
+       (identity + create/join/public list) and, once seated, the active
+       game panel (players, turn, share link, resign / leave). -->
+  <section id="online-panel" class="online-panel hidden" aria-label="Play online">
+    <div id="online-lobby">
+      <div class="online-identity">
+        <label for="player-name">Display name</label>
+        <input id="player-name" type="text" placeholder="Anonymous" maxlength="24" autocomplete="off" />
+      </div>
+
+      <div class="online-columns">
+        <div class="online-card">
+          <h3>Create game</h3>
+          <label class="field">Name
+            <input id="create-name" type="text" placeholder="optional" maxlength="40" autocomplete="off" />
+          </label>
+          <label class="field">Position
+            <select id="create-preset">
+              <option value="standard">Standard chess</option>
+              <option value="duck">Duck Chess</option>
+            </select>
+          </label>
+          <label class="field">Play as
+            <select id="create-color">
+              <option value="White">White</option>
+              <option value="Black">Black</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input id="create-public" type="checkbox" /> List in public lobby
+          </label>
+          <button id="create-btn">Create game</button>
+        </div>
+
+        <div class="online-card">
+          <h3>Join by code</h3>
+          <label class="field">
+            <input id="join-code" type="text" placeholder="e.g. A1B2C3" maxlength="12" autocomplete="off" />
+          </label>
+          <button id="join-btn">Join game</button>
+        </div>
+
+        <div class="online-card">
+          <h3>Public games</h3>
+          <ul id="public-games" class="public-games"></ul>
+          <p id="public-games-empty" class="muted-note">No open games right now — create one!</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="online-game" class="hidden">
+      <div class="players-row">
+        <span class="player-chip" id="chip-white"><span class="dot white"></span><span class="chip-name">White</span></span>
+        <span class="turn-pill" id="turn-pill">Waiting…</span>
+        <span class="player-chip" id="chip-black"><span class="dot black"></span><span class="chip-name">Black</span></span>
+      </div>
+      <div class="game-meta">
+        <span id="share-line" class="share-line"></span>
+        <button id="copy-link-btn" class="ghost-btn">Copy link</button>
+      </div>
+      <div class="game-actions">
+        <button id="resign-btn" class="danger-btn">Resign</button>
+        <button id="leave-btn" class="ghost-btn">Back to lobby</button>
+      </div>
+    </div>
+  </section>
 
   <!-- Game-status banner (plans 04/06): hidden while Ongoing; shows
        check + the terminal outcomes (checkmate / stalemate / brainrot). -->
