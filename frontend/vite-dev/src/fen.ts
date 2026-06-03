@@ -33,6 +33,13 @@ export type BoardFlags = {
   trainTickRate: TrainTickRate;
   /// Plan 09: monotonic ply counter, bumped at every successful move.
   plyCount: number;
+  /// Plan 11: active rule-variant ids (e.g. `["duck_chess"]`); empty for
+  /// standard chess. Round-tripped via the `variants=` flag token.
+  variants: string[];
+  /// Plan 11: Duck Chess half-turn phase. `"placing"` means the side to
+  /// move owes a duck placement; only meaningful when `duck_chess` is in
+  /// `variants`. Round-tripped via `duck_phase=`.
+  duckPhase: "piece" | "placing";
 };
 
 export const DEFAULT_FLAGS: BoardFlags = {
@@ -41,6 +48,8 @@ export const DEFAULT_FLAGS: BoardFlags = {
   enPassant: null,
   trainTickRate: { kind: "EveryFullTurn" },
   plyCount: 0,
+  variants: [],
+  duckPhase: "piece",
 };
 
 /// Split a full FEN ("<grid> <stm> <castling> <ep>") into its grid +
@@ -76,7 +85,18 @@ export function parseFENFlags(fen: string): BoardFlags {
   const trainTickRate = parseTrainTickRate(tr) ?? { kind: "EveryFullTurn" };
   const plyCount = parsePlyCount(p) ?? 0;
 
-  return { sideToMove, castling, enPassant, trainTickRate, plyCount };
+  // Plan 11: `variants=`/`duck_phase=` are prefix-identified (scanned
+  // across all tokens, not positional), so they compose with the optional
+  // `lm=` in any order — matching the engine parser.
+  const variantsTok = parts.find((t) => t.startsWith("variants="));
+  const variants = variantsTok
+    ? variantsTok.slice("variants=".length).split(",").filter((s) => s.length > 0)
+    : [];
+  const duckPhaseTok = parts.find((t) => t.startsWith("duck_phase="));
+  const duckPhase: "piece" | "placing" =
+    duckPhaseTok?.slice("duck_phase=".length) === "placing" ? "placing" : "piece";
+
+  return { sideToMove, castling, enPassant, trainTickRate, plyCount, variants, duckPhase };
 }
 
 function parseTrainTickRate(field: string | undefined): TrainTickRate | null {
@@ -130,7 +150,12 @@ export function serializeFullFEN(board: Square[][], flags: BoardFlags): string {
   const ep = flags.enPassant ?? "-";
   const tr = trainTickRateToFEN(flags.trainTickRate);
   const p = `p=${flags.plyCount}`;
-  return `${grid} ${stm} ${castling} ${ep} ${tr} ${p}`;
+  let out = `${grid} ${stm} ${castling} ${ep} ${tr} ${p}`;
+  // Plan 11: emit only when non-default, matching the engine encoder so
+  // standard-chess FENs stay byte-identical.
+  if (flags.variants.length > 0) out += ` variants=${flags.variants.join(",")}`;
+  if (flags.duckPhase === "placing") out += ` duck_phase=placing`;
+  return out;
 }
 
 // For pretty optional rendering
@@ -317,6 +342,7 @@ export function fenToSquare(fen: string): Square {
     let squareType: SquareType = "STANDARD";
     const conditions: string[] = [];
     const extraFields: Record<string, string> = {};
+    let duck = false;
 
     for (const field of fields) {
       const [key, value] = splitKeyValue(field);
@@ -336,6 +362,11 @@ export function fenToSquare(fen: string): Square {
 
         case "C":
           conditions.push(value);
+          break;
+
+        // Plan 11 (Duck Chess): value-less flag (no `=value`).
+        case "DUCK":
+          duck = true;
           break;
 
         default:
@@ -359,6 +390,7 @@ export function fenToSquare(fen: string): Square {
     }
 
     const sq: Square = { piece, squareType, conditions };
+    if (duck) sq.duck = true;
     if (Object.keys(extraFields).length > 0) sq.extraFields = extraFields;
     return sq;
   }
@@ -396,6 +428,7 @@ export function squareToFEN(square: Square): string {
     square.squareType === "STANDARD" &&
     square.conditions.length === 0 &&
     (!square.extraFields || Object.keys(square.extraFields).length === 0) &&
+    !square.duck &&
     square.piece !== null &&
     square.piece.length === 1;
 
@@ -418,6 +451,10 @@ export function squareToFEN(square: Square): string {
   }
 
   for (const c of square.conditions) parts.push(`C=${c}`);
+
+  // Plan 11 (Duck Chess): value-less `DUCK` flag — a duck-only square
+  // serializes to `(DUCK)`.
+  if (square.duck) parts.push("DUCK");
 
   return `(${parts.join(",")})`;
 }

@@ -66,6 +66,14 @@ function renderBoard(fen: string) {
           }
           renderCarrierPassengerOverlay(square, square_data.piece);
         }
+        // Plan 11 (Duck Chess): the duck is colourless and never shares a
+        // square with a piece, so render it as the square's glyph.
+        if (square_data.duck) {
+          const d = document.createElement("span");
+          d.className = "duck-glyph";
+          d.textContent = "\u{1F986}"; // 🦆
+          square.appendChild(d);
+        }
         if (square_data.conditions.includes("FROZEN")) {
           square.classList.add("cond-frozen");
         }

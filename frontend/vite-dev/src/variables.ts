@@ -25,6 +25,10 @@ export type Square = {
     piece: string | null;        // "P", "q", "G(W=...)" etc
     squareType: SquareType;
     conditions: string[];        // ["FROZEN", ...]
+    /// Plan 11 (Duck Chess): the colourless duck occupies this square
+    /// (mutually exclusive with `piece`). Serialized as the value-less
+    /// `DUCK` key. Omitted (falsy) on normal squares.
+    duck?: boolean;
     /// Variant-specific payload fields preserved verbatim from the FEN
     /// extended block, keyed by tag (e.g. `TARGETS`, `ID`, `STATE`,
     /// `BRANCHES`, `OPEN`, `FIRES`). The editor doesn't yet expose UI for
