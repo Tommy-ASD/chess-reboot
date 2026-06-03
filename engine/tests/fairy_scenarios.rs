@@ -1062,3 +1062,67 @@ fn phase2_brainrot_wall_wins_by_brainrot() {
          phase!=4 means the lockout does not fire, isolating is_brainrot_win condition 3"
     );
 }
+
+/// Count the ducks on the board — the single-duck invariant must hold
+/// after every duck half-move.
+fn count_ducks(board: &Board) -> usize {
+    board.grid.iter().flatten().filter(|sq| sq.duck).count()
+}
+
+/// Plan 11 (Duck Chess) commit 3/7: `PlaceDuck` applies the duck to the
+/// grid. The mover's `from` is unused for a first placement (no duck to
+/// lift), so it can point anywhere — here an empty square. Reached via
+/// `make_move_unchecked` because there's no legality gate yet (validate
+/// rejects a move with no piece at `from`, commit 5/7). Exactly one duck
+/// results, and it shares its square with no piece.
+#[test]
+fn duck_first_move_places_duck_on_grid() {
+    let mut board = empty_board();
+    board
+        .make_move_unchecked(GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 4, rank: 4 },
+            },
+        })
+        .expect("PlaceDuck applies");
+
+    assert!(board.grid[4][4].duck, "duck is on its target square");
+    assert_eq!(count_ducks(&board), 1, "exactly one duck on the board");
+    assert!(
+        board.grid[4][4].piece.is_none(),
+        "the duck square carries no piece"
+    );
+}
+
+/// Plan 11 commit 3/7: `MoveDuck` relocates the duck — the prior square is
+/// cleared and the new one set, preserving the single-duck invariant.
+/// `from` is the duck's current square (informational; `relocate_duck`
+/// sweeps any prior duck regardless of `from`).
+#[test]
+fn duck_move_clears_prior_square() {
+    let mut board = empty_board();
+    // Seed a duck at (4,4) via the first-placement move.
+    board
+        .make_move_unchecked(GameMove {
+            from: Coord { file: 0, rank: 0 },
+            move_type: MoveType::PlaceDuck {
+                to: Coord { file: 4, rank: 4 },
+            },
+        })
+        .expect("PlaceDuck applies");
+
+    // Relocate it to (file 1, rank 6) → grid[6][1].
+    board
+        .make_move_unchecked(GameMove {
+            from: Coord { file: 4, rank: 4 },
+            move_type: MoveType::MoveDuck {
+                to: Coord { file: 1, rank: 6 },
+            },
+        })
+        .expect("MoveDuck applies");
+
+    assert!(!board.grid[4][4].duck, "prior duck square is cleared");
+    assert!(board.grid[6][1].duck, "duck is on its new square");
+    assert_eq!(count_ducks(&board), 1, "still exactly one duck");
+}

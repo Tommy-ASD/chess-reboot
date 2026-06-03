@@ -182,7 +182,11 @@ fn move_destination(game_move: &GameMove) -> Option<&Coord> {
         | MoveType::ThrowSwitch { .. }
         // PlaceTornado does not relocate the placer — it can never be
         // the move that "lands on" the tornado for compulsion.
-        | MoveType::PlaceTornado { .. } => None,
+        | MoveType::PlaceTornado { .. }
+        // Plan 11: duck half-moves relocate no piece — never the move
+        // that "lands on" a tornado.
+        | MoveType::PlaceDuck { .. }
+        | MoveType::MoveDuck { .. } => None,
     }
 }
 

@@ -325,7 +325,11 @@ impl Piece for Skibidi {
             | MoveType::ThrowSwitch { .. }
             // A Skibidi never makes a PlaceTornado move (Stormcaller-
             // only) — no-op here.
-            | MoveType::PlaceTornado { .. } => {}
+            | MoveType::PlaceTornado { .. }
+            // Plan 11: a Skibidi never makes a duck move (and the duck
+            // post-hook wouldn't fire anyway — no moving piece) — no-op.
+            | MoveType::PlaceDuck { .. }
+            | MoveType::MoveDuck { .. } => {}
         }
     }
 }

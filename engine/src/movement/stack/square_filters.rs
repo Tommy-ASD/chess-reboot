@@ -94,7 +94,11 @@ impl WalkabilityFilter {
             | MoveType::ThrowSwitch { .. }
             // Plan 13: placing a tornado doesn't relocate the placer,
             // so there's no landing square to walkability-check.
-            | MoveType::PlaceTornado { .. } => None,
+            | MoveType::PlaceTornado { .. }
+            // Plan 11: duck half-moves relocate no piece — no destination
+            // to walkability-check.
+            | MoveType::PlaceDuck { .. }
+            | MoveType::MoveDuck { .. } => None,
         }
     }
 }

@@ -112,6 +112,22 @@ pub enum MoveType {
     PlaceTornado {
         target: Coord,
     },
+    /// Plan 11 (Duck Chess): place the duck on `to` — the *first* duck
+    /// half-move of a game, when the duck is still off-board. The
+    /// wrapping `GameMove.from` is unused (there's no duck to lift).
+    /// Non-relocating for pieces; only the `duck` flag changes.
+    PlaceDuck {
+        to: Coord,
+    },
+    /// Plan 11 (Duck Chess): relocate the duck to `to` — every duck
+    /// half-move after the first. `GameMove.from` is the duck's current
+    /// square. The grid effect is identical to `PlaceDuck` (the single
+    /// duck ends up on `to`); the two are distinct so later commits can
+    /// gate their legality differently (place only when off-board, move
+    /// only when on-board).
+    MoveDuck {
+        to: Coord,
+    },
 }
 
 impl std::fmt::Display for MoveType {
@@ -133,6 +149,8 @@ impl std::fmt::Display for MoveType {
             }
             MoveType::ThrowSwitch { switch } => write!(f, "throw switch at {switch}"),
             MoveType::PlaceTornado { target } => write!(f, "place tornado at {target}"),
+            MoveType::PlaceDuck { to } => write!(f, "place duck at {to}"),
+            MoveType::MoveDuck { to } => write!(f, "move duck to {to}"),
         }
     }
 }

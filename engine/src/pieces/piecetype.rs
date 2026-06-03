@@ -280,6 +280,11 @@ impl PieceType {
                     // producer. Drop defensively instead of panicking.
                     return false;
                 }
+                // Plan 11: duck half-moves aren't piece moves — the
+                // duck-phase generator (commit 5), not any piece's
+                // `initial_moves`, produces them. Drop defensively, like
+                // the MoveIntoCarrier arm above.
+                MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. } => return false,
             };
 
             let Some(target_square) = board.get_square_at(&target) else {

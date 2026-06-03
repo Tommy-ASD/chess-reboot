@@ -118,10 +118,44 @@ impl Board {
         }
     }
 
+    /// Plan 11 (Duck Chess): make `to` the sole duck square. Sweeps any
+    /// duck already on the board (the single-duck invariant — `PlaceDuck`
+    /// expects none, `MoveDuck` expects exactly one at the move's `from`;
+    /// a full sweep serves both and is robust to a stray duck), then sets
+    /// the duck on `to`. The destination is validated *before* mutating so
+    /// a bad coord can't leave the board duck-less. No walkability /
+    /// occupancy gate here — that's the legality layer (commit 5/7).
+    fn relocate_duck(&mut self, to: &Coord) -> Result<(), String> {
+        if self.get_square_at(to).is_none() {
+            return Err(format!("No square at {to:?} for duck placement"));
+        }
+        for row in self.grid.iter_mut() {
+            for sq in row.iter_mut() {
+                sq.duck = false;
+            }
+        }
+        if let Some(sq) = self.get_square_mut(to) {
+            sq.duck = true;
+        }
+        Ok(())
+    }
+
     /// Phase 1: physically move pieces around. No piece-level post hooks,
     /// no environment reactions — those are separate phases. This is the
     /// pure mechanical effect of the move on the grid.
     fn relocate_pieces(&mut self, game_move: &GameMove) -> Result<(), String> {
+        // Plan 11 (Duck Chess): duck half-moves don't relocate a piece —
+        // they (re)place the colourless duck on the grid. Handle here,
+        // before the piece-extraction below, which requires a piece at
+        // `from` (a duck square has none). `relocate_duck` sweeps any
+        // prior duck, so `MoveDuck`'s `from` is informational.
+        match &game_move.move_type {
+            MoveType::PlaceDuck { to } | MoveType::MoveDuck { to } => {
+                return self.relocate_duck(to);
+            }
+            _ => {}
+        }
+
         // Plan 08 safety net: any move that lands a piece on a non-walkable
         // square (closed Gate, Turret, Vent) is rejected here, even if a
         // piece-level generator forgot to filter. Catches new pieces and
@@ -155,6 +189,11 @@ impl Board {
         };
 
         match &game_move.move_type {
+            // Plan 11: duck half-moves return early at the top of this
+            // function via `relocate_duck`, so control never reaches here.
+            MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. } => {
+                unreachable!("duck moves are handled by the early return in relocate_pieces")
+            }
             MoveType::MoveTo(target) => {
                 // Capture-side effects (clear castle right on rook capture).
                 if let Some(captured) =
@@ -595,7 +634,11 @@ impl Board {
         let mover_dispatch: Option<PieceType> = match &ctx.game_move.move_type {
             MoveType::PhaseShift
             | MoveType::ThrowSwitch { .. }
-            | MoveType::PlaceTornado { .. } => None,
+            | MoveType::PlaceTornado { .. }
+            // Plan 11: a duck half-move moves no piece, so there's no
+            // piece whose `post_move_effects` should fire.
+            | MoveType::PlaceDuck { .. }
+            | MoveType::MoveDuck { .. } => None,
             MoveType::MoveTo(target)
             | MoveType::Promotion { target, .. }
             | MoveType::EnPassant { target, .. } => {
@@ -806,6 +849,17 @@ fn compute_last_move(
 ) -> Option<crate::board::LastMove> {
     use crate::board::LastMoveKind;
 
+    // Plan 11: duck half-moves record no piece last-move (no piece
+    // moved). Bail before the source-piece fetch so a PlaceDuck whose
+    // `from` happens to point at a piece can't be misread as that piece
+    // moving — and so the `kind` match below is unreachable for ducks.
+    if matches!(
+        game_move.move_type,
+        MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. }
+    ) {
+        return None;
+    }
+
     let from = game_move.from.clone();
     let source_piece = before.get_square_at(&from)?.piece.clone()?;
     let (mover_color, _) = before.effective_mover_color(&source_piece, game_move);
@@ -898,6 +952,11 @@ fn compute_last_move(
         MoveType::ThrowSwitch { .. } => LastMoveKind::ThrowSwitch,
         MoveType::PieceInCarrier { .. } => LastMoveKind::PieceInCarrier,
         MoveType::PlaceTornado { .. } => LastMoveKind::PlaceTornado,
+        // Plan 11: unreachable — duck moves return None at the top of
+        // `compute_last_move` before reaching the kind match.
+        MoveType::PlaceDuck { .. } | MoveType::MoveDuck { .. } => {
+            unreachable!("duck moves don't produce a LastMove")
+        }
     };
 
     Some(crate::board::LastMove {
@@ -1088,7 +1147,10 @@ fn collect_landings(game_move: &GameMove) -> Vec<Coord> {
         MoveType::MoveIntoCarrier(_)
         | MoveType::PhaseShift
         | MoveType::ThrowSwitch { .. }
-        | MoveType::PlaceTornado { .. } => vec![],
+        | MoveType::PlaceTornado { .. }
+        // Plan 11: a duck settles no piece on a tile — no plate to fire.
+        | MoveType::PlaceDuck { .. }
+        | MoveType::MoveDuck { .. } => vec![],
     }
 }
 
@@ -1124,6 +1186,9 @@ fn piece_landing_square(game_move: &GameMove) -> Option<&Coord> {
         },
         MoveType::PhaseShift
         | MoveType::ThrowSwitch { .. }
-        | MoveType::PlaceTornado { .. } => None,
+        | MoveType::PlaceTornado { .. }
+        // Plan 11: a duck half-move lands no piece on a board square.
+        | MoveType::PlaceDuck { .. }
+        | MoveType::MoveDuck { .. } => None,
     }
 }
