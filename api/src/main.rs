@@ -367,12 +367,19 @@ async fn game_ws_loop(
                     if send_json(&mut socket, &state).await.is_err() { break; }
                 }
                 // Slow client dropped some snapshots — the next recv carries
-                // the latest, so just continue.
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // the latest, so the board still converges; log the skip.
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    eprintln!("game ws: client lagged, skipped {skipped} update(s)");
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(e)) => {
+                    eprintln!("game ws: socket error: {e}");
+                    break;
+                }
                 // Push-only channel: ignore anything the client sends.
                 Some(Ok(_)) => {}
             },
@@ -401,7 +408,11 @@ async fn lobby_ws_loop(mut socket: WebSocket, state: AppState) {
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(e)) => {
+                    eprintln!("lobby ws: socket error: {e}");
+                    break;
+                }
                 Some(Ok(_)) => {}
             },
         }
@@ -620,6 +631,11 @@ mod game_tests {
         let after = state.apply_move(&g.id.to_string(), &alice, e2e4()).unwrap();
         assert_eq!(after.side_to_move, Color::Black, "turn passed to Black");
         assert_eq!(after.ply, 1);
+        assert_eq!(
+            after.your_color,
+            Some(Color::White),
+            "the move response echoes the mover's colour"
+        );
     }
 
     #[test]
@@ -663,6 +679,12 @@ mod game_tests {
         ));
         assert!(state.join(&g.code, &alice).is_ok());
 
+        // A non-seated player can't resign the game.
+        assert!(matches!(
+            state.resign(&id, &eve),
+            Err(GameActionError::NotSeated)
+        ));
+
         // Resigning ends the game with the opponent as winner; further
         // moves are rejected.
         let r = state.resign(&id, &alice).unwrap();
@@ -676,5 +698,146 @@ mod game_tests {
             state.apply_move(&id, &alice, e2e4()),
             Err(GameActionError::Over)
         ));
+    }
+
+    #[test]
+    fn create_as_black_seats_host_as_black() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: None,
+                    color: Some(Color::Black),
+                },
+            )
+            .unwrap();
+        assert_eq!(g.your_color, Some(Color::Black));
+        assert!(g.black.as_ref().is_some_and(|p| p.id == alice.id));
+        assert!(g.white.is_none(), "the white seat is left open for the joiner");
+    }
+
+    #[test]
+    fn join_by_uuid_and_unknown_id_rejected() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+
+        // The raw game UUID resolves the same game as the share code.
+        let j = state.join(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(j.id, g.id);
+        assert_eq!(j.your_color, Some(Color::Black));
+
+        // An unknown id/code → NotFound.
+        assert!(matches!(
+            state.join(&Uuid::new_v4().to_string(), &bob),
+            Err(GameActionError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn create_with_bad_starting_fen_rejected() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let r = state.create(
+            &alice,
+            CreateGame {
+                name: None,
+                public: true,
+                starting_fen: Some("invalid".to_string()),
+                color: None,
+            },
+        );
+        assert!(matches!(r, Err(GameActionError::BadFen(_))));
+    }
+
+    #[test]
+    fn illegal_move_is_rejected_by_the_engine() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob");
+        let g = state.create(&alice, req(true)).unwrap();
+        state.join(&g.code, &bob).unwrap();
+
+        // White's e-pawn can't step sideways onto its own f-pawn — the engine
+        // rejects it, surfacing as GameActionError::Move (turn already OK).
+        let illegal = GameMove {
+            from: Coord { file: 4, rank: 6 },
+            move_type: MoveType::MoveTo(Coord { file: 5, rank: 6 }),
+        };
+        assert!(matches!(
+            state.apply_move(&g.id.to_string(), &alice, illegal),
+            Err(GameActionError::Move(_))
+        ));
+    }
+
+    #[test]
+    fn list_public_hides_private_and_finished_games() {
+        let state = AppState::new();
+        let alice = player("Alice");
+
+        // Private games are never listed.
+        state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: false,
+                    starting_fen: None,
+                    color: None,
+                },
+            )
+            .unwrap();
+        assert!(state.list_public().is_empty(), "private game is not listed");
+
+        // A public open game is listed, then leaves the lobby once finished.
+        let pub_g = state.create(&alice, req(true)).unwrap();
+        assert_eq!(state.list_public().len(), 1);
+        state.resign(&pub_g.id.to_string(), &alice).unwrap();
+        assert!(
+            state.list_public().is_empty(),
+            "a finished game leaves the lobby"
+        );
+    }
+
+    #[test]
+    fn stalemate_is_recorded_as_a_draw() {
+        let state = AppState::new();
+        let alice = player("Alice"); // White
+        let bob = player("Bob"); // Black
+        // White queen b3, lone kings; Qb3-b6 stalemates Black (no legal move,
+        // not in check). Engine coords: rank 0 is the top (black) row.
+        let g = state
+            .create(
+                &alice,
+                CreateGame {
+                    name: None,
+                    public: true,
+                    starting_fen: Some("k7/8/8/8/8/1Q6/8/K7 w - -".to_string()),
+                    color: None,
+                },
+            )
+            .unwrap();
+        state.join(&g.code, &bob).unwrap();
+
+        let qb6 = GameMove {
+            from: Coord { file: 1, rank: 5 },
+            move_type: MoveType::MoveTo(Coord { file: 1, rank: 2 }),
+        };
+        let after = state.apply_move(&g.id.to_string(), &alice, qb6).unwrap();
+        assert!(
+            matches!(after.status, GameStatus::Stalemate),
+            "expected stalemate, got {:?}",
+            after.status
+        );
+        assert_eq!(after.result, Some(GameResult::Draw));
+        assert!(
+            state.list_public().is_empty(),
+            "the drawn game leaves the lobby"
+        );
     }
 }

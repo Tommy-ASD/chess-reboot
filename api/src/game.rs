@@ -299,7 +299,12 @@ impl AppState {
         let id = Uuid::new_v4();
         let mut store = self.lock();
         let code = Self::fresh_code(&store);
-        let (tx, _) = broadcast::channel(32);
+        // Per-game live-update buffer. Generous so a briefly-slow client
+        // receives intermediate snapshots rather than a `Lagged` skip; a
+        // client that still falls behind recovers to the latest state on its
+        // next recv (see the WS loop's `Lagged` arm), so its board is never
+        // left wrong — only intermediate frames are dropped.
+        let (tx, _) = broadcast::channel(128);
         let game = Game {
             id,
             code: code.clone(),
