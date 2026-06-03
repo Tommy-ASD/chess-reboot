@@ -82,7 +82,13 @@ export type MoveType =
     ///   Castle    → `target: { side: "Kingside" | "Queenside" }`.
     | { kind: "Promotion"; target: { target: Coord; into: "Queen" | "Rook" | "Bishop" | "Knight" } }
     | { kind: "EnPassant"; target: { target: Coord; captured: Coord } }
-    | { kind: "Castle"; target: { side: "Kingside" | "Queenside" } };
+    | { kind: "Castle"; target: { side: "Kingside" | "Queenside" } }
+    /// Plan 11 (Duck Chess): place / relocate the colourless duck. Struct
+    /// variants, so the coord nests under `target.to`. PlaceDuck is the
+    /// first placement (no duck on the board yet); MoveDuck relocates it
+    /// (the wrapping `from` is the duck's current square).
+    | { kind: "PlaceDuck"; target: { to: Coord } }
+    | { kind: "MoveDuck"; target: { to: Coord } };
 
 
 export type GameMove = { from: Coord; move_type: MoveType };

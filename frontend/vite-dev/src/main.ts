@@ -5,7 +5,7 @@
 
 import { initBoardResize, setBoardDimensions } from "./board_size";
 import { castleKingDest, clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
-import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
+import { getBusPassengers, parseFEN, parseFENFlags, pieceToImage, pieceToSymbol } from "./fen";
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
 import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
@@ -121,6 +121,10 @@ function renderBoard(fen: string) {
       boardEl.appendChild(square);
     }
   }
+
+  // Plan 11: if the position is a Duck Chess placement half-turn, light up
+  // the empty squares as duck targets and show the hint.
+  setupDuckPlacementMode();
 }
 
 /// Handler attached to each square on the board
@@ -130,6 +134,16 @@ async function handleSquareClick(rank: number, file: number) {
 
   // Any square click dismisses a pending promotion picker.
   hidePromotionPicker();
+
+  // Plan 11 (Duck Chess) placement half-turn: clicking an empty square
+  // places (first turn) or moves the duck. Piece selection is disabled —
+  // pieces can't move this half, and the engine returns no piece moves.
+  if (duckPlacementActive()) {
+    if (isEmptyForDuck(clicked)) {
+      await placeDuckAt(clicked);
+    }
+    return;
+  }
 
   // if the user clicks the selected square again, clear selection
   if (selectedSquare && selectedSquare.rank === rank && selectedSquare.file === file) {
@@ -235,9 +249,13 @@ async function executeMove(move: GameMove) {
         : await makeSpecialMove(fen, move);
     console.log("New FEN:", result.newFen);
     (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
+    // Clear the prior selection BEFORE re-rendering: `clearSelection`
+    // strips `.highlight` from squares, so running it after `renderBoard`
+    // would wipe the duck-placement highlights that `renderBoard` adds
+    // when the new position is a duck half-turn.
+    clearSelection();
     renderBoard(result.newFen);
     renderStatus(result.status);
-    clearSelection();
   } catch (err) {
     showError(err);
   }
@@ -288,6 +306,70 @@ function hidePromotionPicker() {
   if (!picker) return;
   picker.classList.add("hidden");
   picker.innerHTML = "";
+}
+
+/// Plan 11: is the current position a Duck Chess duck-placement half-turn?
+/// Read straight off the FEN flags (variants + duck_phase).
+function duckPlacementActive(): boolean {
+  const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+  const flags = parseFENFlags(fen);
+  return flags.variants.includes("duck_chess") && flags.duckPhase === "placing";
+}
+
+/// Plan 11: a square that can receive the duck — empty of both a piece and
+/// the duck. Walkability isn't checked client-side; the engine's
+/// `validate_duck_move` is the final authority and rejects bad targets.
+function isEmptyForDuck(c: Coord): boolean {
+  const sq = currentBoard[c.rank]?.[c.file];
+  return !!sq && !sq.piece && !sq.duck;
+}
+
+/// Plan 11: the duck's current square, or null before its first placement.
+function findDuckOnBoard(): Coord | null {
+  for (let rank = 0; rank < currentBoard.length; rank++) {
+    const row = currentBoard[rank];
+    for (let file = 0; file < row.length; file++) {
+      if (row[file]?.duck) return { file, rank };
+    }
+  }
+  return null;
+}
+
+/// Plan 11: place (first turn) or move the duck to `clicked`, then apply
+/// via the backend (which validates legality).
+async function placeDuckAt(clicked: Coord) {
+  const existing = findDuckOnBoard();
+  const move: GameMove = existing
+    ? { from: existing, move_type: { kind: "MoveDuck", target: { to: clicked } } }
+    : { from: clicked, move_type: { kind: "PlaceDuck", target: { to: clicked } } };
+  await executeMove(move);
+}
+
+/// Plan 11: during a duck-placement half-turn, highlight every empty
+/// square as a placement target and show the hint. Called at the end of
+/// `renderBoard`; hides the hint and does nothing otherwise.
+function setupDuckPlacementMode() {
+  const hint = document.getElementById("duck-hint")!;
+  if (!duckPlacementActive()) {
+    hint.classList.add("hidden");
+    return;
+  }
+  hint.textContent = "🦆 Duck Chess — click a highlighted empty square to place the duck.";
+  hint.classList.remove("hidden");
+
+  const squares = document.querySelectorAll("#board .square");
+  const cols =
+    Number(getComputedStyle(document.documentElement).getPropertyValue("--cols").trim()) ||
+    currentBoard[0]?.length ||
+    8;
+  for (let rank = 0; rank < currentBoard.length; rank++) {
+    const row = currentBoard[rank];
+    for (let file = 0; file < row.length; file++) {
+      if (!row[file]?.piece && !row[file]?.duck) {
+        squares[rank * cols + file]?.classList.add("highlight");
+      }
+    }
+  }
 }
 
 /// The side-actions panel: catch-all for moves that don't fit the

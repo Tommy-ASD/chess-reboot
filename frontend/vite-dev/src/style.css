@@ -503,6 +503,26 @@ button {
 }
 
 /* -------------------------------------------------- */
+/* Duck-placement hint (plan 11)                       */
+/* -------------------------------------------------- */
+
+.duck-hint {
+  margin: 0.5rem 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-align: center;
+  background: #fff3cd;
+  color: #664d03;
+  border: 1px solid #ffe69c;
+}
+
+.duck-hint.hidden {
+  display: none;
+}
+
+/* -------------------------------------------------- */
 /* Substrate squares: per-type accent + SVG-icon hook */
 /* -------------------------------------------------- */
 
