@@ -4,7 +4,7 @@
 // build: `npm run build` (runs `tsc && vite build`). See package.json.
 
 import { initBoardResize, setBoardDimensions } from "./board_size";
-import { clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
+import { castleKingDest, clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
 import { getBusPassengers, parseFEN, pieceToImage, pieceToSymbol } from "./fen";
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
@@ -120,6 +120,9 @@ function renderBoard(fen: string) {
 async function handleSquareClick(rank: number, file: number) {
   const clicked = { rank, file };
 
+  // Any square click dismisses a pending promotion picker.
+  hidePromotionPicker();
+
   // if the user clicks the selected square again, clear selection
   if (selectedSquare && selectedSquare.rank === rank && selectedSquare.file === file) {
     console.log("Pressed twice; clearing selection");
@@ -131,26 +134,25 @@ async function handleSquareClick(rank: number, file: number) {
   if (isAllowedSquare(clicked)) {
     console.log("Move:", selectedSquare, "->", clicked, "passenger:", selectedPassengerIndex);
 
+    // Promotion needs a piece choice: if the clicked square is a promotion
+    // target, show the picker and defer the move until the user picks.
+    const promotions = allowedMoves.filter(
+      (m) =>
+        m.move_type.kind === "Promotion" &&
+        m.move_type.target.target.file === clicked.file &&
+        m.move_type.target.target.rank === clicked.rank,
+    );
+    if (promotions.length > 0) {
+      showPromotionPicker(promotions);
+      return;
+    }
+
     const moveToExecute = findMoveForTarget(clicked, allowedMoves, selectedPassengerIndex);
     if (!moveToExecute) {
       console.error("isAllowedSquare matched but findMoveForTarget returned null");
       return;
     }
-
-    try {
-      const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-      const result = moveToExecute.move_type.kind === "MoveTo"
-        ? await makeMove(fen, selectedSquare!, clicked)
-        : await makeSpecialMove(fen, moveToExecute);
-      console.log("New FEN:", result.newFen);
-      (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
-      renderBoard(result.newFen);
-      renderStatus(result.status);
-      clearSelection();
-    } catch (err) {
-      showError(err);
-    }
-
+    await executeMove(moveToExecute);
     return;
   }
 
@@ -195,6 +197,11 @@ function findMoveForTarget(clicked: Coord, moves: GameMove[], passengerIdx: numb
     if (passengerIdx === null) {
       if (m.move_type.kind === "MoveTo" && sameCoord(m.move_type.target, clicked)) return m;
       if (m.move_type.kind === "MoveIntoCarrier" && sameCoord(m.move_type.target, clicked)) return m;
+      if (m.move_type.kind === "EnPassant" && sameCoord(m.move_type.target.target, clicked)) return m;
+      if (m.move_type.kind === "Castle") {
+        const dest = castleKingDest(m);
+        if (dest && sameCoord(dest, clicked)) return m;
+      }
     } else {
       if (m.move_type.kind === "PieceInCarrier"
         && m.move_type.target.piece_index === passengerIdx
@@ -205,6 +212,74 @@ function findMoveForTarget(clicked: Coord, moves: GameMove[], passengerIdx: numb
     }
   }
   return null;
+}
+
+/// Apply a chosen move via the backend, then re-render the board + status
+/// and clear the selection. `MoveTo` goes through `makeMove`; everything
+/// else — Castle / Promotion / EnPassant / carrier / special — through
+/// `makeSpecialMove`, which posts the `GameMove` as-is.
+async function executeMove(move: GameMove) {
+  try {
+    const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
+    const result =
+      move.move_type.kind === "MoveTo"
+        ? await makeMove(fen, move.from, move.move_type.target)
+        : await makeSpecialMove(fen, move);
+    console.log("New FEN:", result.newFen);
+    (document.getElementById("fen-input") as HTMLInputElement).value = result.newFen;
+    renderBoard(result.newFen);
+    renderStatus(result.status);
+    clearSelection();
+  } catch (err) {
+    showError(err);
+  }
+}
+
+/// Show the promotion picker for the four `Promotion` moves that share a
+/// target square. Picking a piece submits that specific move. The glyph
+/// case follows the promoting pawn's colour.
+function showPromotionPicker(moves: GameMove[]) {
+  const picker = document.getElementById("promotion-picker")!;
+  picker.innerHTML = "";
+  picker.classList.remove("hidden");
+
+  const from = moves[0].from;
+  const pawn = currentBoard[from.rank]?.[from.file]?.piece ?? "P";
+  const white = pawn === pawn.toUpperCase();
+  const glyphs: Record<string, [string, string]> = {
+    Queen: ["♕", "♛"],
+    Rook: ["♖", "♜"],
+    Bishop: ["♗", "♝"],
+    Knight: ["♘", "♞"],
+  };
+
+  const label = document.createElement("span");
+  label.className = "promotion-label";
+  label.textContent = "Promote to:";
+  picker.appendChild(label);
+
+  for (const m of moves) {
+    if (m.move_type.kind !== "Promotion") continue;
+    const into = m.move_type.target.into;
+    const btn = document.createElement("button");
+    btn.className = "promotion-choice";
+    btn.textContent = glyphs[into]?.[white ? 0 : 1] ?? into;
+    btn.title = into;
+    btn.onclick = () => {
+      hidePromotionPicker();
+      executeMove(m);
+    };
+    picker.appendChild(btn);
+  }
+}
+
+/// Hide + clear the promotion picker. Safe to call when it's already
+/// hidden (every square click calls it to dismiss a stale picker).
+function hidePromotionPicker() {
+  const picker = document.getElementById("promotion-picker");
+  if (!picker) return;
+  picker.classList.add("hidden");
+  picker.innerHTML = "";
 }
 
 /// The side-actions panel: catch-all for moves that don't fit the

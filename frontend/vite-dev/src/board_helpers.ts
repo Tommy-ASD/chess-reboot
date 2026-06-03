@@ -13,12 +13,27 @@ export function isPieceInCarrier(m: GameMove): m is GameMove & { move_type: { ki
     return m.move_type.kind === "PieceInCarrier";
 }
 
-/// "Special" = needs the side-actions panel (PhaseShift, future Promotion menu, etc.).
-/// Carrier-related moves are NOT special — they get their own carrier panel + board highlights.
+/// "Special" = needs the side-actions panel (PhaseShift, ThrowSwitch,
+/// PlaceTornado). Board moves — MoveTo, MoveIntoCarrier, PieceInCarrier,
+/// and the core chess moves Castle / Promotion / EnPassant — are reached
+/// by clicking the board, not the side panel.
 export function isSpecialMove(m: GameMove): boolean {
-    return m.move_type.kind !== "MoveTo"
-        && m.move_type.kind !== "MoveIntoCarrier"
-        && m.move_type.kind !== "PieceInCarrier";
+    const k = m.move_type.kind;
+    return k !== "MoveTo"
+        && k !== "MoveIntoCarrier"
+        && k !== "PieceInCarrier"
+        && k !== "Castle"
+        && k !== "Promotion"
+        && k !== "EnPassant";
+}
+
+/// The king's landing square for a Castle move — the board square a user
+/// clicks to castle. Kingside → g-file (6), queenside → c-file (2), on the
+/// king's own rank (`GameMove.from.rank`). `null` for non-Castle moves.
+export function castleKingDest(m: GameMove): Coord | null {
+    if (m.move_type.kind !== "Castle") return null;
+    const file = m.move_type.target.side === "Kingside" ? 6 : 2;
+    return { file, rank: m.from.rank };
 }
 
 /// A target the board should highlight, with the visual style it deserves.
@@ -37,6 +52,15 @@ export function visibleMoveTargets(moves: GameMove[], passengerIdx: number | nul
         for (const m of moves) {
             if (isMoveTo(m)) out.push({ target: m.move_type.target, kind: "move" });
             else if (isMoveIntoCarrier(m)) out.push({ target: m.move_type.target, kind: "board" });
+            // Core chess moves are clicked on the board like any move. The
+            // four Promotion entries (one per piece) collapse to a single
+            // highlighted square; the picker disambiguates on click.
+            else if (m.move_type.kind === "Promotion") out.push({ target: m.move_type.target.target, kind: "move" });
+            else if (m.move_type.kind === "EnPassant") out.push({ target: m.move_type.target.target, kind: "move" });
+            else if (m.move_type.kind === "Castle") {
+                const dest = castleKingDest(m);
+                if (dest) out.push({ target: dest, kind: "move" });
+            }
         }
     } else {
         for (const m of moves) {

@@ -460,6 +460,49 @@ button {
 }
 
 /* -------------------------------------------------- */
+/* Promotion picker (plan 03 core moves)               */
+/* -------------------------------------------------- */
+
+.promotion-picker {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+  background: #fff;
+  border: 2px solid #333;
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.promotion-picker.hidden {
+  display: none;
+}
+
+.promotion-label {
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+.promotion-choice {
+  font-size: 2rem;
+  line-height: 1;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+  background: #f0f0f0;
+  border: 1px solid #999;
+  border-radius: 4px;
+}
+
+.promotion-choice:hover {
+  background: #d8e8ff;
+}
+
+/* -------------------------------------------------- */
 /* Substrate squares: per-type accent + SVG-icon hook */
 /* -------------------------------------------------- */
 

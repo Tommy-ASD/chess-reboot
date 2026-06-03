@@ -68,7 +68,17 @@ export type MoveType =
     /// target` — same shape as `ThrowSwitch`, not the bare-coord shape of
     /// `MoveTo`. Wire: `{ kind: "PlaceTornado", target: { target: { file,
     /// rank } } }`.
-    | { kind: "PlaceTornado"; target: { target: Coord } };
+    | { kind: "PlaceTornado"; target: { target: Coord } }
+    /// Plan 03 core moves. All three are *struct* variants, so adjacent
+    /// tagging nests their payload under `target` (verified against
+    /// `/board/moves`):
+    ///   Promotion → `target: { target: Coord, into: <piece> }`
+    ///               (the engine emits one move per `into`).
+    ///   EnPassant → `target: { target: Coord, captured: Coord }`.
+    ///   Castle    → `target: { side: "Kingside" | "Queenside" }`.
+    | { kind: "Promotion"; target: { target: Coord; into: "Queen" | "Rook" | "Bishop" | "Knight" } }
+    | { kind: "EnPassant"; target: { target: Coord; captured: Coord } }
+    | { kind: "Castle"; target: { side: "Kingside" | "Queenside" } };
 
 
 export type GameMove = { from: Coord; move_type: MoveType };

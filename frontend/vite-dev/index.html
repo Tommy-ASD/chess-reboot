@@ -20,6 +20,10 @@
        check + the terminal outcomes (checkmate / stalemate / brainrot). -->
   <div id="game-status" class="game-status hidden" role="status" aria-live="polite"></div>
 
+  <!-- Promotion picker (plan 03 core moves): shown when a pawn reaches the
+       back rank; pick Q/R/B/N to submit the chosen promotion. -->
+  <div id="promotion-picker" class="promotion-picker hidden" role="dialog" aria-label="Choose promotion piece"></div>
+
   <div id="layout">
     <div id="left-panel">
       <input id="fen-input" type="text" placeholder="Enter FEN here" />
