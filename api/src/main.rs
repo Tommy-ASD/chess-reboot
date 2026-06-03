@@ -1087,6 +1087,11 @@ mod game_tests {
         // Resolution lower-cases the lookup key, and a non-UUID falls through
         // to the code map (→ None when absent).
         assert_eq!(state.join(&g.code.to_lowercase(), &bob).unwrap().id, g.id);
+        // Whitespace-padded codes resolve too (resolve trims the token).
+        assert_eq!(
+            state.get(&format!("  {}  ", g.code), None).unwrap().id,
+            g.id
+        );
         assert!(state.get("not-a-uuid", None).is_none());
     }
 
@@ -1288,6 +1293,8 @@ mod game_tests {
         assert!(rx.try_recv().is_ok(), "creating a game pings the lobby");
         state.join(&g.code, &bob).unwrap();
         assert!(rx.try_recv().is_ok(), "joining a game pings the lobby");
+        state.resign(&g.id.to_string(), &alice).unwrap();
+        assert!(rx.try_recv().is_ok(), "ending a game pings the lobby");
     }
 
     #[test]
@@ -1321,5 +1328,32 @@ mod game_tests {
         assert_eq!(rejoin.ply, 1);
         assert_eq!(rejoin.side_to_move, Color::Black);
         assert_eq!(rejoin.your_color, Some(Color::White));
+    }
+
+    #[test]
+    fn get_and_subscribe_resolve_by_join_code() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let g = state.create(&alice, req(true)).unwrap();
+        // The read paths accept the share code, not just the UUID.
+        assert_eq!(state.get(&g.code, Some(alice.id)).unwrap().id, g.id);
+        assert!(state.subscribe_game(&g.code).is_some());
+    }
+
+    #[test]
+    fn game_error_response_maps_each_variant_to_its_status() {
+        use crate::game::GameActionError as E;
+        let cases: [(E, StatusCode); 7] = [
+            (E::NotFound, StatusCode::NOT_FOUND),
+            (E::BadFen("x".to_string()), StatusCode::BAD_REQUEST),
+            (E::NotSeated, StatusCode::FORBIDDEN),
+            (E::Full, StatusCode::CONFLICT),
+            (E::NotYourTurn, StatusCode::FORBIDDEN),
+            (E::Over, StatusCode::CONFLICT),
+            (E::Internal("x".to_string()), StatusCode::INTERNAL_SERVER_ERROR),
+        ];
+        for (err, status) in cases {
+            assert_eq!(game_error_response(err).status(), status);
+        }
     }
 }
