@@ -4,6 +4,42 @@ What's left from the per-piece doc comments that current code doesn't
 satisfy. Several of these blocked on plan 01 (turns) or plan 02
 (king-safety / game-over).
 
+## Status — shipped
+
+- **Goblin mechanic 1 (drop kidnapped piece)** — ✅ shipped earlier via
+  the capture stack (`GoblinDropVictimCapture`, keyed on `captor_origin`).
+- **Goblin mechanic 2 (taker moves again)** — ✅ shipped as
+  flip-suppression in `apply_environment_reactions_with`
+  (`move_grants_extra_turn`). The sketch below proposed an
+  `extra_moves: u8` on `BoardFlags`; the implementation instead simply
+  *doesn't flip* `side_to_move` when the move captured a Kidnapping
+  Goblin (same `captor_origin.is_some()` condition as the victim drop).
+  Equivalent for the single-capture case (≤1 Goblin captured per move)
+  and avoids a transient board field + FEN token — "stay to move"
+  round-trips through FEN for free.
+- **Skibidi win-by-brainrot** — ✅ shipped: `GameStatus::BrainrotWin` +
+  `Board::is_brainrot_win`, folded into `status()`'s no-legal-moves /
+  not-in-check branch. Heuristic kept approximate, as recommended below.
+- **Skibidi captured-while-opponent-phase-4** — ✅ shipped:
+  `GameStatus::BrainrotLockout` + `Board::is_brainrot_lockout`. Detected
+  positionally (no own Skibidi + a radiating phase-4 enemy Skibidi);
+  fires even with legal moves on the board ("nothing you can do"), and
+  in the no-moves branch converts what would be a `Stalemate` into a
+  loss. No-lookahead approximation documented on the method.
+- **Passenger Pawn semantics** — ✅ documented (no behaviour change) on
+  `Bus` move-gen: passengers move from the Bus's coordinate.
+- **Monkey capture-then-jump chain** — ✅ current "capture ends the
+  chain" reading locked in by `fairy_scenarios.rs` tests.
+- **Bus capacity counting** — left as documented dead code (nested
+  carriers forbidden), per the recommendation below.
+
+Tests for the four behavioural items live in
+`engine/tests/fairy_scenarios.rs`; the `GameStatus` wire shapes are
+pinned in `engine/src/board/tests.rs::game_status_json_shape`.
+
+The detail below is the original plan; some implementation specifics
+(e.g. mechanic 2) diverged as noted above.
+
 ## Goblin: captured-while-kidnapping
 
 Doc lines 9-10 of `engine/src/pieces/fairy/goblin.rs`:

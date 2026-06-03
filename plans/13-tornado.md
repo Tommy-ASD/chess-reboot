@@ -548,15 +548,18 @@ commit `28a9dea`, R2 `fa8ee0b`, R3). Greppable mapping:
   epoch; every other reachable resolve is capped ≤304 or on the
   Threat path where the 305 filter is mask-skipped). So no stale-read
   or counting drift over arbitrarily long games.
-- **Forward note for `BrainrotWin` (plan 04, unimplemented).** When a
-  brainrot-win terminal is added, its "brainrot caused the side to
-  have no moves" predicate must be derived from `status()`'s existing
-  post-305 emptiness probe (the same `legal_moves` aggregation), NOT a
-  "every piece sits on a Brainrot square" scan — otherwise a
-  tornado-*trapped* (non-brainrotted) piece, or a square that is both
-  Brainrot and Tornado, would be mis-attributed to a brainrot-win.
-  Shipped code is unaffected (`BrainrotWin` absent → deterministic
-  `Stalemate`); this is a constraint on the future implementer.
+- **Forward note for `BrainrotWin` — now implemented (plan 04).** Plan 04
+  shipped `Board::is_brainrot_win` using exactly the "every piece sits on
+  a Brainrot square" scan this note had cautioned against — but the
+  cautioned mis-attribution does not bite: a tornado-*trapped*
+  (non-brainrotted) piece fails the "on a Brainrot square" condition and
+  so makes the scan return `false` (→ `Stalemate`, not a false win), and
+  a piece on a square that is both Brainrot and Tornado is genuinely
+  brainrot-frozen regardless of the Tornado, so crediting Brainrot is
+  correct. The heuristic is documented as deliberately approximate (e.g.
+  a pinned-but-not-brainrotted side still reads as `Stalemate`); see
+  `Board::is_brainrot_win`. The separate phase-4 `BrainrotLockout`
+  terminal also landed in plan 04.
 - **Probe memo — IMPLEMENTED (audit Round-A/A-DoS; was R1/E5
   "deferred perf").** The uncached per-candidate probe was not merely
   a perf nicety: a new-angle security pass showed a tens-of-bytes

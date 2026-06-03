@@ -39,9 +39,10 @@ tagged works.
 
 > **Update — shipped.** The landed enum is `Ongoing` /
 > `Check { side_to_move }` / `Checkmate { winner }` / `Stalemate` —
-> there's an extra `Check` variant this plan didn't anticipate and
-> **no `BrainrotWin`** (deferred to plan 04, per the doc-comment on
-> `Board::status()`). It derives serde with
+> there's an extra `Check` variant this plan didn't anticipate. (At
+> plan-06 time `BrainrotWin` was still deferred to plan 04; plan 04 has
+> since landed both `BrainrotWin { winner }` and `BrainrotLockout
+> { winner }`, serialized the same adjacently-tagged way.) It derives serde with
 > `#[serde(tag = "status", content = "data")]`, e.g.
 > `{"status":"Checkmate","data":{"winner":"White"}}` /
 > `{"status":"Ongoing"}`. Folded into `/board/new_state` (status of the

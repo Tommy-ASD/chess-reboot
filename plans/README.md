@@ -40,6 +40,18 @@ plan you want to act on.
   validate variant that skips the train tick.
 - **Plan 03 — standard-chess completeness**: promotion (Q/R/B/N),
   castling (king-/queen-side), en passant (set + clear + capture).
+- **Plan 04 — custom-piece spec gaps**: Skibidi win-by-brainrot
+  (`GameStatus::BrainrotWin`) and the phase-4 lockout
+  (`GameStatus::BrainrotLockout` — "your Skibidi captured while the
+  enemy's is phase 4 = nothing you can do"), both folded into `status()`
+  behind documented-approximate heuristics (`is_brainrot_win` /
+  `is_brainrot_lockout`). Goblin "the taker moves again" (mechanic 2)
+  as flip-suppression in `apply_environment_reactions_with`
+  (`move_grants_extra_turn`) — no FEN/state needed, the captor's side
+  simply stays to move. Passenger-Pawn semantics documented on `Bus`
+  move-gen (a carried pawn double-pushes off the *Bus's* rank). Goblin
+  drop-on-capture (mechanic 1) + the Monkey-chain reading already
+  shipped earlier; Bus capacity counting stays documented dead code.
 - **Plan 05 — FEN hardening**: `FenError` type; `fen_to_board` /
   `fen_to_square` / `fen_row_to_squares` are now fallible. Hard
   structural errors (empty input, ragged board, unknown piece glyph,
@@ -83,31 +95,27 @@ plan you want to act on.
 
 In rough priority order:
 
-1. **Custom-piece spec gaps** — Skibidi win-by-brainrot, passenger Pawn
-   double-push semantics, a few smaller items.
-   → [04-custom-piece-spec-gaps.md](04-custom-piece-spec-gaps.md)
-2. **Test strategy** — 340+ tests now (328 lib + perft + property +
+1. **Test strategy** — 340+ tests now (328 lib + perft + property +
    integration + doctests), but coverage is still uneven.
    → [07-testing-strategy.md](07-testing-strategy.md)
-3. **Movement stack** — generic modifier pipeline that absorbs the
+2. **Movement stack** — generic modifier pipeline that absorbs the
    per-piece / per-square conditionals (brainrot, gate walkability,
    train threats, king-safety filter) into one ordered registry.
    Lands incrementally; each migration step is a working commit.
    → [10-movement-stack.md](10-movement-stack.md)
-4. **Duck Chess + variant infrastructure** — first true rule-variant,
+3. **Duck Chess + variant infrastructure** — first true rule-variant,
    plus the per-position `variants` flag future variants hook into.
    Independent of plan 10; conditionals migrate to modifiers when
    plan 10 absorbs them.
    → [11-duck-chess.md](11-duck-chess.md)
-5. **Trains v2** — the deferred items from plan 09 (collision-hook
+4. **Trains v2** — the deferred items from plan 09 (collision-hook
    chain, carriage detaching, heading reversal, boarding-from-adjacent).
    → [09-trains.md](09-trains.md)
 
 ## Suggested sequence
 
-Plans **04 / 07** can proceed in parallel (plans **05** and **06**
-shipped).
-Plan **10** is the
+Plan **07** (test coverage) can proceed now (plans **04**, **05**, **06**
+shipped). Plan **10** is the
 biggest structural piece left and unlocks cleaner future-piece work.
 Plan **11** (Duck Chess + variant infra) is independent of plan 10 —
 the chokepoint conditionals it adds collapse into modifiers when plan
@@ -119,10 +127,17 @@ follow-up to plan 10.
 A few things the spec doesn't pin down and the project will have to
 decide at some point:
 
-- **Win-by-brainrot vs stalemate**: spec mentions both but the rules
-  for which fires when aren't explicit. See plan 02 and 04.
-- **Passenger Pawn semantics**: should a pawn carried in a Bus retain
-  its "starting position" rights? Spec is silent. See plan 04.
+- **Win-by-brainrot vs stalemate** — *resolved (plan 04)*: when the
+  side to move has no legal move and isn't in check, `status()`
+  distinguishes `BrainrotWin` (all its pieces frozen on Brainrot squares
+  with an opposing Skibidi radiating) from an ordinary `Stalemate`, via
+  a documented-approximate heuristic. The separate phase-4 case is a
+  `BrainrotLockout` that fires even with legal moves available.
+- **Passenger Pawn semantics** — *resolved (plan 04)*: a Bus passenger
+  moves from the *Bus's* coordinate, so a carried pawn double-pushes
+  only off the Bus's rank, not its pre-boarding rank. Documented as a
+  deliberate choice on `Bus` move-gen; the other reading (retain
+  origin-rank rights) would need a `has_moved` field — plan 04-bis.
 - **Nested carriers**: currently forbidden (plan 04 keeps this). If
   Buses-inside-Buses is ever wanted, the capacity-5 invariant needs
   a recursive count.
