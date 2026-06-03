@@ -13,6 +13,7 @@
 /// This should be done recursively, to allow for multiple jumps in a single move
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
+    movement::glider::OMNI_DIRS,
     pieces::{Color, Piece},
 };
 
@@ -39,19 +40,8 @@ impl Piece for Monkey {
             return Vec::new();
         }
         let mut moves = Vec::new();
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-
         // first, handle normal one-square moves
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
             if board.in_bounds(new_file, new_rank) {
@@ -166,18 +156,7 @@ impl Monkey {
         visited: &mut Vec<Coord>,
         moves: &mut Vec<GameMove>,
     ) {
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let adj_file = current_coord.file as isize + df;
             let adj_rank = current_coord.rank as isize + dr;
             let jump_file = adj_file + df;
@@ -268,18 +247,7 @@ impl Monkey {
         visited: &mut Vec<Coord>,
         out: &mut Vec<Coord>,
     ) {
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let adj_file = current_coord.file as isize + df;
             let adj_rank = current_coord.rank as isize + dr;
             let jump_file = adj_file + df;

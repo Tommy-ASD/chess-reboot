@@ -137,8 +137,10 @@ impl std::fmt::Display for MoveType {
     }
 }
 
-/// Represents a move from one coordinate to another.
-/// Will likely be expanded later with more info.
+/// A single move action: the `from` square plus a `move_type` that
+/// encodes the rest of the move's shape — plain relocation, carrier
+/// boarding / passenger move, promotion, castle, en passant, phase
+/// shift, throw-switch, or place-tornado (see [`MoveType`]).
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct GameMove {
     pub from: Coord,

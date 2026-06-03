@@ -9,14 +9,15 @@
 ///     Increasing the radius of brainrot uses a move.
 ///     If there is no opposing Skibidi, the maximum phase your Skibidi can reach is 3.
 ///     It moves like a king (to any directly neighboring cells), but cannot take other pieces.
-///     It can take other Skibidis
-///     If your Skibidi your enemy cannot make a move due to your Brainrot,
+///     It can take other Skibidis.
+///     If your Skibidi's Brainrot leaves your enemy unable to make a move,
 ///         you win by Brainrot instead of stalemate being declared.
 ///     If your Skibidi is captured while your opponent's Skibidi is in phase 4, there is nothing you can do.
 use tracing::{trace, warn};
 
 use crate::{
     board::{Board, Coord, GameMove, MoveType},
+    movement::glider::OMNI_DIRS,
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
@@ -109,18 +110,7 @@ impl Piece for Skibidi {
             return Vec::new();
         }
         let mut moves = Vec::new();
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
             if !board.in_bounds(new_file, new_rank) {
@@ -202,17 +192,7 @@ impl Piece for Skibidi {
             return Vec::new();
         }
         let mut out = Vec::new();
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let nf = from.file as isize + df;
             let nr = from.rank as isize + dr;
             if !board.in_bounds(nf, nr) {

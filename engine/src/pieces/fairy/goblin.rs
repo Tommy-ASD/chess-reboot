@@ -4,8 +4,8 @@ use tracing::{trace, warn};
 
 /// Goblin - Moves like a queen at first, but once it takes a piece,
 /// it "kidnaps" that piece and has to take it back to home base
-/// After taking a piece, the goblin moves like a king until it reaches it's home square.
-/// Once it reaches the home square, the "kidnapped" piece is changes color to that of who took it.
+/// After taking a piece, the goblin moves like a king until it reaches its home square.
+/// Once it reaches the home square, the "kidnapped" piece changes color to that of who took it.
 /// If the goblin is taken by an enemy piece while it has a piece kidnapped,
 /// the kidnapped piece is placed where the captor came *from* (the
 /// goblin's old square is taken by the captor; the captor's origin
@@ -83,18 +83,7 @@ impl Goblin {
     pub fn generate_goblin_kidnapping_moves(&self, board: &Board, from: Coord) -> Vec<GameMove> {
         trace!("goblin kidnapping moves");
         let mut moves = Vec::new();
-        let directions: [(isize, isize); 8] = [
-            (1, 0),
-            (1, 1),
-            (0, 1),
-            (-1, 1),
-            (-1, 0),
-            (-1, -1),
-            (0, -1),
-            (1, -1),
-        ];
-
-        for (df, dr) in &directions {
+        for (df, dr) in OMNI_DIRS {
             let new_file = from.file as isize + df;
             let new_rank = from.rank as isize + dr;
             if board.in_bounds(new_file, new_rank) {

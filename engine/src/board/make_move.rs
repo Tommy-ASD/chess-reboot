@@ -283,7 +283,7 @@ impl Board {
                 PieceType::Skibidi(mut skib) => {
                     // Spec: max phase 4, capped at 3 unless an opposing
                     // Skibidi is on the board.
-                    let has_opponent = self.all_pieces().iter().any(|(_, p)| match p {
+                    let has_opponent = self.iter_pieces().any(|(_, p)| match p {
                         PieceType::Skibidi(other) => other.color != skib.color,
                         _ => false,
                     });

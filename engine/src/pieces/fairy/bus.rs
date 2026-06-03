@@ -14,6 +14,7 @@ use crate::{
         Board, Coord, GameMove, MoveType,
         fen::{find_matching_paren, split_top_level},
     },
+    movement::glider::STRAIGHT_DIRS,
     pieces::{Color, Piece, piecetype::PieceType},
 };
 
@@ -183,9 +184,7 @@ impl Piece for Bus {
         // `MoveIntoCarrier`. We stop at the first blocking piece — friendly or
         // enemy — and only emit the blocker's square if it's a friendly Bus
         // (so the filter can swap it).
-        let directions: [(isize, isize); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-
-        for (df, dr) in &directions {
+        for (df, dr) in STRAIGHT_DIRS {
             let mut step: isize = 1;
             loop {
                 let new_file = from.file as isize + df * step;

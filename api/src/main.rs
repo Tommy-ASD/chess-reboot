@@ -191,7 +191,7 @@ pub async fn serve_api() {
         .allow_headers([http::header::CONTENT_TYPE]);
 
     let port = 8080;
-    let binding_address = "0.0.0.0".to_string() + ":" + &port.to_string();
+    let binding_address = format!("0.0.0.0:{port}");
 
     let app = Router::new()
         .route("/board/moves", post(get_moves_handler))
@@ -201,11 +201,11 @@ pub async fn serve_api() {
 
     let listener = tokio::net::TcpListener::bind(&binding_address)
         .await
-        .expect(&format!("Couldn't bind to port {port}"));
+        .unwrap_or_else(|e| panic!("Couldn't bind to {binding_address}: {e}"));
     println!("Serving on {binding_address}");
     ::axum::serve(listener, app)
         .await
-        .expect(&format!("Failed to serve on port {port}"));
+        .unwrap_or_else(|e| panic!("Failed to serve on {binding_address}: {e}"));
 }
 
 #[tokio::main]
