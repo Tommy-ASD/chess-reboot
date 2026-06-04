@@ -79,10 +79,19 @@
         <span class="player-chip" id="chip-black"><span class="dot black"></span><span class="chip-name">Black</span></span>
       </div>
       <div class="game-meta">
+        <span id="conn-status" class="conn-status" title="Live"></span>
         <span id="share-line" class="share-line"></span>
         <button id="copy-link-btn" class="ghost-btn">Copy link</button>
       </div>
+
+      <div class="move-history-wrap">
+        <h3>Moves</h3>
+        <ol id="move-history" class="move-history"></ol>
+      </div>
       <div class="game-actions">
+        <button id="flip-btn" class="ghost-btn">⇅ Flip</button>
+        <button id="rematch-btn" class="primary-btn hidden">Rematch</button>
+        <button id="goto-rematch-btn" class="primary-btn hidden">Go to rematch &rarr;</button>
         <button id="resign-btn" class="danger-btn">Resign</button>
         <button id="leave-btn" class="ghost-btn">Back to lobby</button>
       </div>
@@ -115,6 +124,8 @@
         </label>
         <input id="board-size-slider" type="range" />
       </div>
+
+      <button id="flip-local-btn" class="ghost-btn flip-local">⇅ Flip board</button>
 
       <a id="open-editor-link" href="/editor.html">Edit this position &rarr;</a>
     </div>

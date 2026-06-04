@@ -9,11 +9,12 @@ import { getBusPassengers, parseFEN, parseFENFlags, pieceToImage, pieceToSymbol 
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
 import { squareIconSvg } from "./signal_icons";
 import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
-import { allowedMoves, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, type Color, type Coord, type GameMove, type GameStatus } from "./variables";
+import { allowedMoves, boardOrientation, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setBoardOrientation, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, squareDomIndex, type Color, type Coord, type GameMove, type GameStatus } from "./variables";
 import { API_BASE } from "./config";
 import * as online from "./online";
 import type { CreateGameRequest, GameResult, GameState, Subscription } from "./online";
 import { getName, setName } from "./player";
+import { toast } from "./toast";
 
 
 
@@ -34,14 +35,24 @@ function renderBoard(fen: string) {
   const cols = currentBoard[0]?.length ?? 0;
   setBoardDimensions(cols, rows);
 
-  for (let rank = 0; rank < rows; rank++) {
-    for (let file = 0; file < cols; file++) {
+  // Render in DOM (row-major) order, mapping each slot to its logical
+  // square for the current orientation. A black-oriented board is a 180°
+  // rotation, so both axes reverse. Logical coords drive piece lookup, the
+  // checker pattern, and the click handler — so move logic never has to
+  // know which way the board faces.
+  const flipped = boardOrientation === "black";
+  const showCoords = rows === 8 && cols === 8;
+  for (let dr = 0; dr < rows; dr++) {
+    for (let df = 0; df < cols; df++) {
+      const rank = flipped ? rows - 1 - dr : dr;
+      const file = flipped ? cols - 1 - df : df;
       const square_data = currentBoard[rank][file];
 
       const square = document.createElement("div");
       square.classList.add("square");
 
-      // light/dark checkered pattern
+      // light/dark checkered pattern (keyed on logical coords, so each
+      // square keeps its colour when the board flips)
       const isDark = (rank + file) % 2 === 1;
       square.classList.add(isDark ? "dark" : "light");
 
@@ -120,15 +131,65 @@ function renderBoard(fen: string) {
 
       }
 
+      // Coordinate labels on the board edges (standard 8×8 only — fairy
+      // boards have arbitrary dimensions). Appended AFTER the piece, whose
+      // `textContent` assignment would otherwise wipe these child nodes.
+      // File letter on the bottom DOM row, rank number on the left DOM
+      // column; both read the logical square so they rotate with the
+      // orientation.
+      if (showCoords) {
+        if (dr === rows - 1) square.appendChild(coordLabel("file", "abcdefgh"[file]));
+        if (df === 0) square.appendChild(coordLabel("rank", String(8 - rank)));
+      }
+
       square.onclick = () => handleSquareClick(rank, file);
 
       boardEl.appendChild(square);
     }
   }
 
+  // Tint the squares of the most recent move (from the FEN's `lm=` marker)
+  // so the opponent's move is obvious in online play.
+  highlightLastMove(fen, rows, cols);
+
   // Plan 11: if the position is a Duck Chess placement half-turn, light up
   // the empty squares as duck targets and show the hint.
   setupDuckPlacementMode();
+}
+
+/// A board-edge coordinate label (file letter / rank number). Absolutely
+/// positioned within its corner cell via the `coord-*` CSS classes.
+function coordLabel(kind: "file" | "rank", text: string): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.className = `coord-label coord-${kind}`;
+  span.textContent = text;
+  return span;
+}
+
+/// Parse the FEN's `lm=` last-move marker into from/to coords. Format:
+/// `lm=(C=<col>,F=<file>-<rank>,K=<kind>,T=<file>-<rank>,P=<piece>)`.
+/// Returns null when no last move is recorded (e.g. the start position).
+function parseLastMove(fen: string): { from: Coord; to: Coord } | null {
+  const tok = fen.split(/\s+/).find((t) => t.startsWith("lm="));
+  if (!tok) return null;
+  const from = /F=(\d+)-(\d+)/.exec(tok);
+  const to = /T=(\d+)-(\d+)/.exec(tok);
+  if (!from || !to) return null;
+  return {
+    from: { file: Number(from[1]), rank: Number(from[2]) },
+    to: { file: Number(to[1]), rank: Number(to[2]) },
+  };
+}
+
+/// Tint the from/to squares of the last move (`.last-move`), honoring the
+/// current orientation via `squareDomIndex`.
+function highlightLastMove(fen: string, rows: number, cols: number) {
+  const lm = parseLastMove(fen);
+  if (!lm) return;
+  const squares = document.querySelectorAll("#board .square");
+  for (const c of [lm.from, lm.to]) {
+    squares[squareDomIndex(c.rank, c.file, rows, cols)]?.classList.add("last-move");
+  }
 }
 
 /// Handler attached to each square on the board
@@ -198,13 +259,10 @@ async function handleSquareClick(rank: number, file: number) {
   // already follows this convention.
   const squareEls = document.querySelectorAll(".square");
   squareEls.forEach(s => s.classList.remove("selected"));
-  const cols =
-    Number(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue("--cols")
-        .trim(),
-    ) || currentBoard[0]?.length || 8;
-  squareEls[rank * cols + file]?.classList.add("selected");
+  const rootStyle = getComputedStyle(document.documentElement);
+  const cols = Number(rootStyle.getPropertyValue("--cols").trim()) || currentBoard[0]?.length || 8;
+  const rows = Number(rootStyle.getPropertyValue("--rows").trim()) || currentBoard.length || 8;
+  squareEls[squareDomIndex(rank, file, rows, cols)]?.classList.add("selected");
 
   try {
     const fen = currentFen();
@@ -386,15 +444,14 @@ function setupDuckPlacementMode() {
   hint.classList.remove("hidden");
 
   const squares = document.querySelectorAll("#board .square");
-  const cols =
-    Number(getComputedStyle(document.documentElement).getPropertyValue("--cols").trim()) ||
-    currentBoard[0]?.length ||
-    8;
+  const rootStyle = getComputedStyle(document.documentElement);
+  const cols = Number(rootStyle.getPropertyValue("--cols").trim()) || currentBoard[0]?.length || 8;
+  const rows = Number(rootStyle.getPropertyValue("--rows").trim()) || currentBoard.length || 8;
   for (let rank = 0; rank < currentBoard.length; rank++) {
     const row = currentBoard[rank];
     for (let file = 0; file < row.length; file++) {
       if (!row[file]?.piece && !row[file]?.duck) {
-        squares[rank * cols + file]?.classList.add("highlight");
+        squares[squareDomIndex(rank, file, rows, cols)]?.classList.add("highlight");
       }
     }
   }
@@ -558,7 +615,7 @@ async function consumeError(response: Response, context: string): Promise<Error>
 function showError(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
   console.error("Surfaced to user:", msg);
-  alert(msg);
+  toast(msg, "error", 5000);
 }
 
 /// Render the game-status banner (plans 04/06). `Ongoing` or `null` hides
@@ -721,6 +778,25 @@ type OnlineSession = {
 let onlineSession: OnlineSession | null = null;
 let lobbySub: Subscription | null = null;
 
+/// Tracks the game WS connection so we only toast genuine drops/recoveries —
+/// not the initial connect or an intentional leave. Reset per game.
+let connState: "init" | "up" | "down" = "init";
+
+function setConnStatus(connected: boolean) {
+  const dot = document.getElementById("conn-status");
+  if (dot) {
+    dot.className = "conn-status " + (connected ? "live" : "down");
+    dot.title = connected ? "Live" : "Reconnecting…";
+  }
+  if (connected) {
+    if (connState === "down") toast("Reconnected", "success", 2000);
+    connState = "up";
+  } else {
+    if (connState === "up") toast("Connection lost — reconnecting…", "warn", 4000);
+    connState = "down";
+  }
+}
+
 /// The FEN the board is currently showing: the online session's when
 /// seated in a game, else the local FEN input. Board helpers read this
 /// (not `#fen-input` directly) so online play drives off the server's
@@ -744,6 +820,7 @@ function isMyTurnOnline(): boolean {
 /// game panel. `myColor` is preserved (pushes carry `your_color: null`).
 function applyOnlineState(state: GameState) {
   if (!onlineSession) return;
+  notifyStateChange(onlineSession.state, state);
   onlineSession.state = state;
   (document.getElementById("fen-input") as HTMLInputElement).value = state.fen;
   clearSelection();
@@ -751,6 +828,40 @@ function applyOnlineState(state: GameState) {
   renderStatus(state.status);
   renderOnlineOutcome(state);
   renderGamePanel();
+  trackHistory(state);
+}
+
+/// Emit toast cues for the meaningful transitions between two snapshots of
+/// the same game: an opponent taking a seat, the game ending, and the turn
+/// passing to us.
+function notifyStateChange(prev: GameState, next: GameState) {
+  if (!onlineSession) return;
+  const my = onlineSession.myColor;
+
+  const oppSeat = (s: GameState) =>
+    my === "White" ? s.black : my === "Black" ? s.white : null;
+  if (!oppSeat(prev) && oppSeat(next)) {
+    toast(`${oppSeat(next)!.name || "Opponent"} joined`, "success");
+  }
+
+  if (!prev.result && next.result) {
+    const r = next.result;
+    const msg =
+      r.kind === "Draw"
+        ? "Game drawn"
+        : r.kind === "Resignation"
+          ? `${r.winner} wins by resignation`
+          : `${r.winner} wins`;
+    toast(msg, "info", 6000);
+  } else {
+    // Turn just passed to us (suppressed when the game has ended).
+    const wasMine = !prev.result && my != null && my === prev.side_to_move;
+    const isMine = !next.result && my != null && my === next.side_to_move;
+    if (!wasMine && isMine) toast("Your turn", "info", 2500);
+  }
+
+  // The opponent offered a rematch.
+  if (!prev.rematch && next.rematch) toast("Rematch ready — jump in!", "success", 5000);
 }
 
 /// The `#game-status` banner is driven by `GameStatus`, which has no
@@ -875,7 +986,8 @@ async function joinByIdOrCode(idOrCode: string) {
 
 function enterOnlineGame(state: GameState) {
   onlineSession?.sub.close();
-  const sub = online.subscribeGame(state.id, applyOnlineState);
+  connState = "init";
+  const sub = online.subscribeGame(state.id, applyOnlineState, setConnStatus);
   onlineSession = {
     gameId: state.id,
     code: state.code,
@@ -883,6 +995,10 @@ function enterOnlineGame(state: GameState) {
     state,
     sub,
   };
+  // Seat the board from the player's perspective (Black plays flipped);
+  // spectators keep the default White-up view.
+  setBoardOrientation(state.your_color === "Black" ? "black" : "white");
+  resetHistory(state);
   setGameUrlParam(state.id);
   showGameView(true);
   applyOnlineState(state);
@@ -894,6 +1010,23 @@ function leaveOnlineGame() {
   clearGameUrlParam();
   showGameView(false);
   refreshPublicGames();
+  // Back to the local White-up view.
+  setBoardOrientation("white");
+  renderBoard(currentFen());
+}
+
+/// Manual board flip (works in Local and Online). Re-renders the current
+/// position the other way up; re-applies the online status/panel that
+/// `renderBoard` resets.
+function flipBoard() {
+  setBoardOrientation(boardOrientation === "white" ? "black" : "white");
+  clearSelection();
+  renderBoard(currentFen());
+  if (onlineSession) {
+    renderStatus(onlineSession.state.status);
+    renderOnlineOutcome(onlineSession.state);
+    renderGamePanel();
+  }
 }
 
 function showGameView(inGame: boolean) {
@@ -935,6 +1068,17 @@ function renderGamePanel() {
     `Code ${s.code}` + (onlineSession.myColor ? ` · you are ${onlineSession.myColor}` : "");
   const resignBtn = document.getElementById("resign-btn") as HTMLButtonElement;
   resignBtn.disabled = Boolean(s.result) || onlineSession.myColor == null;
+
+  // Rematch affordances: offer one once the game is over (to seated
+  // players); once a rematch exists, both sides get a jump-across button.
+  const over = Boolean(s.result);
+  const seated = onlineSession.myColor != null;
+  document
+    .getElementById("rematch-btn")!
+    .classList.toggle("hidden", !(over && seated && s.rematch == null));
+  document
+    .getElementById("goto-rematch-btn")!
+    .classList.toggle("hidden", s.rematch == null);
 }
 
 function flashCopied() {
@@ -942,6 +1086,66 @@ function flashCopied() {
   const prev = btn.textContent;
   btn.textContent = "Copied!";
   setTimeout(() => (btn.textContent = prev), 1200);
+}
+
+// --- move history ---
+
+let moveHistory: string[] = [];
+let historyMaxPly = 0;
+
+/// A coordinate-notation entry from the FEN's `lm=` marker: `<glyph> e2→e4`.
+/// Algebraic-ish (file letter + 8−rank); degrades gracefully off 8×8.
+function formatLastMove(fen: string): string | null {
+  const tok = fen.split(/\s+/).find((t) => t.startsWith("lm="));
+  if (!tok) return null;
+  const f = /F=(\d+)-(\d+)/.exec(tok);
+  const t = /T=(\d+)-(\d+)/.exec(tok);
+  if (!f || !t) return null;
+  const sq = (file: number, rank: number) =>
+    (file < 8 ? "abcdefgh"[file] : `f${file}`) + (8 - rank);
+  const piece = /P=([^,)]+)/.exec(tok);
+  const glyph = piece ? pieceToSymbol(piece[1]) : "";
+  return `${glyph} ${sq(Number(f[1]), Number(f[2]))}→${sq(Number(t[1]), Number(t[2]))}`.trim();
+}
+
+/// Start a fresh history for a game. Joining mid-game, we lack the earlier
+/// moves, so seed the high-water mark at the entry ply and note it.
+function resetHistory(state: GameState) {
+  moveHistory = [];
+  historyMaxPly = state.ply;
+  if (state.ply > 0) moveHistory.push(`· joined at move ${state.ply} ·`);
+  renderMoveHistory();
+}
+
+/// Append the move(s) that advanced the game since the last render. Only the
+/// latest move is recoverable (from `lm=`), so a ply jump (lag / mid-game
+/// join) is summarised rather than reconstructed.
+function trackHistory(state: GameState) {
+  if (state.ply <= historyMaxPly) return;
+  const gap = state.ply - historyMaxPly - 1;
+  if (gap > 0) moveHistory.push(`· ${gap} move${gap === 1 ? "" : "s"} not shown ·`);
+  moveHistory.push(`${state.ply}. ${formatLastMove(state.fen) ?? "—"}`);
+  historyMaxPly = state.ply;
+  renderMoveHistory();
+}
+
+function renderMoveHistory() {
+  const el = document.getElementById("move-history");
+  if (!el) return;
+  el.innerHTML = "";
+  if (moveHistory.length === 0) {
+    const li = document.createElement("li");
+    li.className = "mh-empty";
+    li.textContent = "No moves yet";
+    el.appendChild(li);
+  } else {
+    for (const m of moveHistory) {
+      const li = document.createElement("li");
+      li.textContent = m;
+      el.appendChild(li);
+    }
+  }
+  el.scrollTop = el.scrollHeight;
 }
 
 // --- share URL ---
@@ -1064,6 +1268,25 @@ document.getElementById("resign-btn")!.addEventListener("click", async () => {
   }
 });
 document.getElementById("leave-btn")!.addEventListener("click", () => leaveOnlineGame());
+document.getElementById("flip-btn")!.addEventListener("click", () => flipBoard());
+document.getElementById("flip-local-btn")!.addEventListener("click", () => flipBoard());
+document.getElementById("rematch-btn")!.addEventListener("click", async () => {
+  if (!onlineSession) return;
+  try {
+    enterOnlineGame(await online.rematchGame(onlineSession.gameId));
+  } catch (err) {
+    showError(err);
+  }
+});
+document.getElementById("goto-rematch-btn")!.addEventListener("click", async () => {
+  const rid = onlineSession?.state.rematch;
+  if (!rid) return;
+  try {
+    enterOnlineGame(await online.getGame(rid));
+  } catch (err) {
+    showError(err);
+  }
+});
 document.getElementById("copy-link-btn")!.addEventListener("click", async () => {
   if (!onlineSession) return;
   const url = gameShareUrl(onlineSession.gameId);

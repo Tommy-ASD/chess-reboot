@@ -42,6 +42,9 @@ export type GameState = {
   ply: number;
   status: GameStatus;
   result: GameResult | null;
+  /// Set once a rematch has been created from this finished game (its id);
+  /// both players learn it from the old game's live feed.
+  rematch: string | null;
   your_color: Color | null;
 };
 
@@ -123,6 +126,14 @@ export function resignGame(idOrCode: string): Promise<GameState> {
   });
 }
 
+/// Create (or re-fetch) a swapped-colours rematch of a finished game. Both
+/// players are pre-seated; the returned state is the new game.
+export function rematchGame(idOrCode: string): Promise<GameState> {
+  return api<GameState>(`/games/${encodeURIComponent(idOrCode)}/rematch`, {
+    method: "POST",
+  });
+}
+
 // ---------------------------------------------------------------------
 // WebSocket (server -> client push, auto-reconnecting)
 // ---------------------------------------------------------------------
@@ -134,7 +145,11 @@ export type Subscription = { close(): void };
 /// Connect to `url`, parse each text frame as JSON, and invoke
 /// `onMessage`. Reconnects with capped exponential backoff on an
 /// unexpected close, until `close()` is called.
-function subscribe(url: string, onMessage: (data: unknown) => void): Subscription {
+function subscribe(
+  url: string,
+  onMessage: (data: unknown) => void,
+  onStatus?: (connected: boolean) => void,
+): Subscription {
   let ws: WebSocket | null = null;
   let closed = false;
   let attempt = 0;
@@ -145,6 +160,7 @@ function subscribe(url: string, onMessage: (data: unknown) => void): Subscriptio
     ws = new WebSocket(url);
     ws.onopen = () => {
       attempt = 0;
+      onStatus?.(true);
     };
     ws.onmessage = (ev) => {
       try {
@@ -154,7 +170,9 @@ function subscribe(url: string, onMessage: (data: unknown) => void): Subscriptio
       }
     };
     ws.onclose = () => {
+      // An intentional `close()` is not a dropped connection — stay quiet.
       if (closed) return;
+      onStatus?.(false);
       const delay = Math.min(1000 * 2 ** attempt, 10000);
       attempt += 1;
       timer = setTimeout(connect, delay);
@@ -179,9 +197,12 @@ function subscribe(url: string, onMessage: (data: unknown) => void): Subscriptio
 export function subscribeGame(
   idOrCode: string,
   onState: (state: GameState) => void,
+  onStatus?: (connected: boolean) => void,
 ): Subscription {
-  return subscribe(`${WS_BASE}/ws/games/${encodeURIComponent(idOrCode)}`, (data) =>
-    onState(data as GameState),
+  return subscribe(
+    `${WS_BASE}/ws/games/${encodeURIComponent(idOrCode)}`,
+    (data) => onState(data as GameState),
+    onStatus,
   );
 }
 

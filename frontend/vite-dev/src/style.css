@@ -1792,3 +1792,156 @@ body.online #left-panel {
     grid-template-columns: 1fr;
   }
 }
+
+/* Last-move tint (from the FEN `lm=` marker) — fills the from/to squares
+   behind the piece (which sits at z-index 2), via an inset box-shadow so it
+   never collides with the `.highlight` / `.selected` pseudo-elements. */
+.square.last-move {
+  box-shadow: inset 0 0 0 200px rgba(245, 200, 66, 0.26);
+}
+
+/* Board-edge coordinate labels (rendered on 8×8 boards only). Coloured with
+   the opposite square's tone so they stay legible on light and dark. */
+.coord-label {
+  position: absolute;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+  font-size: calc(20cqw / var(--cols));
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.coord-file {
+  bottom: 2px;
+  right: 3px;
+}
+
+.coord-rank {
+  top: 1px;
+  left: 3px;
+}
+
+.square.light .coord-label {
+  color: var(--dark-square);
+}
+
+.square.dark .coord-label {
+  color: var(--light-square);
+}
+
+/* Local-mode flip button spans the panel like the other left-panel controls. */
+#flip-local-btn {
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+/* Toasts — bottom-right stack, colour-keyed left border, click to dismiss. */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  max-width: 320px;
+  padding: 11px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--primary);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 0.18s ease both;
+}
+
+.toast.toast-hide {
+  animation: toast-out 0.2s ease forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(16px); }
+}
+
+.toast-success { border-left-color: #3f9d52; }
+.toast-warn { border-left-color: #d08a2a; }
+.toast-error { border-left-color: #b4452e; }
+.toast-info { border-left-color: var(--primary); }
+
+/* Connection-status dot in the game panel. */
+.conn-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.conn-status.live {
+  background: #3f9d52;
+  box-shadow: 0 0 0 3px rgba(63, 157, 82, 0.18);
+}
+
+.conn-status.down {
+  background: #d08a2a;
+  box-shadow: 0 0 0 3px rgba(208, 138, 42, 0.18);
+  animation: conn-pulse 1s ease-in-out infinite;
+}
+
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Move history — compact scrollable list in the game panel. */
+.move-history-wrap {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.move-history-wrap h3 {
+  margin: 0 0 8px 0;
+}
+
+.move-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 92px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+}
+
+.move-history li {
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-soft);
+  background: var(--surface-2);
+}
+
+.move-history li.mh-empty {
+  background: transparent;
+  color: var(--text-muted);
+  font-style: italic;
+}

@@ -1,4 +1,4 @@
-import { allowedMoves, selectedPassengerIndex, setAllowedMoves, setSelectedPassengerIndex, setSelectedSquare, type Coord, type GameMove, type MoveType } from "./variables";
+import { allowedMoves, selectedPassengerIndex, setAllowedMoves, setSelectedPassengerIndex, setSelectedSquare, squareDomIndex, type Coord, type GameMove, type MoveType } from "./variables";
 
 
 export function isMoveTo(m: GameMove): m is GameMove & { move_type: { kind: "MoveTo"; target: Coord } } {
@@ -91,14 +91,13 @@ export function highlightMoves(moves: GameMove[]) {
     // The squares NodeList is in row-major order — same as the rendered
     // grid. Read the column count off the `--cols` CSS variable so this
     // works for any board width, not just 8.
-    const colsRaw = getComputedStyle(document.documentElement)
-        .getPropertyValue("--cols")
-        .trim();
-    const cols = Number(colsRaw) || 8;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const cols = Number(rootStyle.getPropertyValue("--cols").trim()) || 8;
+    const rows = Number(rootStyle.getPropertyValue("--rows").trim()) || cols;
 
     const targets = visibleMoveTargets(moves, selectedPassengerIndex);
     for (const t of targets) {
-        const idx = t.target.rank * cols + t.target.file;
+        const idx = squareDomIndex(t.target.rank, t.target.file, rows, cols);
         const sq = squares[idx];
         if (!sq) continue;
         sq.classList.add("highlight");

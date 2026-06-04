@@ -138,3 +138,25 @@ export let selectedPassengerIndex: number | null = null;
 export function setSelectedPassengerIndex(i: number | null) {
     selectedPassengerIndex = i;
 }
+
+/// Board rendering orientation. "white" = rank 0 (the FEN's first row) at
+/// the top; "black" = flipped 180° so a seated black player sees their own
+/// pieces at the bottom. Logical coords (rank/file) never change — only DOM
+/// placement + index mapping flip, so all move logic stays orientation-
+/// agnostic.
+export let boardOrientation: "white" | "black" = "white";
+
+export function setBoardOrientation(o: "white" | "black") {
+    boardOrientation = o;
+}
+
+/// Map a logical (rank, file) to its index in the row-major `.square`
+/// NodeList for the current orientation. Every board-cell lookup routes
+/// through this, so flipping lives in exactly one place. A 180° flip is its
+/// own inverse, so the same formula also maps a DOM slot back to a logical
+/// square (used by `renderBoard`).
+export function squareDomIndex(rank: number, file: number, rows: number, cols: number): number {
+    return boardOrientation === "black"
+        ? (rows - 1 - rank) * cols + (cols - 1 - file)
+        : rank * cols + file;
+}
