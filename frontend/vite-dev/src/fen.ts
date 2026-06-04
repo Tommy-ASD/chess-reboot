@@ -1,6 +1,6 @@
 // src/fen.ts
 
-import type { Square, SquareType } from "./variables";
+import type { Coord, Square, SquareType } from "./variables";
 
 // ----------------------------------------------
 // Full-FEN flag fields (used by the dedicated editor)
@@ -195,6 +195,40 @@ export const pieceToImage = (p: string): string | undefined => {
   return map[base];
 }
 
+
+// ----------------------------------------------
+// Last-move marker (`lm=`)
+// ----------------------------------------------
+
+/// Parse the FEN's `lm=` last-move marker into from/to coords. Format:
+/// `lm=(C=<col>,F=<file>-<rank>,K=<kind>,T=<file>-<rank>,P=<piece>)`.
+/// Returns null when no last move is recorded (e.g. the start position).
+export function parseLastMove(fen: string): { from: Coord; to: Coord } | null {
+  const tok = fen.split(/\s+/).find((t) => t.startsWith("lm="));
+  if (!tok) return null;
+  const from = /F=(\d+)-(\d+)/.exec(tok);
+  const to = /T=(\d+)-(\d+)/.exec(tok);
+  if (!from || !to) return null;
+  return {
+    from: { file: Number(from[1]), rank: Number(from[2]) },
+    to: { file: Number(to[1]), rank: Number(to[2]) },
+  };
+}
+
+/// A coordinate-notation summary of the last move: `<glyph> e2→e4`.
+/// Algebraic-ish (file letter + 8−rank); degrades gracefully off 8×8.
+export function formatLastMove(fen: string): string | null {
+  const tok = fen.split(/\s+/).find((t) => t.startsWith("lm="));
+  if (!tok) return null;
+  const f = /F=(\d+)-(\d+)/.exec(tok);
+  const t = /T=(\d+)-(\d+)/.exec(tok);
+  if (!f || !t) return null;
+  const sq = (file: number, rank: number) =>
+    (file < 8 ? "abcdefgh"[file] : `f${file}`) + (8 - rank);
+  const piece = /P=([^,)]+)/.exec(tok);
+  const glyph = piece ? pieceToSymbol(piece[1]) : "";
+  return `${glyph} ${sq(Number(f[1]), Number(f[2]))}→${sq(Number(t[1]), Number(t[2]))}`.trim();
+}
 
 // ----------------------------------------------
 // Bus passenger extraction
