@@ -1945,3 +1945,14 @@ body.online #left-panel {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* Watch-live section in the lobby (the list reuses .public-games). */
+.online-watch {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.online-watch h3 {
+  margin: 0 0 10px 0;
+}

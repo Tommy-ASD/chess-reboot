@@ -45,6 +45,8 @@ export type GameState = {
   /// Set once a rematch has been created from this finished game (its id);
   /// both players learn it from the old game's live feed.
   rematch: string | null;
+  /// The colour with an outstanding draw offer, if any.
+  draw_offer: Color | null;
   your_color: Color | null;
 };
 
@@ -130,6 +132,25 @@ export function resignGame(idOrCode: string): Promise<GameState> {
 /// players are pre-seated; the returned state is the new game.
 export function rematchGame(idOrCode: string): Promise<GameState> {
   return api<GameState>(`/games/${encodeURIComponent(idOrCode)}/rematch`, {
+    method: "POST",
+  });
+}
+
+/// Public in-progress games (both seats filled, not finished) — spectatable.
+export function listLive(): Promise<GameState[]> {
+  return api<GameState[]>("/games/live");
+}
+
+/// Offer a draw, or accept the opponent's outstanding offer.
+export function offerDraw(idOrCode: string): Promise<GameState> {
+  return api<GameState>(`/games/${encodeURIComponent(idOrCode)}/draw`, {
+    method: "POST",
+  });
+}
+
+/// Decline / withdraw a draw offer.
+export function declineDraw(idOrCode: string): Promise<GameState> {
+  return api<GameState>(`/games/${encodeURIComponent(idOrCode)}/draw/decline`, {
     method: "POST",
   });
 }

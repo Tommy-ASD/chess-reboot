@@ -70,6 +70,12 @@
           <p id="public-games-empty" class="muted-note">No open games right now — create one!</p>
         </div>
       </div>
+
+      <div class="online-watch">
+        <h3>Watch live games</h3>
+        <ul id="live-games" class="public-games"></ul>
+        <p id="live-games-empty" class="muted-note">No games in progress right now.</p>
+      </div>
     </div>
 
     <div id="online-game" class="hidden">
@@ -90,6 +96,9 @@
       </div>
       <div class="game-actions">
         <button id="flip-btn" class="ghost-btn">⇅ Flip</button>
+        <button id="offer-draw-btn" class="ghost-btn hidden">½ Offer draw</button>
+        <button id="accept-draw-btn" class="primary-btn hidden">Accept draw</button>
+        <button id="decline-draw-btn" class="ghost-btn hidden">Decline draw</button>
         <button id="rematch-btn" class="primary-btn hidden">Rematch</button>
         <button id="goto-rematch-btn" class="primary-btn hidden">Go to rematch &rarr;</button>
         <button id="resign-btn" class="danger-btn">Resign</button>

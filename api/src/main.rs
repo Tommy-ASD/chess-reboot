@@ -349,6 +349,38 @@ async fn rematch_game_handler(
     }
 }
 
+/// `GET /games/live` — public in-progress games for spectating.
+#[axum::debug_handler]
+async fn list_live_handler(State(state): State<AppState>) -> Response {
+    Json(state.list_live()).into_response()
+}
+
+/// `POST /games/{id}/draw` — offer a draw, or accept the opponent's offer.
+#[axum::debug_handler]
+async fn draw_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.offer_draw(&id, &player) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
+/// `POST /games/{id}/draw/decline` — decline / withdraw a draw offer.
+#[axum::debug_handler]
+async fn decline_draw_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.decline_draw(&id, &player) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
 // ---------------------------------------------------------------------
 // Phase 2: WebSocket live updates (server -> client push)
 // ---------------------------------------------------------------------
@@ -462,11 +494,14 @@ pub async fn serve_api() {
         .route("/board/status", post(get_status_handler))
         // Online multiplayer (Phase 1 REST; WS added in Phase 2).
         .route("/games", post(create_game_handler).get(list_games_handler))
+        .route("/games/live", get(list_live_handler))
         .route("/games/{id}", get(get_game_handler))
         .route("/games/{id}/join", post(join_game_handler))
         .route("/games/{id}/move", post(move_handler))
         .route("/games/{id}/resign", post(resign_game_handler))
         .route("/games/{id}/rematch", post(rematch_game_handler))
+        .route("/games/{id}/draw", post(draw_handler))
+        .route("/games/{id}/draw/decline", post(decline_draw_handler))
         // Live updates (Phase 2): per-game + lobby pushes.
         .route("/ws/games/{id}", get(game_ws_handler))
         .route("/ws/lobby", get(lobby_ws_handler))
@@ -1438,5 +1473,89 @@ mod game_tests {
             state.rematch(&g.id.to_string(), &carol),
             Err(GameActionError::NotSeated)
         ));
+    }
+
+    #[test]
+    fn draw_offer_then_accept_ends_in_a_draw() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+
+        // Alice offers → recorded on White, game still live.
+        let offered = state.offer_draw(&g.id.to_string(), &alice).unwrap();
+        assert_eq!(offered.draw_offer, Some(Color::White));
+        assert!(offered.result.is_none());
+
+        // Bob accepts (the offer stands on the opponent's colour) → Draw.
+        let accepted = state.offer_draw(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(accepted.result, Some(GameResult::Draw));
+        assert_eq!(accepted.draw_offer, None);
+    }
+
+    #[test]
+    fn a_move_clears_a_pending_draw_offer() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+        // Bob (Black) offers; Alice (White) then moves → the offer clears.
+        state.offer_draw(&g.id.to_string(), &bob).unwrap();
+        let after = state.apply_move(&g.id.to_string(), &alice, e2e4()).unwrap();
+        assert_eq!(after.draw_offer, None);
+        assert!(after.result.is_none());
+    }
+
+    #[test]
+    fn draw_offer_can_be_declined() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+        state.offer_draw(&g.id.to_string(), &alice).unwrap();
+        let declined = state.decline_draw(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(declined.draw_offer, None);
+        assert!(declined.result.is_none());
+    }
+
+    #[test]
+    fn draw_rejects_finished_game_and_non_players() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let carol = player("Carol");
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+        assert!(matches!(
+            state.offer_draw(&g.id.to_string(), &carol),
+            Err(GameActionError::NotSeated)
+        ));
+        state.resign(&g.id.to_string(), &alice).unwrap();
+        assert!(matches!(
+            state.offer_draw(&g.id.to_string(), &bob),
+            Err(GameActionError::Over)
+        ));
+    }
+
+    #[test]
+    fn list_live_shows_only_in_progress_public_games() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        // Public with one open seat → joinable, not yet spectatable.
+        let g = state.create(&alice, req(true)).unwrap();
+        assert!(state.list_live().is_empty());
+        assert_eq!(state.list_public().len(), 1);
+        // Once full → spectatable, no longer joinable.
+        state.join(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(state.list_live().len(), 1);
+        assert!(state.list_public().is_empty());
+        // A private full game is not spectatable.
+        let p = state.create(&player("Carol"), req(false)).unwrap();
+        state.join(&p.id.to_string(), &player("Dave")).unwrap();
+        assert_eq!(state.list_live().len(), 1);
     }
 }

@@ -83,6 +83,9 @@ pub struct Game {
     /// follow-up game's id. Surfaced in `GameState` so both players can jump
     /// to it from the old game's live feed.
     pub rematch: Option<GameId>,
+    /// The colour with an outstanding draw offer, if any. Cleared on accept,
+    /// decline, or any move.
+    pub draw_offer: Option<Color>,
 }
 
 impl Game {
@@ -119,6 +122,7 @@ impl Game {
             status: self.status.clone(),
             result: self.result.clone(),
             rematch: self.rematch,
+            draw_offer: self.draw_offer,
             your_color: viewer.and_then(|v| self.color_of(v)),
         }
     }
@@ -141,6 +145,8 @@ pub struct GameState {
     /// Set when a rematch has been created from this finished game (its id);
     /// both players learn it from the old game's broadcast.
     pub rematch: Option<GameId>,
+    /// The colour with an outstanding draw offer (offer / accept / decline).
+    pub draw_offer: Option<Color>,
     /// The requesting player's colour, if seated. `None` for spectators /
     /// broadcast pushes.
     pub your_color: Option<Color>,
@@ -338,6 +344,7 @@ impl AppState {
             status,
             initial_fen: fen,
             rematch: None,
+            draw_offer: None,
         };
         let snap = game.snapshot(Some(host.id));
         store.codes.insert(code, id);
@@ -443,6 +450,8 @@ impl AppState {
             g.side_to_move = board.flags.side_to_move;
             g.status = board.status();
             g.history.push(mv);
+            // A move supersedes any pending draw offer.
+            g.draw_offer = None;
             if let Some(res) = result_from_status(&g.status) {
                 g.result = Some(res);
             }
@@ -539,6 +548,7 @@ impl AppState {
             status,
             initial_fen,
             rematch: None,
+            draw_offer: None,
         };
         let snap = new_game.snapshot(Some(player.id));
         store.codes.insert(code, new_id);
@@ -556,5 +566,72 @@ impl AppState {
             let _ = self.lobby_tx.send(());
         }
         Ok(snap)
+    }
+
+    /// Public, in-progress (both seats filled, not finished) games — the
+    /// spectator list. The mirror image of [`list_public`](Self::list_public),
+    /// which lists *joinable* games.
+    pub fn list_live(&self) -> Vec<GameState> {
+        let store = self.lock();
+        store
+            .games
+            .values()
+            .filter(|e| e.game.public && e.game.result.is_none() && e.game.is_full())
+            .map(|e| e.game.snapshot(None))
+            .collect()
+    }
+
+    /// Offer a draw, or accept the opponent's outstanding offer. Accepting
+    /// (the offer already stands on the other colour) ends the game in a
+    /// draw; otherwise it records/refreshes the offer on the caller's colour.
+    /// Any move by either side clears a pending offer (see `apply_move`).
+    pub fn offer_draw(&self, key: &str, player: &AuthPlayer) -> Result<GameState, GameActionError> {
+        let mut store = self.lock();
+        let id = Self::resolve(&store, key).ok_or(GameActionError::NotFound)?;
+        let entry = store.games.get_mut(&id).ok_or(GameActionError::NotFound)?;
+        let (your, bcast, ended) = {
+            let g = &mut entry.game;
+            if g.result.is_some() {
+                return Err(GameActionError::Over);
+            }
+            let my_color = g.color_of(player.id).ok_or(GameActionError::NotSeated)?;
+            if g.draw_offer == Some(my_color.opposite()) {
+                // The opponent already offered → accept: the game is a draw.
+                g.result = Some(GameResult::Draw);
+                g.draw_offer = None;
+                (g.snapshot(Some(player.id)), g.snapshot(None), true)
+            } else {
+                // Offer (or re-offer) on my colour.
+                g.draw_offer = Some(my_color);
+                (g.snapshot(Some(player.id)), g.snapshot(None), false)
+            }
+        };
+        let _ = entry.tx.send(bcast);
+        drop(store);
+        if ended {
+            let _ = self.lobby_tx.send(());
+        }
+        Ok(your)
+    }
+
+    /// Decline / withdraw the outstanding draw offer (clears it).
+    pub fn decline_draw(
+        &self,
+        key: &str,
+        player: &AuthPlayer,
+    ) -> Result<GameState, GameActionError> {
+        let mut store = self.lock();
+        let id = Self::resolve(&store, key).ok_or(GameActionError::NotFound)?;
+        let entry = store.games.get_mut(&id).ok_or(GameActionError::NotFound)?;
+        let (your, bcast) = {
+            let g = &mut entry.game;
+            if g.color_of(player.id).is_none() {
+                return Err(GameActionError::NotSeated);
+            }
+            g.draw_offer = None;
+            (g.snapshot(Some(player.id)), g.snapshot(None))
+        };
+        let _ = entry.tx.send(bcast);
+        Ok(your)
     }
 }

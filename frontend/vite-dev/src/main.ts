@@ -847,6 +847,11 @@ function notifyStateChange(prev: GameState, next: GameState) {
 
   // The opponent offered a rematch.
   if (!prev.rematch && next.rematch) toast("Rematch ready — jump in!", "success", 5000);
+
+  // The opponent offered a draw.
+  const prevOppDraw = prev.draw_offer != null && my != null && prev.draw_offer !== my;
+  const nextOppDraw = next.draw_offer != null && my != null && next.draw_offer !== my;
+  if (!prevOppDraw && nextOppDraw) toast("Opponent offers a draw", "info", 5000);
 }
 
 /// The `#game-status` banner is driven by `GameStatus`, which has no
@@ -891,7 +896,13 @@ function setMode(mode: "local" | "online") {
 
 function startLobby() {
   refreshPublicGames();
-  if (!lobbySub) lobbySub = online.subscribeLobby(renderPublicGames);
+  refreshLiveGames();
+  if (!lobbySub) {
+    lobbySub = online.subscribeLobby((games) => {
+      renderPublicGames(games);
+      refreshLiveGames();
+    });
+  }
 }
 
 function stopLobby() {
@@ -936,6 +947,35 @@ function renderPublicGames(games: GameState[]) {
   }
 }
 
+async function refreshLiveGames() {
+  try {
+    renderLiveGames(await online.listLive());
+  } catch (err) {
+    console.error("listLive failed", err);
+  }
+}
+
+function renderLiveGames(games: GameState[]) {
+  const list = document.getElementById("live-games")!;
+  const empty = document.getElementById("live-games-empty")!;
+  list.innerHTML = "";
+  empty.classList.toggle("hidden", games.length > 0);
+  for (const g of games) {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "game-label";
+    const variant = g.fen.includes("variants=duck_chess") ? "Duck Chess" : "Chess";
+    label.textContent =
+      `${g.name || "Game"} — ${variant} · ${g.white?.name ?? "?"} vs ${g.black?.name ?? "?"} · move ${g.ply}`;
+    const btn = document.createElement("button");
+    btn.className = "join-mini";
+    btn.textContent = "Watch";
+    btn.onclick = () => spectateGame(g.id);
+    li.append(label, btn);
+    list.appendChild(li);
+  }
+}
+
 // --- create / join / leave ---
 
 function syncName() {
@@ -964,6 +1004,19 @@ async function joinByIdOrCode(idOrCode: string) {
   syncName();
   try {
     enterOnlineGame(await online.joinGame(key));
+  } catch (err) {
+    showError(err);
+  }
+}
+
+/// Open a game as a spectator: `getGame` (not join), so `your_color` stays
+/// null — the board renders read-only and the seat actions stay hidden.
+async function spectateGame(idOrCode: string) {
+  const key = idOrCode.trim();
+  if (!key) return;
+  syncName();
+  try {
+    enterOnlineGame(await online.getGame(key));
   } catch (err) {
     showError(err);
   }
@@ -1050,7 +1103,7 @@ function renderGamePanel() {
   pill.className =
     "turn-pill" + (s.result ? " over" : isMyTurnOnline() ? " mine" : " theirs");
   document.getElementById("share-line")!.textContent =
-    `Code ${s.code}` + (onlineSession.myColor ? ` · you are ${onlineSession.myColor}` : "");
+    `Code ${s.code} · ` + (onlineSession.myColor ? `you are ${onlineSession.myColor}` : "spectating");
   const resignBtn = document.getElementById("resign-btn") as HTMLButtonElement;
   resignBtn.disabled = Boolean(s.result) || onlineSession.myColor == null;
 
@@ -1064,6 +1117,21 @@ function renderGamePanel() {
   document
     .getElementById("goto-rematch-btn")!
     .classList.toggle("hidden", s.rematch == null);
+
+  // Draw-offer affordances (seated players, live game only). I see an
+  // "Offer draw" button (a pending self-offer disables it); the opponent
+  // sees Accept / Decline.
+  const liveSeated = !over && seated;
+  const myColor = onlineSession.myColor;
+  const iOffered = liveSeated && s.draw_offer != null && s.draw_offer === myColor;
+  const oppOffered =
+    liveSeated && s.draw_offer != null && myColor != null && s.draw_offer !== myColor;
+  const offerBtn = document.getElementById("offer-draw-btn") as HTMLButtonElement;
+  offerBtn.classList.toggle("hidden", !(liveSeated && (s.draw_offer == null || iOffered)));
+  offerBtn.disabled = iOffered;
+  offerBtn.textContent = iOffered ? "Draw offered…" : "½ Offer draw";
+  document.getElementById("accept-draw-btn")!.classList.toggle("hidden", !oppOffered);
+  document.getElementById("decline-draw-btn")!.classList.toggle("hidden", !oppOffered);
 }
 
 function flashCopied() {
@@ -1253,6 +1321,30 @@ document.getElementById("goto-rematch-btn")!.addEventListener("click", async () 
   if (!rid) return;
   try {
     enterOnlineGame(await online.getGame(rid));
+  } catch (err) {
+    showError(err);
+  }
+});
+document.getElementById("offer-draw-btn")!.addEventListener("click", async () => {
+  if (!onlineSession) return;
+  try {
+    applyOnlineState(await online.offerDraw(onlineSession.gameId));
+  } catch (err) {
+    showError(err);
+  }
+});
+document.getElementById("accept-draw-btn")!.addEventListener("click", async () => {
+  if (!onlineSession) return;
+  try {
+    applyOnlineState(await online.offerDraw(onlineSession.gameId));
+  } catch (err) {
+    showError(err);
+  }
+});
+document.getElementById("decline-draw-btn")!.addEventListener("click", async () => {
+  if (!onlineSession) return;
+  try {
+    applyOnlineState(await online.declineDraw(onlineSession.gameId));
   } catch (err) {
     showError(err);
   }
