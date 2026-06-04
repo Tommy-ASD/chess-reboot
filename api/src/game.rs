@@ -77,6 +77,12 @@ pub struct Game {
     pub history: Vec<GameMove>,
     pub status: GameStatus,
     pub result: Option<GameResult>,
+    /// The starting position, kept so a rematch can reset to it.
+    pub initial_fen: String,
+    /// Set once a rematch has been created from this (finished) game — the
+    /// follow-up game's id. Surfaced in `GameState` so both players can jump
+    /// to it from the old game's live feed.
+    pub rematch: Option<GameId>,
 }
 
 impl Game {
@@ -112,6 +118,7 @@ impl Game {
             ply: self.history.len(),
             status: self.status.clone(),
             result: self.result.clone(),
+            rematch: self.rematch,
             your_color: viewer.and_then(|v| self.color_of(v)),
         }
     }
@@ -131,6 +138,9 @@ pub struct GameState {
     pub ply: usize,
     pub status: GameStatus,
     pub result: Option<GameResult>,
+    /// Set when a rematch has been created from this finished game (its id);
+    /// both players learn it from the old game's broadcast.
+    pub rematch: Option<GameId>,
     /// The requesting player's colour, if seated. `None` for spectators /
     /// broadcast pushes.
     pub your_color: Option<Color>,
@@ -166,6 +176,8 @@ pub enum GameActionError {
     NotYourTurn,
     /// The game has already ended.
     Over,
+    /// A rematch was requested but this game isn't over yet.
+    NotOver,
     /// The engine rejected the move (turn already validated).
     Move(MoveError),
     /// The stored FEN failed to parse — should never happen.
@@ -315,7 +327,7 @@ impl AppState {
             public: req.public,
             white,
             black,
-            fen,
+            fen: fen.clone(),
             side_to_move,
             history: Vec::new(),
             // A starting position that is already terminal (a checkmate /
@@ -324,6 +336,8 @@ impl AppState {
             // treat it consistently.
             result: result_from_status(&status),
             status,
+            initial_fen: fen,
+            rematch: None,
         };
         let snap = game.snapshot(Some(host.id));
         store.codes.insert(code, id);
@@ -462,5 +476,85 @@ impl AppState {
         drop(store);
         let _ = self.lobby_tx.send(());
         Ok(your)
+    }
+
+    /// Create (or re-fetch) a rematch of a finished game: a fresh game with
+    /// the same players, swapped colours, and the same settings + starting
+    /// position. Idempotent — the first call links the old game to the new
+    /// one and broadcasts it (so the opponent, still on the old game's WS,
+    /// can follow across); later calls return the existing rematch.
+    pub fn rematch(&self, key: &str, player: &AuthPlayer) -> Result<GameState, GameActionError> {
+        let mut store = self.lock();
+        let id = Self::resolve(&store, key).ok_or(GameActionError::NotFound)?;
+
+        // Read + validate against the old game before mutating anything.
+        let (old_white, old_black, public, initial_fen, existing) = {
+            let g = &store.games.get(&id).ok_or(GameActionError::NotFound)?.game;
+            if g.color_of(player.id).is_none() {
+                return Err(GameActionError::NotSeated);
+            }
+            if g.result.is_none() {
+                return Err(GameActionError::NotOver);
+            }
+            (
+                g.white.clone(),
+                g.black.clone(),
+                g.public,
+                g.initial_fen.clone(),
+                g.rematch,
+            )
+        };
+
+        // Idempotent: a rematch already exists → hand it back (the caller is
+        // already seated in it, with their swapped colour).
+        if let Some(rid) = existing {
+            return store
+                .games
+                .get(&rid)
+                .map(|e| e.game.snapshot(Some(player.id)))
+                .ok_or(GameActionError::NotFound);
+        }
+
+        // The starting position is re-derived from the stored initial FEN, so
+        // a rematch of a variant (e.g. Duck Chess) game stays that variant.
+        let board =
+            fen_to_board(&initial_fen).map_err(|e| GameActionError::Internal(e.to_string()))?;
+        let side_to_move = board.flags.side_to_move;
+        let status = board.status();
+        let new_id = Uuid::new_v4();
+        let code = Self::fresh_code(&store);
+        let (tx, _) = broadcast::channel(128);
+        let new_game = Game {
+            id: new_id,
+            code: code.clone(),
+            name: "Rematch".to_string(),
+            public,
+            // Swap seats so each player gets the other colour this time.
+            white: old_black,
+            black: old_white,
+            fen: initial_fen.clone(),
+            side_to_move,
+            history: Vec::new(),
+            result: result_from_status(&status),
+            status,
+            initial_fen,
+            rematch: None,
+        };
+        let snap = new_game.snapshot(Some(player.id));
+        store.codes.insert(code, new_id);
+        store.games.insert(new_id, GameEntry { game: new_game, tx });
+
+        // Link the old game to the rematch + push it so the opponent learns
+        // the rematch id. Scope the `&mut game` borrow so it ends before `tx`.
+        if let Some(entry) = store.games.get_mut(&id) {
+            entry.game.rematch = Some(new_id);
+            let bcast = entry.game.snapshot(None);
+            let _ = entry.tx.send(bcast);
+        }
+        drop(store);
+        if public {
+            let _ = self.lobby_tx.send(());
+        }
+        Ok(snap)
     }
 }

@@ -235,6 +235,11 @@ fn game_error_response(err: GameActionError) -> Response {
             Json(json!({ "code": "game_over", "message": "the game has already ended" })),
         )
             .into_response(),
+        GameActionError::NotOver => (
+            StatusCode::CONFLICT,
+            Json(json!({ "code": "game_not_over", "message": "the game is still in progress" })),
+        )
+            .into_response(),
         GameActionError::Move(move_err) => {
             let body = json!({
                 "code": move_error_code(&move_err),
@@ -325,6 +330,20 @@ async fn resign_game_handler(
     Path(id): Path<String>,
 ) -> Response {
     match state.resign(&id, &player) {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => game_error_response(e),
+    }
+}
+
+/// `POST /games/{id}/rematch` — after a finished game, create or re-fetch a
+/// swapped-colours rematch with the same players.
+#[axum::debug_handler]
+async fn rematch_game_handler(
+    State(state): State<AppState>,
+    player: AuthPlayer,
+    Path(id): Path<String>,
+) -> Response {
+    match state.rematch(&id, &player) {
         Ok(s) => Json(s).into_response(),
         Err(e) => game_error_response(e),
     }
@@ -447,6 +466,7 @@ pub async fn serve_api() {
         .route("/games/{id}/join", post(join_game_handler))
         .route("/games/{id}/move", post(move_handler))
         .route("/games/{id}/resign", post(resign_game_handler))
+        .route("/games/{id}/rematch", post(rematch_game_handler))
         // Live updates (Phase 2): per-game + lobby pushes.
         .route("/ws/games/{id}", get(game_ws_handler))
         .route("/ws/lobby", get(lobby_ws_handler))
@@ -1343,13 +1363,14 @@ mod game_tests {
     #[test]
     fn game_error_response_maps_each_variant_to_its_status() {
         use crate::game::GameActionError as E;
-        let cases: [(E, StatusCode); 8] = [
+        let cases: [(E, StatusCode); 9] = [
             (E::NotFound, StatusCode::NOT_FOUND),
             (E::BadFen("x".to_string()), StatusCode::BAD_REQUEST),
             (E::NotSeated, StatusCode::FORBIDDEN),
             (E::Full, StatusCode::CONFLICT),
             (E::NotYourTurn, StatusCode::FORBIDDEN),
             (E::Over, StatusCode::CONFLICT),
+            (E::NotOver, StatusCode::CONFLICT),
             // The engine-rejection arm builds the richest body (code +
             // message + serialized `details`); exercise its full mapping.
             (
@@ -1363,5 +1384,59 @@ mod game_tests {
         for (err, status) in cases {
             assert_eq!(game_error_response(err).status(), status);
         }
+    }
+
+    #[test]
+    fn rematch_swaps_colours_and_links_the_finished_game() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        // Alice (White) creates, Bob joins (Black), Alice resigns → finished.
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+        let finished = state.resign(&g.id.to_string(), &alice).unwrap();
+        assert!(finished.result.is_some());
+        assert!(finished.rematch.is_none());
+
+        // Alice requests the rematch → a fresh game with swapped seats.
+        let rematch = state.rematch(&g.id.to_string(), &alice).unwrap();
+        assert_ne!(rematch.id, g.id);
+        assert!(rematch.result.is_none());
+        assert_eq!(rematch.white.as_ref().unwrap().id, bob.id);
+        assert_eq!(rematch.black.as_ref().unwrap().id, alice.id);
+        assert_eq!(rematch.your_color, Some(Color::Black));
+
+        // The old game now links to the rematch so the opponent can follow.
+        let old = state.get(&g.id.to_string(), Some(bob.id)).unwrap();
+        assert_eq!(old.rematch, Some(rematch.id));
+
+        // Idempotent: Bob requesting it returns the SAME game, seated as his
+        // swapped colour (White) — not a second game.
+        let bob_view = state.rematch(&g.id.to_string(), &bob).unwrap();
+        assert_eq!(bob_view.id, rematch.id);
+        assert_eq!(bob_view.your_color, Some(Color::White));
+    }
+
+    #[test]
+    fn rematch_rejects_unfinished_game_and_non_players() {
+        let state = AppState::new();
+        let alice = player("Alice");
+        let bob = player("Bob");
+        let carol = player("Carol");
+        let g = state.create(&alice, req(false)).unwrap();
+        state.join(&g.id.to_string(), &bob).unwrap();
+
+        // Still in progress → no rematch yet.
+        assert!(matches!(
+            state.rematch(&g.id.to_string(), &alice),
+            Err(GameActionError::NotOver)
+        ));
+
+        // Finish it, then a non-player still can't rematch.
+        state.resign(&g.id.to_string(), &bob).unwrap();
+        assert!(matches!(
+            state.rematch(&g.id.to_string(), &carol),
+            Err(GameActionError::NotSeated)
+        ));
     }
 }
