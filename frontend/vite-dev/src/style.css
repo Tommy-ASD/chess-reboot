@@ -856,9 +856,8 @@ button {
   box-shadow: var(--shadow-sm);
 }
 
-#special-actions:empty::before,
-#carrier-moves:empty::before {
-  content: "Select a piece to see options.";
+#special-actions:empty::before {
+  content: "Select a piece to see its options.";
   display: block;
   font-size: 12px;
   color: var(--text-muted);
@@ -1413,7 +1412,9 @@ button {
 /* Play page — link to editor                          */
 /* -------------------------------------------------- */
 
-#open-editor-link {
+#open-editor-link,
+#play-from-here,
+#open-fen-link {
   display: inline-block;
   margin-top: 14px;
   padding: 9px 14px;
@@ -1431,10 +1432,66 @@ button {
   transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
 }
 
-#open-editor-link:hover {
+#open-editor-link:hover,
+#play-from-here:hover,
+#open-fen-link:hover {
   background: var(--accent-hover);
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(107, 68, 35, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* "Play this position" is the primary hand-off on the renderer, so give
+   it the warm primary tone; "Edit" / "Open renderer" stay the darker
+   accent as secondary links. */
+#play-from-here {
+  background: var(--primary);
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+#play-from-here:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 6px 14px rgba(184, 134, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Secondary hand-off links sit tighter under the primary one. */
+#play-from-here + #open-editor-link,
+#open-editor-link + #open-fen-link {
+  margin-top: 8px;
+}
+
+/* Read-only board (FEN renderer): squares aren't interactive, so drop the
+   pointer cursor and the click-hover brightness cue. */
+#board.readonly .square {
+  cursor: default;
+}
+
+#board.readonly .square:hover {
+  filter: none;
+}
+
+/* Advanced "Custom position (FEN)" disclosure on the play page — keeps the
+   raw FEN box available without making it the first thing a newcomer sees. */
+.advanced-fen {
+  margin-top: 4px;
+}
+
+.advanced-fen > summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 0;
+  user-select: none;
+}
+
+.advanced-fen > summary:hover {
+  color: var(--text-soft);
+}
+
+.advanced-fen[open] > summary {
+  margin-bottom: 8px;
 }
 
 @media (max-width: 1100px) {
@@ -1955,4 +2012,664 @@ body.online #left-panel {
 
 .online-watch h3 {
   margin: 0 0 10px 0;
+}
+
+/* Left-panel helper line on the play page — a friendly cue for newcomers
+   sitting under the FEN input. */
+.panel-hint {
+  margin: 4px 0 18px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ================================================== */
+/* Landing page (index.html — the welcoming front door)*/
+/* ================================================== */
+
+body.home {
+  display: flex;
+  justify-content: center;
+}
+
+.landing {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 12px 4px 40px;
+}
+
+.landing-hero {
+  text-align: center;
+  padding: 24px 12px 8px;
+}
+
+.hero-mark {
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  font-size: 64px;
+  line-height: 1;
+  color: var(--primary);
+  text-shadow: 0 4px 10px rgba(184, 134, 74, 0.3);
+}
+
+.hero-title {
+  display: block;
+  font-size: 44px;
+  margin: 14px 0 0 0;
+  color: var(--accent);
+}
+
+/* The generic `h1::before` adds a knight glyph; the hero already has its
+   own `.hero-mark`, so suppress the duplicate. */
+.hero-title::before {
+  content: none;
+}
+
+.hero-tagline {
+  max-width: 560px;
+  margin: 16px auto 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+
+/* Three action cards — the main way in. */
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 36px 0 0 0;
+}
+
+.landing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: var(--text);
+  transition: transform var(--t), box-shadow var(--t), border-color var(--t);
+}
+
+.landing-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary-soft);
+}
+
+/* The primary card (Play online) gets the accent treatment so the eye
+   lands on it first. */
+.landing-card.primary {
+  background: linear-gradient(160deg, var(--primary), var(--primary-hover));
+  border-color: transparent;
+  color: #fff;
+}
+
+.landing-card.primary .card-desc,
+.landing-card.primary .card-cta {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.card-icon {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.card-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.card-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-soft);
+}
+
+.card-cta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.landing-card:not(.primary):hover .card-cta {
+  color: var(--accent);
+}
+
+/* "What makes it weird" — a light, reassuring feature strip. */
+.landing-learn {
+  margin: 40px 0 0 0;
+  padding: 24px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.landing-learn h2 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.feature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+}
+
+.feature-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-soft);
+}
+
+.feature-list b {
+  color: var(--text);
+}
+
+.feature-emoji {
+  font-size: 20px;
+  line-height: 1.3;
+  flex: none;
+}
+
+.landing-foot {
+  margin: 28px 0 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.landing-foot a {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.landing-foot a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .landing-cards {
+    grid-template-columns: 1fr;
+  }
+  .feature-list {
+    grid-template-columns: 1fr;
+  }
+  .hero-title {
+    font-size: 34px;
+  }
+}
+
+/* ================================================== */
+/* Play page — board-centric table + lobby             */
+/* ================================================== */
+
+/* Keep the header's three nav items (home / mode tabs / editor) on one
+   tidy, wrapping row. */
+#page-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --- The table: the board flanked by two seats, plus a side panel. --- */
+.table {
+  display: grid;
+  grid-template-columns: auto minmax(280px, 320px);
+  gap: 24px;
+  align-items: start;
+  justify-content: center;
+}
+
+.table.hidden {
+  display: none;
+}
+
+#board-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+#board-area #board {
+  margin: 0;
+}
+
+/* Player seats above / below the board. Width tracks `--board-size` so the
+   seats line up with the board's edges. */
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: var(--board-size);
+  max-width: 100%;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+
+/* Avatar circle at the left of a seat, tinted to the player's side. */
+.seat-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-family: "Segoe UI Symbol", "Segoe UI Historic", "Arial Unicode MS", "DejaVu Sans", sans-serif;
+  font-size: 20px;
+  line-height: 1;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+
+.seat.side-white .seat-avatar {
+  background: #f3ead6;
+  color: #6b5e4f;
+}
+
+.seat.side-black .seat-avatar {
+  background: #2d2620;
+  color: #d8cbb6;
+}
+
+.seat-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-you {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--primary-glow);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* Turn indicator: a pill pinned to the right of the seat (where chess.com
+   shows the clock). Shown only for the side to move. */
+.seat-turn {
+  margin-left: auto;
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seat.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+.seat.active .seat-turn {
+  background: var(--primary);
+  color: #fff;
+}
+
+.seat.winner {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.seat.winner .seat-name {
+  color: #fff;
+}
+
+.seat.winner .seat-turn {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* --- Side panel: a stack of cards. --- */
+#side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.panel-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+}
+
+.panel-block.hidden {
+  display: none;
+}
+
+.panel-block > h3 {
+  margin: 0 0 12px 0;
+}
+
+/* Turn banner: full-width headline at the top of the panel. Colour comes
+   from the `.mine / .theirs / .over` modifiers defined above. */
+#turn-pill {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Controls: buttons share a wrapping row. `width: auto` overrides the
+   `.primary-btn { width: 100% }` base so they sit side by side. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controls > button {
+  flex: 1 1 auto;
+  min-width: 120px;
+  width: auto;
+  margin: 0;
+}
+
+/* Local setup: presets, then the advanced FEN box + hand-off links. */
+#local-setup #fen-list {
+  margin-bottom: 12px;
+}
+
+#local-setup #open-editor-link,
+#local-setup #open-fen-link {
+  margin-top: 8px;
+}
+
+/* Board-size control gets its own card in the panel. */
+#side-panel .board-size-control {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  margin-top: 0;
+}
+
+/* --- Lobby (shown until you're seated at a table). --- */
+.lobby.hidden {
+  display: none;
+}
+
+.lobby-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.lobby-head h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.lobby-head .online-identity {
+  margin-bottom: 0;
+}
+
+/* Secondary heading inside a lobby card (e.g. "Public games" under Join). */
+.card-subhead {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* Stack the panel below the board (and the lobby into one column) on
+   narrow viewports. */
+@media (max-width: 900px) {
+  .table {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  #side-panel {
+    max-width: 520px;
+  }
+}
+
+/* ================================================== */
+/* Play sidebar — menu (New Game / Games / Watch)      */
+/* ================================================== */
+
+#sidebar-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+#sidebar-menu.hidden,
+#sidebar-game.hidden {
+  display: none;
+}
+
+#sidebar-game {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Tab strip across the top of the menu. */
+.side-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  margin-bottom: 16px;
+}
+
+.side-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.side-tab:hover {
+  background: var(--surface);
+  color: var(--text-soft);
+}
+
+.side-tab.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.side-tab-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tab-panel.hidden {
+  display: none;
+}
+
+/* New Game fields: uppercase label above the control. */
+.ng-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ng-field input {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.ng-field select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ng-field select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* Primary call-to-action (Play online, Accept draw, Rematch). */
+.btn-green {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--primary);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(184, 134, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+.btn-green:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(184, 134, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.btn-lg {
+  margin-top: 2px;
+}
+
+/* Secondary full-width menu buttons (Play locally, Board editor, Join). */
+.menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+
+.menu-btn:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.menu-btn.compact {
+  width: auto;
+  flex: none;
+  padding: 11px 18px;
+}
+
+/* Join-by-code: input + button on one row. */
+.join-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.join-row input {
+  flex: 1;
+  margin: 0;
+}
+
+/* In-game hand-off links (Edit position / FEN renderer). Reuse the accent
+   button look defined earlier, but stack them tightly in their card. */
+.local-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.local-links #open-editor-link,
+.local-links #open-fen-link {
+  margin-top: 0;
 }

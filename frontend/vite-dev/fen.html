@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FEN Renderer · Chess Reboot</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+
+<body class="render-only">
+  <header id="page-header">
+    <h1>FEN Renderer</h1>
+    <nav id="page-nav">
+      <a href="/" class="nav-home">&larr; Home</a>
+      <a href="/play.html">Play &rarr;</a>
+      <a href="/editor.html">Editor &rarr;</a>
+    </nav>
+  </header>
+
+  <div id="layout">
+    <div id="left-panel">
+      <h3>Render a position</h3>
+      <input id="fen-input" type="text" spellcheck="false" placeholder="Paste a FEN string here" />
+      <button id="load-btn">Render</button>
+      <p class="panel-hint">Paste any FEN to draw it. This view is read-only —
+        hit <b>Play this position</b> to make moves, or <b>Edit</b> to change it.</p>
+
+      <h3>Presets</h3>
+      <ul id="fen-list"></ul>
+
+      <div class="board-size-control">
+        <label for="board-size-slider">
+          Board size <span id="board-size-value" class="board-size-value">532px</span>
+        </label>
+        <input id="board-size-slider" type="range" />
+      </div>
+
+      <button id="flip-local-btn" class="ghost-btn flip-local">⇅ Flip board</button>
+
+      <a id="play-from-here" href="/play.html">Play this position &rarr;</a>
+      <a id="open-editor-link" href="/editor.html">Edit this position &rarr;</a>
+    </div>
+
+    <div id="board"></div>
+  </div>
+
+  <script type="module" src="/src/fen_page.ts"></script>
+</body>
+
+</html>

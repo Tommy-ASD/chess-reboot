@@ -7,14 +7,20 @@ import { defineConfig } from "vitest/config";
 // `test` block is typed — it re-exports Vite's config augmented with the
 // Vitest options, keeping build and test settings in a single file.
 export default defineConfig({
-  // Multi-page app: both HTML entry points must be listed, otherwise
+  // Multi-page app: every HTML entry point must be listed, otherwise
   // `vite build` treats only `index.html` as an entry and silently drops
-  // `editor.html` from `dist/`. The dev server serves every .html file
+  // the others from `dist/`. The dev server serves every .html file
   // regardless; this matters purely for the production build.
+  //   home   → the welcoming landing page
+  //   play   → the interactive local/online play surface (main.ts)
+  //   fen    → the read-only FEN renderer (fen_page.ts)
+  //   editor → the board editor (editor_page.ts)
   build: {
     rollupOptions: {
       input: {
-        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        home: fileURLToPath(new URL("./index.html", import.meta.url)),
+        play: fileURLToPath(new URL("./play.html", import.meta.url)),
+        fen: fileURLToPath(new URL("./fen.html", import.meta.url)),
         editor: fileURLToPath(new URL("./editor.html", import.meta.url)),
       },
     },

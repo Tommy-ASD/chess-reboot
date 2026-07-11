@@ -3,17 +3,16 @@
 // Play page entry point. Dev: `npm run dev` (Vite). Production
 // build: `npm run build` (runs `tsc && vite build`). See package.json.
 
-import { initBoardResize, setBoardDimensions } from "./board_size";
+import { initBoardResize } from "./board_size";
+import { renderBoardInto } from "./board_render";
 import { castleKingDest, clearSelection, highlightMoves, isAllowedSquare, isSpecialMove } from "./board_helpers";
-import { formatLastMove, getBusPassengers, parseFEN, parseFENFlags, parseLastMove, pieceToImage, pieceToSymbol } from "./fen";
-import { renderCarrierPassengerOverlay } from "./passenger_overlay";
-import { squareIconSvg } from "./signal_icons";
-import { isTrainCart, trainCartRotationDegrees } from "./train_payload";
-import { allowedMoves, boardOrientation, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setBoardOrientation, setCurrentBoard, setSelectedPassengerIndex, setSelectedSquare, squareDomIndex, type Color, type Coord, type GameMove, type GameStatus } from "./variables";
+import { formatLastMove, getBusPassengers, parseFENFlags, pieceToImage, pieceToSymbol } from "./fen";
+import { allowedMoves, boardOrientation, currentBoard, selectedPassengerIndex, selectedSquare, setAllowedMoves, setBoardOrientation, setSelectedPassengerIndex, setSelectedSquare, squareDomIndex, type Color, type Coord, type GameMove, type GameStatus } from "./variables";
 import { API_BASE } from "./config";
 import * as online from "./online";
 import type { CreateGameRequest, GameResult, GameState, Subscription } from "./online";
 import { getName, setName } from "./player";
+import { FEN_PRESETS } from "./presets";
 import { toast } from "./toast";
 
 
@@ -23,158 +22,35 @@ import { toast } from "./toast";
 // ---------------------------
 
 function renderBoard(fen: string) {
-  const boardEl = document.getElementById("board")!;
-  boardEl.innerHTML = ""; // clear previous board
-
   // Reset the status banner on every re-render; callers that know the
   // post-position status (Load, post-move) re-show it immediately after.
   renderStatus(null);
 
-  setCurrentBoard(parseFEN(fen));
-  const rows = currentBoard.length;
-  const cols = currentBoard[0]?.length ?? 0;
-  setBoardDimensions(cols, rows);
-
-  // Render in DOM (row-major) order, mapping each slot to its logical
-  // square for the current orientation. A black-oriented board is a 180°
-  // rotation, so both axes reverse. Logical coords drive piece lookup, the
-  // checker pattern, and the click handler — so move logic never has to
-  // know which way the board faces.
-  const flipped = boardOrientation === "black";
-  const showCoords = rows === 8 && cols === 8;
-  for (let dr = 0; dr < rows; dr++) {
-    for (let df = 0; df < cols; df++) {
-      const rank = flipped ? rows - 1 - dr : dr;
-      const file = flipped ? cols - 1 - df : df;
-      const square_data = currentBoard[rank][file];
-
-      const square = document.createElement("div");
-      square.classList.add("square");
-
-      // light/dark checkered pattern (keyed on logical coords, so each
-      // square keeps its colour when the board flips)
-      const isDark = (rank + file) % 2 === 1;
-      square.classList.add(isDark ? "dark" : "light");
-
-      if (square_data) {
-        if (square_data.piece) {
-          // check if pieceToImage returns other than undefined
-          // and if it does, use an img element instead of textContent
-          const imgPath = pieceToImage(square_data.piece);
-          if (imgPath) {
-            const img = document.createElement("img");
-            img.src = imgPath;
-            img.alt = square_data.piece;
-            img.classList.add("piece-image");
-            if (isTrainCart(square_data.piece)) {
-              const deg = trainCartRotationDegrees(
-                square_data.piece,
-                currentBoard,
-                file,
-                rank,
-              );
-              if (deg !== 0) img.style.transform = `rotate(${deg}deg)`;
-            }
-            square.appendChild(img);
-          } else {
-            square.textContent = pieceToSymbol(square_data.piece);
-          }
-          renderCarrierPassengerOverlay(square, square_data.piece);
-        }
-        // Plan 11 (Duck Chess): the duck is colourless and never shares a
-        // square with a piece, so render it as the square's glyph.
-        if (square_data.duck) {
-          const d = document.createElement("span");
-          d.className = "duck-glyph";
-          d.textContent = "\u{1F986}"; // 🦆
-          square.appendChild(d);
-        }
-        if (square_data.conditions.includes("FROZEN")) {
-          square.classList.add("cond-frozen");
-        }
-        if (square_data.conditions.includes("BRAINROT")) {
-          square.classList.add("cond-brainrot");
-        }
-        // Plan 13: `TORNADO` carries a `:<remaining>` countdown payload,
-        // so match the prefix rather than exact equality. The swirl is a
-        // CSS overlay (.cond-tornado::after); the countdown is value-
-        // bearing, so the badge is built here.
-        const tornado = square_data.conditions.find(
-          (c) => c === "TORNADO" || c.startsWith("TORNADO:"),
-        );
-        if (tornado) {
-          square.classList.add("cond-tornado");
-          const remaining = tornado.split(":")[1];
-          if (remaining) {
-            const badge = document.createElement("span");
-            badge.className = "tornado-countdown";
-            badge.textContent = remaining;
-            square.appendChild(badge);
-          }
-        }
-        // Plan 08: substrate types render with a per-type accent border
-        // (via `type-{lowercase}`) plus an SVG icon overlay.
-        if (square_data.squareType !== "STANDARD") {
-          square.classList.add(`type-${square_data.squareType.toLowerCase()}`);
-          const svg = squareIconSvg(square_data, {
-            board: currentBoard,
-            file,
-            rank,
-          });
-          if (svg) {
-            const wrap = document.createElement("div");
-            wrap.className = "square-icon";
-            wrap.innerHTML = svg;
-            square.appendChild(wrap);
-          }
-        }
-
-      }
-
-      // Coordinate labels on the board edges (standard 8×8 only — fairy
-      // boards have arbitrary dimensions). Appended AFTER the piece, whose
-      // `textContent` assignment would otherwise wipe these child nodes.
-      // File letter on the bottom DOM row, rank number on the left DOM
-      // column; both read the logical square so they rotate with the
-      // orientation.
-      if (showCoords) {
-        if (dr === rows - 1) square.appendChild(coordLabel("file", "abcdefgh"[file]));
-        if (df === 0) square.appendChild(coordLabel("rank", String(8 - rank)));
-      }
-
-      square.onclick = () => handleSquareClick(rank, file);
-
-      boardEl.appendChild(square);
-    }
-  }
-
-  // Tint the squares of the most recent move (from the FEN's `lm=` marker)
-  // so the opponent's move is obvious in online play.
-  highlightLastMove(fen, rows, cols);
+  // The pure visual pass lives in `board_render` (shared with the
+  // read-only FEN renderer). Interactivity is layered on here: the click
+  // handler is wired in during the render, and duck-placement highlights
+  // are added afterwards.
+  renderBoardInto(document.getElementById("board")!, fen, {
+    onSquareClick: handleSquareClick,
+  });
 
   // Plan 11: if the position is a Duck Chess placement half-turn, light up
   // the empty squares as duck targets and show the hint.
   setupDuckPlacementMode();
+
+  // Refresh the two seats + the turn pill for the current position. Works
+  // in both modes: online reads the live `GameState`, local reads the
+  // side-to-move off the FEN.
+  renderTable();
 }
 
-/// A board-edge coordinate label (file letter / rank number). Absolutely
-/// positioned within its corner cell via the `coord-*` CSS classes.
-function coordLabel(kind: "file" | "rank", text: string): HTMLSpanElement {
-  const span = document.createElement("span");
-  span.className = `coord-label coord-${kind}`;
-  span.textContent = text;
-  return span;
-}
-
-/// Tint the from/to squares of the last move (`.last-move`), honoring the
-/// current orientation via `squareDomIndex`.
-function highlightLastMove(fen: string, rows: number, cols: number) {
-  const lm = parseLastMove(fen);
-  if (!lm) return;
-  const squares = document.querySelectorAll("#board .square");
-  for (const c of [lm.from, lm.to]) {
-    squares[squareDomIndex(c.rank, c.file, rows, cols)]?.classList.add("last-move");
-  }
+/// Draw a non-interactive board — the menu's position preview and the FEN
+/// renderer share the read-only pass. No click handler, no duck-placement
+/// highlights; just the picture, plus the seat/turn labels.
+function renderPreviewBoard(fen: string) {
+  renderStatus(null);
+  renderBoardInto(document.getElementById("board")!, fen);
+  renderTable();
 }
 
 /// Handler attached to each square on the board
@@ -749,6 +625,23 @@ async function makeMove(fen: string, from: Coord, to: Coord): Promise<MoveResult
 const DUCK_CHESS_FEN =
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - tr=full p=0 variants=duck_chess";
 
+/// Maps the online create-game `#create-preset` option values to their
+/// `FEN_PRESETS` entry name. "standard"/"duck" are handled separately;
+/// everything else resolves its starting FEN through the shared preset
+/// list (see `createOnlineGame`).
+const ONLINE_PRESET_NAME: Record<string, string> = {
+  fairy: "Fairy Army",
+  rampart: "Rampart Run",
+  brainrot: "Brainrot Standoff",
+  signal: "Signal Contraption",
+  railyard: "Railyard Roundhouse",
+  duckmonkeys: "Duck & Monkeys",
+  colossus: "Colossus 16x16",
+  colosseum: "Fairy Colosseum",
+  greatwall: "Great Wall 17x17",
+  megafield: "Mega Field 24x24",
+};
+
 /// The active online game (null in Local mode / the lobby). `myColor` is
 /// the seat captured from the create/join REST response — WS pushes carry
 /// `your_color: null`, so colour is never read off the live `state`.
@@ -874,26 +767,112 @@ function renderOnlineOutcome(state: GameState) {
   el.textContent = text;
 }
 
-// --- mode + lobby ---
+// --- views: menu / local / online ---
 
-function setMode(mode: "local" | "online") {
-  const isOnline = mode === "online";
-  document.body.classList.toggle("online", isOnline);
-  document.getElementById("online-panel")!.classList.toggle("hidden", !isOnline);
-  const tabOnline = document.getElementById("tab-online")!;
-  const tabLocal = document.getElementById("tab-local")!;
-  tabOnline.classList.toggle("active", isOnline);
-  tabLocal.classList.toggle("active", !isOnline);
-  tabOnline.setAttribute("aria-selected", String(isOnline));
-  tabLocal.setAttribute("aria-selected", String(!isOnline));
-  if (isOnline) {
+/// What the board + seats currently represent:
+///   menu   — the board is a non-interactive preview of the selected
+///            position; the sidebar shows the New Game / Games / Watch menu.
+///   local  — interactive hotseat; both sides play on this board.
+///   online — a live networked game (see `onlineSession`).
+/// `renderTable` reads this to label the seats + turn pill.
+let boardMode: "menu" | "local" | "online" = "menu";
+
+/// The single switch for what the sidebar shows. `menu` reveals the
+/// tabbed lobby (and keeps the lobby subscriptions live); `local` / `online`
+/// reveal the in-game panel, wired for the respective mode.
+function showView(mode: "menu" | "local" | "online") {
+  boardMode = mode;
+  const inGame = mode !== "menu";
+  document.getElementById("sidebar-menu")!.classList.toggle("hidden", inGame);
+  document.getElementById("sidebar-game")!.classList.toggle("hidden", !inGame);
+  document.body.classList.toggle("in-game", inGame);
+
+  if (mode === "menu") {
     startLobby();
-  } else {
-    stopLobby();
-    if (onlineSession) leaveOnlineGame();
+    renderPreview();
+    return;
+  }
+
+  // In-game side-panel chrome. The online-only blocks (moves, connection /
+  // share, and the resign / draw / rematch set) show only for `online`;
+  // renderGamePanel then fine-tunes the draw/rematch buttons from state.
+  const online = mode === "online";
+  document.getElementById("moves-block")!.classList.toggle("hidden", !online);
+  document.getElementById("game-meta")!.classList.toggle("hidden", !online);
+  for (const id of ["offer-draw-btn", "accept-draw-btn", "decline-draw-btn", "rematch-btn", "goto-rematch-btn", "resign-btn"]) {
+    document.getElementById(id)!.classList.toggle("hidden", !online);
+  }
+  // "Leave" doubles as "back to menu"; label it for the mode.
+  document.getElementById("leave-btn")!.textContent = online ? "Leave game" : "← New game";
+}
+
+/// Switch the visible menu tab (New Game / Games / Watch).
+function selectTab(name: string) {
+  for (const tab of document.querySelectorAll<HTMLElement>(".side-tab")) {
+    tab.classList.toggle("active", tab.dataset.tab === name);
+  }
+  for (const panel of document.querySelectorAll<HTMLElement>(".tab-panel")) {
+    panel.classList.toggle("hidden", panel.dataset.panel !== name);
   }
 }
 
+/// Resolve a `#create-preset` option value to its starting FEN. "standard"
+/// leaves the engine default; "duck" is the canonical Duck-Chess start; the
+/// rest resolve through the shared `FEN_PRESETS` by name.
+function startingFenFor(preset: string): string {
+  if (preset === "duck") return DUCK_CHESS_FEN;
+  if (preset !== "standard") {
+    const fen = FEN_PRESETS.find((p) => p.name === ONLINE_PRESET_NAME[preset])?.fen;
+    if (fen) return fen;
+  }
+  return "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+}
+
+/// The position currently chosen in the New Game menu.
+function selectedMenuFen(): string {
+  const sel = document.getElementById("create-preset") as HTMLSelectElement | null;
+  return startingFenFor(sel?.value ?? "standard");
+}
+
+/// Draw the menu's board preview: the chosen position, read-only, seated
+/// with the player's chosen colour at the bottom.
+function renderPreview() {
+  const color = (document.getElementById("create-color") as HTMLSelectElement | null)?.value;
+  setBoardOrientation(color === "Black" ? "black" : "white");
+  const fen = selectedMenuFen();
+  (document.getElementById("fen-input") as HTMLInputElement).value = fen;
+  renderPreviewBoard(fen);
+}
+
+/// Start a local hotseat game from the chosen position.
+async function startLocalGame() {
+  syncName();
+  const fen = selectedMenuFen();
+  const color = (document.getElementById("create-color") as HTMLSelectElement).value;
+  setBoardOrientation(color === "Black" ? "black" : "white");
+  (document.getElementById("fen-input") as HTMLInputElement).value = fen;
+  showView("local");
+  clearSelection();
+  renderBoard(fen);
+  // Surface the starting position's status (e.g. a preset that's already a
+  // terminal position shows its banner without needing a move).
+  try {
+    renderStatus(await fetchStatus(fen));
+  } catch (err) {
+    showError(err);
+  }
+}
+
+/// Leave whatever game is in progress and return to the menu.
+function backToMenu() {
+  teardownOnlineSession();
+  setBoardOrientation("white");
+  showView("menu");
+}
+
+/// Open (once) the lobby subscription and refresh both game lists. The
+/// subscription stays live for the page's lifetime — the lists sit behind
+/// the Games / Watch tabs and are cheap to keep current.
 function startLobby() {
   refreshPublicGames();
   refreshLiveGames();
@@ -903,11 +882,6 @@ function startLobby() {
       refreshLiveGames();
     });
   }
-}
-
-function stopLobby() {
-  lobbySub?.close();
-  lobbySub = null;
 }
 
 async function refreshPublicGames() {
@@ -986,11 +960,11 @@ async function createOnlineGame() {
   syncName();
   const preset = (document.getElementById("create-preset") as HTMLSelectElement).value;
   const color = (document.getElementById("create-color") as HTMLSelectElement).value as Color;
-  const name = (document.getElementById("create-name") as HTMLInputElement).value.trim();
   const isPublic = (document.getElementById("create-public") as HTMLInputElement).checked;
   const req: CreateGameRequest = { public: isPublic, color };
-  if (name) req.name = name;
-  if (preset === "duck") req.starting_fen = DUCK_CHESS_FEN;
+  // "standard" leaves starting_fen unset (server uses its default); the
+  // rest resolve through the shared preset catalogue.
+  if (preset !== "standard") req.starting_fen = startingFenFor(preset);
   try {
     enterOnlineGame(await online.createGame(req));
   } catch (err) {
@@ -1038,19 +1012,16 @@ function enterOnlineGame(state: GameState) {
   setBoardOrientation(state.your_color === "Black" ? "black" : "white");
   resetHistory(state);
   setGameUrlParam(state.id);
-  showGameView(true);
+  showView("online");
   applyOnlineState(state);
 }
 
-function leaveOnlineGame() {
+/// Tear down the live game subscription + URL marker without deciding what
+/// to show next. Shared by "Leave game" and starting a fresh local game.
+function teardownOnlineSession() {
   onlineSession?.sub.close();
   onlineSession = null;
   clearGameUrlParam();
-  showGameView(false);
-  refreshPublicGames();
-  // Back to the local White-up view.
-  setBoardOrientation("white");
-  renderBoard(currentFen());
 }
 
 /// Manual board flip (works in Local and Online). Re-renders the current
@@ -1067,15 +1038,74 @@ function flipBoard() {
   }
 }
 
-function showGameView(inGame: boolean) {
-  document.getElementById("online-lobby")!.classList.toggle("hidden", inGame);
-  document.getElementById("online-game")!.classList.toggle("hidden", !inGame);
-}
-
-// --- live game panel ---
+// --- table: seats + turn pill (both modes) ---
 
 function resultWinner(r: GameResult): Color | null {
   return r.kind === "Draw" ? null : r.winner;
+}
+
+/// Which colour sits at the bottom (the player's own side) vs. the top.
+/// Tracks the board orientation so flipping swaps the seats too.
+function seatColor(position: "top" | "bottom"): Color {
+  const bottom: Color = boardOrientation === "black" ? "Black" : "White";
+  if (position === "bottom") return bottom;
+  return bottom === "White" ? "Black" : "White";
+}
+
+/// Local side-to-move, read off the FEN flags ("w"/"b" → colour).
+function localSideToMove(): Color {
+  return parseFENFlags(currentFen()).sideToMove === "b" ? "Black" : "White";
+}
+
+/// Repaint both seats + the turn pill for the current position. Online
+/// pulls names / turn / winner from the live `GameState`; local falls back
+/// to the FEN's side-to-move; the menu preview shows a neutral matchup.
+function renderTable() {
+  updateSeat("seat-top", seatColor("top"));
+  updateSeat("seat-bottom", seatColor("bottom"));
+
+  const pill = document.getElementById("turn-pill")!;
+  if (boardMode === "online" && onlineSession) {
+    const s = onlineSession.state;
+    pill.textContent = turnPillText(s);
+    pill.className =
+      "turn-pill" + (s.result ? " over" : isMyTurnOnline() ? " mine" : " theirs");
+  } else {
+    pill.textContent = `${localSideToMove()} to move`;
+    pill.className = "turn-pill mine";
+  }
+}
+
+function updateSeat(id: string, color: Color) {
+  const el = document.getElementById(id)!;
+  const bottom = seatColor("bottom") === color;
+  el.classList.toggle("side-white", color === "White");
+  el.classList.toggle("side-black", color !== "White");
+
+  let name: string = color;
+  let active = false;
+  let winner = false;
+  let isYou = false;
+
+  if (boardMode === "online" && onlineSession) {
+    const s = onlineSession.state;
+    const seat = color === "White" ? s.white : s.black;
+    name = seat?.name || "Waiting…";
+    active = !s.result && s.side_to_move === color;
+    winner = Boolean(s.result && resultWinner(s.result) === color);
+    isYou = onlineSession.myColor === color;
+  } else if (boardMode === "local") {
+    active = localSideToMove() === color;
+  } else {
+    // Menu preview: you sit at the bottom, a placeholder opponent up top.
+    name = bottom ? (getName() || "You") : "Opponent";
+  }
+
+  el.querySelector(".seat-name")!.textContent = name;
+  el.querySelector(".seat-you")!.classList.toggle("hidden", !isYou);
+  el.querySelector(".seat-turn")!.classList.toggle("hidden", !active);
+  el.classList.toggle("active", active);
+  el.classList.toggle("winner", winner);
 }
 
 function turnPillText(s: GameState): string {
@@ -1086,22 +1116,11 @@ function turnPillText(s: GameState): string {
   return isMyTurnOnline() ? "Your move" : "Opponent's move";
 }
 
-function updateChip(id: string, color: Color, name: string | null, s: GameState) {
-  const chip = document.getElementById(id)!;
-  chip.querySelector(".chip-name")!.textContent = name ?? "waiting…";
-  chip.classList.toggle("active", !s.result && s.side_to_move === color);
-  chip.classList.toggle("winner", Boolean(s.result && resultWinner(s.result) === color));
-}
+// --- live game panel: online-only controls (seats/turn live in renderTable) ---
 
 function renderGamePanel() {
   if (!onlineSession) return;
   const s = onlineSession.state;
-  updateChip("chip-white", "White", s.white?.name ?? null, s);
-  updateChip("chip-black", "Black", s.black?.name ?? null, s);
-  const pill = document.getElementById("turn-pill")!;
-  pill.textContent = turnPillText(s);
-  pill.className =
-    "turn-pill" + (s.result ? " over" : isMyTurnOnline() ? " mine" : " theirs");
   document.getElementById("share-line")!.textContent =
     `Code ${s.code} · ` + (onlineSession.myColor ? `you are ${onlineSession.myColor}` : "spectating");
   const resignBtn = document.getElementById("resign-btn") as HTMLButtonElement;
@@ -1209,94 +1228,59 @@ function clearGameUrlParam() {
 // UI Wiring
 // ---------------------------
 
-document.getElementById("load-btn")!.addEventListener("click", async () => {
-  const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-  try {
-    renderBoard(fen);
-    // Surface the loaded position's status (e.g. loading an already-
-    // checkmated FEN shows the banner without needing to make a move).
-    renderStatus(await fetchStatus(fen));
-  } catch (e) {
-    alert(e instanceof Error ? e.message : String(e));
-  }
-});
-
-// Optional: live preview
-document.getElementById("fen-input")!.addEventListener("input", (ev) => {
-  const value = (ev.target as HTMLInputElement).value;
-  try { renderBoard(value); } catch { }
-});
-
-
-// ------------------------------------------
-// FEN PRESET LIST
-// ------------------------------------------
-
-// Presets here are bare grids — the engine's parser fills in default
-// flag fields (stm=w, castling=KQkq, ep=-, tr=full, p=0) when they're
-// absent. The editor's PRESETS in `editor_page.ts` use the canonical
-// full form. Both round-trip through the engine identically.
-const FEN_PRESETS: { name: string; fen: string }[] = [
-  { name: "Empty Board", fen: "8/8/8/8/8/8/8/8" },
-  { name: "Standard Chess", fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" },
-  { name: "Goblin Test", fen: "(P=g(H=0-0))nbqkbn(P=g(H=7-0))/pppppppp/8/8/8/8/PPPPPPPP/(P=G(H=0-7))NBQKBN(P=G(H=7-7))" },
-  { name: "Vent Test", fen: "(T=VENT)7/8/8/8/8/8/8/8" },
-  { name: "Frozen Test", fen: "(C=FROZEN)7/8/8/8/8/8/8/8" },
-];
-
-function populateFENList() {
-  const list = document.getElementById("fen-list")!;
-  list.innerHTML = "";
-
-  for (const { name, fen } of FEN_PRESETS) {
-    const li = document.createElement("li");
-    li.textContent = name;
-
-    li.onclick = () => {
-      const input = document.getElementById("fen-input") as HTMLInputElement;
-      input.value = fen;
-      renderBoard(fen);
-    };
-
-    list.appendChild(li);
-  }
-}
-
-populateFENList();
 initBoardResize({
   sliderSelector: "#board-size-slider",
   valueLabelSelector: "#board-size-value",
 });
 
-// Make the "Edit this position" link forward the current FEN to the editor.
-const editorLink = document.getElementById("open-editor-link") as HTMLAnchorElement | null;
-if (editorLink) {
-  editorLink.addEventListener("click", (ev) => {
+// The "Edit this position" / "Open FEN renderer" hand-off links forward the
+// board's current FEN so the tools open on the position in play.
+function wireHandoff(id: string, page: string) {
+  const link = document.getElementById(id) as HTMLAnchorElement | null;
+  if (!link) return;
+  link.addEventListener("click", (ev) => {
     ev.preventDefault();
     const fen = (document.getElementById("fen-input") as HTMLInputElement).value;
-    const url = `/editor.html?fen=${encodeURIComponent(fen)}`;
-    window.location.href = url;
+    window.location.href = `${page}?fen=${encodeURIComponent(fen)}`;
   });
 }
-
-// Auto-load standard chess position so the board isn't empty on first paint
-const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
-(document.getElementById("fen-input") as HTMLInputElement).value = DEFAULT_FEN;
-renderBoard(DEFAULT_FEN);
-
+wireHandoff("open-editor-link", "/editor.html");
+wireHandoff("open-fen-link", "/fen.html");
 
 // ---------------------------
-// Online UI wiring
+// Menu (New Game / Games / Watch) wiring
 // ---------------------------
 
 (document.getElementById("player-name") as HTMLInputElement).value = getName();
-document.getElementById("player-name")!.addEventListener("change", syncName);
-document.getElementById("tab-local")!.addEventListener("click", () => setMode("local"));
-document.getElementById("tab-online")!.addEventListener("click", () => setMode("online"));
-document.getElementById("create-btn")!.addEventListener("click", () => createOnlineGame());
+document.getElementById("player-name")!.addEventListener("change", () => {
+  syncName();
+  if (boardMode === "menu") renderTable(); // refresh the preview's "You" seat
+});
+
+// Tabs switch the visible menu panel; entering Games/Watch refreshes lists.
+for (const tab of document.querySelectorAll<HTMLElement>(".side-tab")) {
+  tab.addEventListener("click", () => {
+    const name = tab.dataset.tab!;
+    selectTab(name);
+    if (name === "games") refreshPublicGames();
+    if (name === "watch") refreshLiveGames();
+  });
+}
+
+// Changing the previewed position / colour re-renders the menu board.
+document.getElementById("create-preset")!.addEventListener("change", () => renderPreview());
+document.getElementById("create-color")!.addEventListener("change", () => renderPreview());
+
+document.getElementById("play-online-btn")!.addEventListener("click", () => createOnlineGame());
+document.getElementById("play-local-btn")!.addEventListener("click", () => startLocalGame());
 document.getElementById("join-btn")!.addEventListener("click", () =>
   joinByIdOrCode((document.getElementById("join-code") as HTMLInputElement).value),
 );
+
+// ---------------------------
+// In-game controls wiring
+// ---------------------------
+
 document.getElementById("resign-btn")!.addEventListener("click", async () => {
   if (!onlineSession || !confirm("Resign this game?")) return;
   try {
@@ -1305,9 +1289,9 @@ document.getElementById("resign-btn")!.addEventListener("click", async () => {
     showError(err);
   }
 });
-document.getElementById("leave-btn")!.addEventListener("click", () => leaveOnlineGame());
+// "Leave game" (online) / "New game" (local) both return to the menu.
+document.getElementById("leave-btn")!.addEventListener("click", () => backToMenu());
 document.getElementById("flip-btn")!.addEventListener("click", () => flipBoard());
-document.getElementById("flip-local-btn")!.addEventListener("click", () => flipBoard());
 document.getElementById("rematch-btn")!.addEventListener("click", async () => {
   if (!onlineSession) return;
   try {
@@ -1360,14 +1344,33 @@ document.getElementById("copy-link-btn")!.addEventListener("click", async () => 
   }
 });
 
-// Deep link: `?game=<id>` (or `?code=<code>`) auto-opens Online mode and
-// joins, so a shared link / reload lands straight back in the game.
+// ---------------------------
+// Boot + deep links
+// ---------------------------
+
+// Always start at the menu (renders the position preview + starts the lobby
+// subscriptions), then honour any deep link:
+//   ?game=<id> / ?code=<code> — join a shared game and seat at the table.
+//   ?fen=<fen>                — play a handed-off position locally (from the
+//                               FEN renderer / editor "Play this position").
+//   ?start=local              — jump straight into a local hotseat.
+//   ?mode=online              — no-op: the menu's New Game tab is the default.
 {
-  const target =
-    new URLSearchParams(window.location.search).get("game") ??
-    new URLSearchParams(window.location.search).get("code");
-  if (target) {
-    setMode("online");
-    joinByIdOrCode(target);
+  const params = new URLSearchParams(window.location.search);
+  const game = params.get("game") ?? params.get("code");
+  const handoffFen = params.get("fen");
+
+  showView("menu");
+
+  if (game) {
+    joinByIdOrCode(game);
+  } else if (handoffFen) {
+    setBoardOrientation("white");
+    (document.getElementById("fen-input") as HTMLInputElement).value = handoffFen;
+    showView("local");
+    clearSelection();
+    renderBoard(handoffFen);
+  } else if (params.get("start") === "local") {
+    startLocalGame();
   }
 }

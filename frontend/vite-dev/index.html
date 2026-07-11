@@ -4,155 +4,80 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FEN Renderer</title>
+  <title>Chess Reboot — chess, but weirder</title>
   <link rel="stylesheet" href="/src/style.css" />
+  <script>
+    // Preserve shared game links that point at the site root: the play
+    // surface (and its share URLs) now lives at /play.html, so a stray
+    // "/?game=…" or "/?code=…" is forwarded there before anything paints.
+    var q = window.location.search;
+    if (/[?&](game|code)=/.test(q)) window.location.replace("/play.html" + q);
+  </script>
 </head>
 
-<body>
-  <header id="page-header">
-    <h1>FEN Renderer</h1>
-    <nav id="page-nav">
-      <!-- Local | Online mode split (plan: multiplayer). "Local" is the
-           original hotseat board; "Online" reveals the lobby + live games. -->
-      <div id="mode-tabs" class="mode-tabs" role="tablist">
-        <button id="tab-local" class="mode-tab active" role="tab" aria-selected="true">Local</button>
-        <button id="tab-online" class="mode-tab" role="tab" aria-selected="false">Online</button>
-      </div>
-      <a id="open-editor-nav" href="/editor.html">Open Editor &rarr;</a>
+<body class="home">
+  <main class="landing">
+    <header class="landing-hero">
+      <div class="hero-mark" aria-hidden="true">♞</div>
+      <h1 class="hero-title">Chess Reboot</h1>
+      <p class="hero-tagline">
+        It's chess — the board and pieces you already know — with a few extra
+        friends: ducks, buses, goblins and the occasional tornado. Jump in;
+        you'll pick it up as you play.
+      </p>
+    </header>
+
+    <nav class="landing-cards" aria-label="Get started">
+      <a class="landing-card primary" href="/play.html?mode=online">
+        <span class="card-icon" aria-hidden="true">🌐</span>
+        <span class="card-body">
+          <span class="card-title">Play a friend online</span>
+          <span class="card-desc">Create a game, share the link, and play live from anywhere.</span>
+        </span>
+        <span class="card-cta">Start a game &rarr;</span>
+      </a>
+
+      <a class="landing-card" href="/play.html?start=local">
+        <span class="card-icon" aria-hidden="true">♟️</span>
+        <span class="card-body">
+          <span class="card-title">Play on this screen</span>
+          <span class="card-desc">Hotseat both sides on one device — the easiest way to learn the pieces.</span>
+        </span>
+        <span class="card-cta">Open the board &rarr;</span>
+      </a>
+
+      <a class="landing-card" href="/editor.html">
+        <span class="card-icon" aria-hidden="true">🎨</span>
+        <span class="card-body">
+          <span class="card-title">Build a position</span>
+          <span class="card-desc">Drop pieces, lay tracks and set up any board you can dream up.</span>
+        </span>
+        <span class="card-cta">Open the editor &rarr;</span>
+      </a>
     </nav>
-  </header>
 
-  <!-- Play Online surface (hidden in Local mode). Holds the lobby
-       (identity + create/join/public list) and, once seated, the active
-       game panel (players, turn, share link, resign / leave). -->
-  <section id="online-panel" class="online-panel hidden" aria-label="Play online">
-    <div id="online-lobby">
-      <div class="online-identity">
-        <label for="player-name">Display name</label>
-        <input id="player-name" type="text" placeholder="Anonymous" maxlength="24" autocomplete="off" />
-      </div>
+    <section class="landing-learn" aria-label="What's different">
+      <h2>What makes it weird?</h2>
+      <ul class="feature-list">
+        <li><span class="feature-emoji" aria-hidden="true">🦆</span>
+          <span><b>Duck Chess</b> — a duck blocks one square every turn. Chaos.</span>
+        </li>
+        <li><span class="feature-emoji" aria-hidden="true">🚌</span>
+          <span><b>Carriers</b> — buses and trains pick up pieces and drive them across the board.</span>
+        </li>
+        <li><span class="feature-emoji" aria-hidden="true">🌪️</span>
+          <span><b>Tornadoes</b> — the Stormcaller traps pieces in a swirl with a ticking countdown.</span>
+        </li>
+        <li><span class="feature-emoji" aria-hidden="true">👺</span>
+          <span><b>Custom pieces</b> — goblins and more, each with rules of their own.</span>
+        </li>
+      </ul>
+    </section>
 
-      <div class="online-columns">
-        <div class="online-card">
-          <h3>Create game</h3>
-          <label class="field">Name
-            <input id="create-name" type="text" placeholder="optional" maxlength="40" autocomplete="off" />
-          </label>
-          <label class="field">Position
-            <select id="create-preset">
-              <option value="standard">Standard chess</option>
-              <option value="duck">Duck Chess</option>
-            </select>
-          </label>
-          <label class="field">Play as
-            <select id="create-color">
-              <option value="White">White</option>
-              <option value="Black">Black</option>
-            </select>
-          </label>
-          <label class="checkbox">
-            <input id="create-public" type="checkbox" /> List in public lobby
-          </label>
-          <button id="create-btn">Create game</button>
-        </div>
-
-        <div class="online-card">
-          <h3>Join by code</h3>
-          <label class="field">
-            <input id="join-code" type="text" placeholder="e.g. A1B2C3" maxlength="12" autocomplete="off" />
-          </label>
-          <button id="join-btn">Join game</button>
-        </div>
-
-        <div class="online-card">
-          <h3>Public games</h3>
-          <ul id="public-games" class="public-games"></ul>
-          <p id="public-games-empty" class="muted-note">No open games right now — create one!</p>
-        </div>
-      </div>
-
-      <div class="online-watch">
-        <h3>Watch live games</h3>
-        <ul id="live-games" class="public-games"></ul>
-        <p id="live-games-empty" class="muted-note">No games in progress right now.</p>
-      </div>
-    </div>
-
-    <div id="online-game" class="hidden">
-      <div class="players-row">
-        <span class="player-chip" id="chip-white"><span class="dot white"></span><span class="chip-name">White</span></span>
-        <span class="turn-pill" id="turn-pill">Waiting…</span>
-        <span class="player-chip" id="chip-black"><span class="dot black"></span><span class="chip-name">Black</span></span>
-      </div>
-      <div class="game-meta">
-        <span id="conn-status" class="conn-status" title="Live"></span>
-        <span id="share-line" class="share-line"></span>
-        <button id="copy-link-btn" class="ghost-btn">Copy link</button>
-      </div>
-
-      <div class="move-history-wrap">
-        <h3>Moves</h3>
-        <ol id="move-history" class="move-history"></ol>
-      </div>
-      <div class="game-actions">
-        <button id="flip-btn" class="ghost-btn">⇅ Flip</button>
-        <button id="offer-draw-btn" class="ghost-btn hidden">½ Offer draw</button>
-        <button id="accept-draw-btn" class="primary-btn hidden">Accept draw</button>
-        <button id="decline-draw-btn" class="ghost-btn hidden">Decline draw</button>
-        <button id="rematch-btn" class="primary-btn hidden">Rematch</button>
-        <button id="goto-rematch-btn" class="primary-btn hidden">Go to rematch &rarr;</button>
-        <button id="resign-btn" class="danger-btn">Resign</button>
-        <button id="leave-btn" class="ghost-btn">Back to lobby</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- Game-status banner (plans 04/06): hidden while Ongoing; shows
-       check + the terminal outcomes (checkmate / stalemate / brainrot). -->
-  <div id="game-status" class="game-status hidden" role="status" aria-live="polite"></div>
-
-  <!-- Promotion picker (plan 03 core moves): shown when a pawn reaches the
-       back rank; pick Q/R/B/N to submit the chosen promotion. -->
-  <div id="promotion-picker" class="promotion-picker hidden" role="dialog" aria-label="Choose promotion piece"></div>
-
-  <!-- Duck-placement hint (plan 11): shown during the Duck Chess duck
-       half-turn; empty squares are highlighted as placement targets. -->
-  <div id="duck-hint" class="duck-hint hidden" role="status" aria-live="polite"></div>
-
-  <div id="layout">
-    <div id="left-panel">
-      <input id="fen-input" type="text" placeholder="Enter FEN here" />
-      <button id="load-btn">Load FEN</button>
-
-      <h3>FEN Presets</h3>
-      <ul id="fen-list"></ul>
-
-      <div class="board-size-control">
-        <label for="board-size-slider">
-          Board size <span id="board-size-value" class="board-size-value">532px</span>
-        </label>
-        <input id="board-size-slider" type="range" />
-      </div>
-
-      <button id="flip-local-btn" class="ghost-btn flip-local">⇅ Flip board</button>
-
-      <a id="open-editor-link" href="/editor.html">Edit this position &rarr;</a>
-    </div>
-
-    <div id="board"></div>
-
-    <div id="actions-panel">
-      <h3>Actions</h3>
-      <div id="special-actions"></div>
-    </div>
-
-    <div id="carrier-panel">
-      <h3>Carrier</h3>
-      <div id="carrier-moves"></div>
-    </div>
-  </div>
-
-  <script type="module" src="/src/main.ts"></script>
+    <footer class="landing-foot">
+      Just want the raw tool? <a href="/fen.html">Open the FEN renderer &rarr;</a>
+    </footer>
+  </main>
 </body>
 
 </html>

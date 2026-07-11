@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Play · Chess Reboot</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+
+<body class="play-page">
+  <header id="page-header">
+    <h1>Chess Reboot</h1>
+    <nav id="page-nav">
+      <a href="/" class="nav-home">&larr; Home</a>
+      <a href="/editor.html">Board editor &rarr;</a>
+    </nav>
+  </header>
+
+  <!-- THE TABLE: the board is always on screen. The opponent's seat sits
+       above it, yours below; the right sidebar swaps between the pre-game
+       MENU (New Game / Games / Watch) and the in-game panel. -->
+  <main id="table" class="table">
+    <div id="board-area">
+      <div class="seat side-black" id="seat-top">
+        <span class="seat-avatar" aria-hidden="true">♟</span>
+        <span class="seat-name">Opponent</span>
+        <span class="seat-you hidden">you</span>
+        <span class="seat-turn hidden">to move</span>
+      </div>
+
+      <!-- Game-status banner (plans 04/06): check + terminal outcomes. -->
+      <div id="game-status" class="game-status hidden" role="status" aria-live="polite"></div>
+      <!-- Duck-placement hint (plan 11). -->
+      <div id="duck-hint" class="duck-hint hidden" role="status" aria-live="polite"></div>
+
+      <div id="board"></div>
+
+      <div class="seat side-white" id="seat-bottom">
+        <span class="seat-avatar" aria-hidden="true">♙</span>
+        <span class="seat-name">You</span>
+        <span class="seat-you hidden">you</span>
+        <span class="seat-turn hidden">to move</span>
+      </div>
+    </div>
+
+    <aside id="side-panel">
+      <!-- ============ PRE-GAME MENU ============ -->
+      <div id="sidebar-menu">
+        <div class="side-tabs" role="tablist">
+          <button class="side-tab active" data-tab="new" role="tab">
+            <span class="side-tab-icon">＋</span><span>New Game</span>
+          </button>
+          <button class="side-tab" data-tab="games" role="tab">
+            <span class="side-tab-icon">♟</span><span>Games</span>
+          </button>
+          <button class="side-tab" data-tab="watch" role="tab">
+            <span class="side-tab-icon">👁</span><span>Watch</span>
+          </button>
+        </div>
+
+        <div class="tab-panel" data-panel="new">
+          <label class="ng-field">Your name
+            <input id="player-name" type="text" placeholder="Anonymous" maxlength="24" autocomplete="off" />
+          </label>
+          <label class="ng-field">Position
+            <select id="create-preset">
+              <option value="standard">Standard chess</option>
+              <option value="duck">Duck Chess</option>
+              <option value="fairy">Fairy Army</option>
+              <option value="rampart">Rampart Run</option>
+              <option value="brainrot">Brainrot Standoff</option>
+              <option value="signal">Signal Contraption</option>
+              <option value="railyard">Railyard Roundhouse</option>
+              <option value="duckmonkeys">Duck &amp; Monkeys</option>
+              <option value="colossus">Colossus 16x16</option>
+              <option value="colosseum">Fairy Colosseum</option>
+              <option value="greatwall">Great Wall 17x17</option>
+              <option value="megafield">Mega Field 24x24</option>
+            </select>
+          </label>
+          <label class="ng-field">Play as
+            <select id="create-color">
+              <option value="White">White</option>
+              <option value="Black">Black</option>
+            </select>
+          </label>
+
+          <button id="play-online-btn" class="btn-green btn-lg">Play online</button>
+          <label class="checkbox"><input id="create-public" type="checkbox" /> List in public lobby</label>
+
+          <button id="play-local-btn" class="menu-btn"><span>🏠</span> Play locally (hotseat)</button>
+
+          <div class="join-row">
+            <input id="join-code" type="text" placeholder="Enter game code" maxlength="12" autocomplete="off" />
+            <button id="join-btn" class="menu-btn compact">Join</button>
+          </div>
+
+          <a href="/editor.html" class="menu-btn"><span>🎨</span> Board editor</a>
+        </div>
+
+        <div class="tab-panel hidden" data-panel="games">
+          <h3>Open games</h3>
+          <ul id="public-games" class="public-games"></ul>
+          <p id="public-games-empty" class="muted-note">No open games right now — create one in New Game!</p>
+        </div>
+
+        <div class="tab-panel hidden" data-panel="watch">
+          <h3>Live games</h3>
+          <ul id="live-games" class="public-games"></ul>
+          <p id="live-games-empty" class="muted-note">No games in progress right now.</p>
+        </div>
+      </div>
+
+      <!-- ============ IN-GAME PANEL ============ -->
+      <div id="sidebar-game" class="hidden">
+        <div id="turn-pill" class="turn-pill">White to move</div>
+
+        <div id="game-meta" class="game-meta panel-block hidden">
+          <span id="conn-status" class="conn-status" title="Live"></span>
+          <span id="share-line" class="share-line"></span>
+          <button id="copy-link-btn" class="ghost-btn">Copy link</button>
+        </div>
+
+        <div id="moves-block" class="panel-block hidden">
+          <h3>Moves</h3>
+          <ol id="move-history" class="move-history"></ol>
+        </div>
+
+        <div id="assist-block" class="panel-block">
+          <h3>Piece options</h3>
+          <div id="special-actions"></div>
+          <div id="carrier-moves"></div>
+        </div>
+
+        <div class="panel-block controls">
+          <button id="flip-btn" class="ghost-btn">⇅ Flip</button>
+          <button id="offer-draw-btn" class="ghost-btn hidden">½ Offer draw</button>
+          <button id="accept-draw-btn" class="btn-green hidden">Accept draw</button>
+          <button id="decline-draw-btn" class="ghost-btn hidden">Decline draw</button>
+          <button id="rematch-btn" class="btn-green hidden">Rematch</button>
+          <button id="goto-rematch-btn" class="btn-green hidden">Go to rematch &rarr;</button>
+          <button id="resign-btn" class="danger-btn hidden">Resign</button>
+          <button id="leave-btn" class="ghost-btn">&larr; New game</button>
+        </div>
+
+        <div class="panel-block local-links">
+          <a id="open-editor-link" href="/editor.html">Edit this position &rarr;</a>
+          <a id="open-fen-link" href="/fen.html">Open FEN renderer &rarr;</a>
+        </div>
+      </div>
+
+      <div class="board-size-control">
+        <label for="board-size-slider">
+          Board size <span id="board-size-value" class="board-size-value">532px</span>
+        </label>
+        <input id="board-size-slider" type="range" />
+      </div>
+
+      <!-- Local-mode state holder: the FEN the board is playing from. Hidden;
+           positions are chosen via the menu, not typed here. -->
+      <input id="fen-input" type="hidden" />
+    </aside>
+  </main>
+
+  <!-- Promotion picker (plan 03): centered overlay while a pawn promotes. -->
+  <div id="promotion-picker" class="promotion-picker hidden" role="dialog" aria-label="Choose promotion piece"></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

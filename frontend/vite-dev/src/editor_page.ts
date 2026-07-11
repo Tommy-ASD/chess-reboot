@@ -153,6 +153,50 @@ const PRESETS: { name: string; fen: string }[] = [
     name: "Train test (loop + cart)",
     fen: "8/8/8/3(T=TRACK,D=E,P=LOCO(ID=1,H=F))(T=TRACK,D=E)3/3(T=TRACK,D=E,P=CART(ID=1,I=1))(T=TRACK,D=E)3/8/8/8 w - - tr=ply p=0",
   },
+  // Curated playable starting positions (mirror the play page's
+  // FEN_PRESETS). Each validated against the engine; FENs are the
+  // canonical round-trip form.
+  {
+    name: "Fairy Army",
+    fen: "(P=g(H=0-0))msqkwm(P=g(H=7-0))/pppppppp/8/8/8/8/PPPPPPPP/(P=G(H=0-7))MSQKWM(P=G(H=7-7)) w - - tr=full p=0",
+  },
+  {
+    name: "Rampart Run",
+    fen: "rnbqkbmr/pppppppp/8/(T=TURRET)1(T=BLOCK)(T=VENT)(T=VENT)(T=BLOCK)1(T=TURRET)/8/8/PPPPPPPP/RNBQKBMR w - - tr=full p=0",
+  },
+  {
+    name: "Brainrot Standoff",
+    fen: "r2wk2r/ppp2ppp/3(P=s(PHASE=2))4/8/8/3(P=S(PHASE=2))4/PPP2PPP/R2WK2R w KQkq - tr=full p=0",
+  },
+  {
+    name: "Signal Contraption",
+    fen: "r2k3r/pp4pp/8/(T=GATE,ID=1,OPEN=0)(T=GATE,ID=2,OPEN=0)(T=GATE,ID=3,OPEN=0)2(T=JUNCTION,ID=9,STATE=0,BRANCHES=(N,E))2/(P=N,T=SWITCH,TARGETS=(1,2,9))5(P=n,T=SWITCH,TARGETS=(2,3,9))1/3(T=PLATE,TARGETS=(1,9),FIRES=W)4/PP4PP/R2K3R w KQkq - tr=full p=0",
+  },
+  {
+    name: "Railyard Roundhouse",
+    fen: "(T=BLOCK)rnbqkbnr(T=BLOCK)/1pppppppp1/10/1(P=LOCO(ID=1,H=F,P=(N,P)),T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=S)2/1(P=CART(ID=1,I=2),T=TRACK,D=N)5(T=TRACK,D=S)2/1(P=CART(ID=1,I=1),T=TRACK,D=N)5(T=TRACK,D=S)2/1(T=TRACK,D=N)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=E)(T=TRACK,D=N)2/10/1PPPPPPPP1/(T=BLOCK)RNBQKBNR(T=BLOCK) w - - tr=ply p=0",
+  },
+  {
+    name: "Duck & Monkeys",
+    fen: "rmbqkbmr/pppppppp/8/3(DUCK)4/8/8/PPPPPPPP/RMBQKBMR w KQkq - tr=full p=0 variants=duck_chess",
+  },
+  // Oversized, fully symmetric positions (mirror the play page's presets).
+  {
+    name: "Colossus 16x16",
+    fen: "rnbmbnrkqrnbmbnr/pppppppppppppppp/16/16/16/16/16/16/16/16/16/16/16/16/PPPPPPPPPPPPPPPP/RNBMBNRKQRNBMBNR w - - tr=full p=0",
+  },
+  {
+    name: "Fairy Colosseum",
+    fen: "(P=g(H=0-0))mbrwnskqsnwrbm(P=g(H=15-0))/(P=bus)pppppppppppppp(P=bus)/16/16/16/16/16/16/16/16/16/16/16/16/(P=BUS)PPPPPPPPPPPPPP(P=BUS)/(P=G(H=0-15))MBRWNSKQSNWRBM(P=G(H=15-15)) w - - tr=full p=0",
+  },
+  {
+    name: "Great Wall 17x17",
+    fen: "(P=g(H=0-0))1r1(P=bus)1bqk1b1(P=bus)1r1(P=g(H=16-0))/1n1m1w2n2w1m1n1/1ppppppppppppppp1/17/17/17/6(T=SWITCH,TARGETS=(1,2,3))3(T=SWITCH,TARGETS=(1,2,3))6/2m1s3w3s1m2/(T=TURRET)(T=BLOCK)(T=BLOCK)(T=BLOCK)(T=GATE,ID=1,OPEN=0)(T=BLOCK)(T=BLOCK)(T=BLOCK)(T=GATE,ID=2,OPEN=1)(T=BLOCK)(T=BLOCK)(T=BLOCK)(T=GATE,ID=3,OPEN=0)(T=BLOCK)(T=BLOCK)(T=BLOCK)(T=TURRET)/2M1S3W3S1M2/6(T=SWITCH,TARGETS=(1,2,3))3(T=SWITCH,TARGETS=(1,2,3))6/17/17/17/1PPPPPPPPPPPPPPP1/1N1M1W2N2W1M1N1/(P=G(H=0-16))1R1(P=BUS)1BQK1B1(P=BUS)1R1(P=G(H=16-16)) w - - tr=full p=0",
+  },
+  {
+    name: "Mega Field 24x24",
+    fen: "rnbmbn(P=g(H=6-0))wbnskqsnbw(P=g(H=17-0))nbmbnr/pppppppppppppppppppppppp/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/24/PPPPPPPPPPPPPPPPPPPPPPPP/RNBMBN(P=G(H=6-23))WBNSKQSNBW(P=G(H=17-23))NBMBNR w - - tr=full p=0",
+  },
 ];
 
 // ---------------------------
