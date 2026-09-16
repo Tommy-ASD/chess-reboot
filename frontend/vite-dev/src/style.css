@@ -1014,6 +1014,34 @@ button {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
+/* Mirror-board buttons: a 2x2 grid of compact reflections. They share
+   `.ghost-btn`'s look but drop the 100%-width state-section override so
+   two fit per row. */
+.mirror-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Colour-mode toggle above the "Duplicate half" buttons: stretch the
+   three segments to the panel width so it lines up with the grid. */
+#symmetry-colors {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+#symmetry-colors button {
+  flex: 1;
+  padding: 8px 6px;
+}
+
+.state-section .mirror-grid .ghost-btn {
+  width: 100%;
+  padding: 8px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* In the editor's state panel the slider sits above the label rather
    than below — different layout, same control. */
 #state-panel .board-size-control {

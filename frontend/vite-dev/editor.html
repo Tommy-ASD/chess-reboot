@@ -132,6 +132,27 @@
       </div>
 
       <div class="state-section">
+        <h3>Mirror board</h3>
+        <div id="mirror-controls" class="mirror-grid"></div>
+        <p class="board-size-hint">
+          Reflects pieces, track directions and goblin home squares. Diagonal swaps width and height.
+        </p>
+      </div>
+
+      <div class="state-section">
+        <h3>Duplicate half</h3>
+        <div id="symmetry-colors" class="segmented" title="Piece colours on the copied half">
+          <button data-mode="auto" class="active" title="Invert top ↔ bottom, keep left ↔ right">Auto</button>
+          <button data-mode="keep" title="Copied pieces keep their colour">Keep</button>
+          <button data-mode="invert" title="Copied pieces swap colour">Invert</button>
+        </div>
+        <div id="symmetry-controls" class="mirror-grid"></div>
+        <p class="board-size-hint">
+          Copies one half onto the other, reflected. Auto inverts colours top ↔ bottom and keeps them left ↔ right.
+        </p>
+      </div>
+
+      <div class="state-section">
         <h3>Board size</h3>
         <div class="board-size-control">
           <input id="board-size-slider" type="range" />

@@ -16,7 +16,20 @@ import {
   type BoardFlags,
   type Side,
 } from "./fen";
+import {
+  MIRROR_AXES,
+  MIRROR_LABELS,
+  mirrorPosition,
+  type MirrorAxis,
+} from "./mirror";
 import { renderCarrierPassengerOverlay } from "./passenger_overlay";
+import {
+  HALF_LABELS,
+  HALF_SOURCES,
+  shouldInvertColors,
+  symmetrizeBoard,
+  type ColorMode,
+} from "./symmetrize";
 import { squareIconSvg, squareTypeIconByType } from "./signal_icons";
 import {
   ALL_PRESSURE_TRIGGERS,
@@ -503,6 +516,45 @@ function resizeBoard(newCols: number, newRows: number) {
     inspectedSquare = null;
   }
   syncFromState();
+}
+
+/// Reflect the whole position across one axis. Directions (`D=`,
+/// `BRANCHES=`, a loco's `L=`), coordinate payloads (the Goblin's
+/// `H=`) and the geometry-bearing flags all travel with the pieces —
+/// see `mirror.ts`. The diagonal reflection transposes the grid, so
+/// width and height swap; `renderBoard` picks the new dimensions up
+/// from the board itself.
+function applyMirror(axis: MirrorAxis) {
+  const rows = board.length;
+  const cols = board[0]?.length ?? 0;
+  const next = mirrorPosition(board, flags, axis);
+  board = next.board;
+  flags = next.flags;
+
+  // Carry the inspected square along with its contents — mirroring
+  // while the inspector is open shouldn't yank the panel onto an
+  // unrelated tile.
+  if (inspectedSquare && rows > 0 && cols > 0) {
+    inspectedSquare = mirrorInspected(inspectedSquare, axis, rows, cols);
+  }
+
+  syncFromState();
+}
+
+/// Where the inspected coord lands after a reflection. Mirrors are
+/// their own inverse, so this is the same mapping `mirrorBoard` uses.
+function mirrorInspected(
+  coord: Coord,
+  axis: MirrorAxis,
+  rows: number,
+  cols: number,
+): Coord {
+  switch (axis) {
+    case "horizontal": return { file: cols - 1 - coord.file, rank: coord.rank };
+    case "vertical":   return { file: coord.file, rank: rows - 1 - coord.rank };
+    case "both":       return { file: cols - 1 - coord.file, rank: rows - 1 - coord.rank };
+    case "diagonal":   return { file: coord.rank, rank: coord.file };
+  }
 }
 
 /// Pull state from the FEN input. Used when the user types or pastes.
@@ -1154,6 +1206,56 @@ function wireDimensionControls() {
   rows.addEventListener("change", apply);
 }
 
+/// Build the mirror button row. One button per axis, driven off
+/// `MIRROR_AXES` so adding a reflection needs no markup change.
+function buildMirrorControls() {
+  const host = document.getElementById("mirror-controls");
+  if (!host) return;
+  host.innerHTML = "";
+  for (const axis of MIRROR_AXES) {
+    const btn = document.createElement("button");
+    btn.className = "ghost-btn mirror-btn";
+    btn.textContent = MIRROR_LABELS[axis].short;
+    btn.title = MIRROR_LABELS[axis].title;
+    btn.onclick = () => applyMirror(axis);
+    host.appendChild(btn);
+  }
+}
+
+/// Build the "Duplicate half" controls: a colour-mode toggle plus one
+/// button per copy direction. The mode is read at click time, so
+/// switching it never rewrites the board on its own.
+function buildSymmetryControls() {
+  const host = document.getElementById("symmetry-controls");
+  const modeToggle = document.getElementById("symmetry-colors");
+  if (!host || !modeToggle) return;
+
+  let colorMode: ColorMode = "auto";
+  for (const btn of modeToggle.querySelectorAll<HTMLButtonElement>("button")) {
+    btn.onclick = () => {
+      colorMode = (btn.dataset.mode as ColorMode) ?? "auto";
+      for (const other of modeToggle.querySelectorAll("button")) {
+        other.classList.toggle("active", other === btn);
+      }
+    };
+  }
+
+  host.innerHTML = "";
+  for (const source of HALF_SOURCES) {
+    const btn = document.createElement("button");
+    btn.className = "ghost-btn mirror-btn";
+    btn.textContent = HALF_LABELS[source].short;
+    btn.title = HALF_LABELS[source].title;
+    btn.onclick = () => {
+      // Flags are left alone: castling rights / en passant belong to a
+      // side, and which side the copied half "is" isn't knowable here.
+      board = symmetrizeBoard(board, source, shouldInvertColors(source, colorMode));
+      syncFromState();
+    };
+    host.appendChild(btn);
+  }
+}
+
 function wireFlagControls() {
   for (const btn of document.querySelectorAll<HTMLButtonElement>("#stm-toggle button")) {
     btn.onclick = () => {
@@ -1268,6 +1370,8 @@ buildTypePalette();
 buildConditionPalette();
 buildErasePalette();
 buildPresets();
+buildMirrorControls();
+buildSymmetryControls();
 wireFENInput();
 wireFlagControls();
 wireDimensionControls();
