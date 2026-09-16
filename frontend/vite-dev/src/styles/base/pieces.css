@@ -1,0 +1,115 @@
+/* pieces.css — piece guide index and detail pages */
+
+.section-tight {
+  margin-top: 36px;
+}
+
+.section-tight .section-lede {
+  margin-bottom: 16px;
+}
+
+.piece-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+}
+
+.piece-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.piece-card:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-2px);
+}
+
+.piece-card-sprites {
+  display: flex;
+  gap: 2px;
+}
+
+.piece-card-sprites .piece {
+  --ps: 40px;
+}
+
+.piece-card-body {
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.piece-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.piece-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 40px;
+}
+
+.piece-detail-info {
+  display: grid;
+  gap: 18px;
+}
+
+.piece-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.piece-detail-sprites {
+  display: flex;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--board-light);
+}
+
+.piece-detail-sprites .piece {
+  --ps: 60px;
+}
+
+.piece-detail-demo {
+  position: sticky;
+  top: 88px;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pager-link {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 960px) {
+  .piece-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .piece-detail-demo {
+    position: static;
+  }
+}

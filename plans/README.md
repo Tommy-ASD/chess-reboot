@@ -28,9 +28,9 @@ plan you want to act on.
   Returns `400 Bad Request` on illegal moves and a structured 400 on
   malformed FEN. `/new_state` and `/status` carry the adjacently-tagged
   `GameStatus`.
-- **Frontend** (`frontend/vite-dev/`): exists, mostly an editor /
-  rendering surface. Out of scope of this engine-focused project work
-  unless the API contract changes.
+- **Frontend** (`frontend/vite-dev/`): the Chess 2 site (Preact) — variant
+  gallery, online / same-device play, piece guide, Lab editor, themes.
+  See plan 14 and `frontend/vite-dev/docs/THEMES.md`.
 
 ## What's shipped
 

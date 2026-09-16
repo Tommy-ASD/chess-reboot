@@ -1,0 +1,79 @@
+/**
+ * Chess 2 Theme: Slate
+ *
+ * Cool slate and tournament green. Crisp, modern and high-contrast —
+ * a deliberately different take from Walnut, to show how far a theme
+ * file can move the look.
+ *
+ * Palette: blue-grey slate surfaces · tournament green accent
+ * Fonts:   system sans throughout · tighter corners
+ */
+
+:root {
+  /* Surfaces */
+  --page-bg:
+    radial-gradient(900px 500px at 90% -10%, rgba(79, 191, 139, 0.08), transparent 60%),
+    #11161C;
+  --bg:       #11161C;
+  --surface:  #19212A;
+  --surface2: #222C37;
+  --surface3: #0D1217;
+
+  /* Lines */
+  --border:  rgba(190, 215, 240, 0.08);
+  --border2: rgba(190, 215, 240, 0.17);
+
+  /* Accent */
+  --accent:      #4FBF8B;
+  --accent2:     #66D19F;
+  --accent-text: #06140D;
+  --accent-soft: rgba(79, 191, 139, 0.13);
+  --highlight:   #F2C14E;
+
+  /* Text */
+  --text:  #E6EDF3;
+  --text2: #A9B8C6;
+  --muted: #6F8193;
+
+  /* Status */
+  --success: #4FBF8B;
+  --warning: #F2C14E;
+  --danger:  #F07167;
+
+  /* Board */
+  --board-light:   #DCE3D5;
+  --board-dark:    #6F9A76;
+  --board-frame:   #0A0E12;
+  --piece-white:   #FFFFFF;
+  --piece-black:   #15191D;
+  --piece-outline: rgba(0, 0, 0, 0.85);
+  --move-hint:     rgba(10, 20, 15, 0.30);
+  --selected:      rgba(242, 193, 78, 0.55);
+  --last-move:     rgba(242, 193, 78, 0.32);
+
+  /* Type */
+  --font-body:    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    ui-monospace, "Cascadia Mono", "SF Mono", Consolas, Menlo, monospace;
+
+  /* Shape */
+  --radius:    10px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow:    0 8px 22px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* ── Flourishes ── */
+
+.hero-title,
+.section-title,
+.page-title {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.btn,
+.chip {
+  letter-spacing: 0.01em;
+}

@@ -1,0 +1,18 @@
+/* ═══════════════════════════════════════════════════════
+   base.css — Chess 2 structural styles
+   Theme-agnostic: layout, spacing, type scale, states.
+   Colours, fonts, radii and shadows come ONLY from theme
+   tokens (see src/theme/vars.ts and docs/THEMES.md), so the
+   active theme file in src/themes/ restyles everything.
+   Order matters: later files win at equal specificity.
+   ═══════════════════════════════════════════════════════ */
+
+@import "./base/foundation.css";
+@import "./base/controls.css";
+@import "./base/shell.css";
+@import "./base/board.css";
+@import "./base/home.css";
+@import "./base/game.css";
+@import "./base/pieces.css";
+@import "./base/lab.css";
+@import "./base/settings.css";

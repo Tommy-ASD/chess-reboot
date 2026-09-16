@@ -1,0 +1,75 @@
+/**
+ * Chess 2 Theme: Walnut
+ *
+ * Warm parchment and polished walnut — a quiet club room with a good
+ * board. The default light theme.
+ *
+ * Palette: parchment surfaces · walnut accent · brass highlight
+ * Fonts:   Palatino-family serif (display) · system sans (body)
+ */
+
+:root {
+  /* Surfaces */
+  --page-bg:
+    radial-gradient(1100px 520px at 85% -8%, rgba(200, 150, 62, 0.16), transparent 62%),
+    radial-gradient(900px 480px at -12% 108%, rgba(122, 74, 36, 0.10), transparent 60%),
+    linear-gradient(180deg, #F8F3EA, #EFE6D6);
+  --bg:       #F6F0E6;
+  --surface:  #FFFDF9;
+  --surface2: #F7F0E4;
+  --surface3: #EFE5D4;
+
+  /* Lines */
+  --border:  rgba(70, 45, 20, 0.10);
+  --border2: rgba(70, 45, 20, 0.20);
+
+  /* Accent */
+  --accent:      #7A4A24;
+  --accent2:     #633A19;
+  --accent-text: #FFF8EE;
+  --accent-soft: rgba(122, 74, 36, 0.10);
+  --highlight:   #C8963E;
+
+  /* Text */
+  --text:  #2A211A;
+  --text2: #5B4E42;
+  --muted: #8E7F6E;
+
+  /* Status */
+  --success: #3E8A55;
+  --warning: #B7791F;
+  --danger:  #B0432E;
+
+  /* Board */
+  --board-light:   #EEDAB6;
+  --board-dark:    #B58863;
+  --board-frame:   #3B2616;
+  --piece-white:   #FFFDF7;
+  --piece-black:   #231A13;
+  --piece-outline: rgba(30, 20, 10, 0.85);
+  --move-hint:     rgba(35, 25, 15, 0.30);
+  --selected:      rgba(214, 170, 60, 0.55);
+  --last-move:     rgba(222, 185, 70, 0.34);
+
+  /* Type */
+  --font-body:    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-mono:    ui-monospace, "Cascadia Mono", "SF Mono", Consolas, Menlo, monospace;
+
+  /* Shape */
+  --radius:    14px;
+  --radius-sm: 9px;
+  --shadow-sm: 0 1px 2px rgba(40, 24, 8, 0.07);
+  --shadow:    0 8px 24px rgba(40, 24, 8, 0.08);
+  --shadow-lg: 0 22px 48px rgba(40, 24, 8, 0.20);
+}
+
+/* ── Flourishes (optional: any selector may be restyled) ── */
+
+.brand-mark {
+  color: var(--accent);
+}
+
+.hero-title {
+  letter-spacing: -0.02em;
+}

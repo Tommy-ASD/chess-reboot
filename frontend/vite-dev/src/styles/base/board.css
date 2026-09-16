@@ -1,0 +1,496 @@
+/* board.css — the board, pieces and every square state.
+   Cells are sized by the grid; everything inside a cell scales with
+   `cqw` (1% of the board's width), so boards of any size and shape
+   (`--cols` × `--rows`, set inline per board) render proportionally. */
+
+.board-frame {
+  --frame-w: 10px;
+  position: relative;
+  width: 100%;
+  padding: var(--frame-w);
+  border-radius: var(--radius);
+  background: var(--board-frame);
+  box-shadow: var(--shadow-lg);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
+  aspect-ratio: var(--cols) / var(--rows);
+  width: 100%;
+  overflow: hidden;
+  border-radius: max(2px, calc(var(--radius) - var(--frame-w)));
+  container-type: inline-size;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* ── Squares ── */
+
+.sq {
+  position: relative;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sq-light {
+  background-color: var(--board-light);
+}
+
+.sq-dark {
+  background-color: var(--board-dark);
+}
+
+.board-frame.is-interactive .sq {
+  cursor: pointer;
+}
+
+.board-frame.is-interactive .sq:hover {
+  filter: brightness(1.06);
+}
+
+.board-frame.is-interactive .sq:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+  z-index: 8;
+}
+
+.sq.is-last-move {
+  box-shadow: inset 0 0 0 100vmax var(--last-move);
+}
+
+.sq.is-selected {
+  box-shadow: inset 0 0 0 100vmax var(--selected);
+}
+
+/* ── Pieces ── */
+
+.piece {
+  --ps: 32px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--ps);
+  height: var(--ps);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.piece-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+  transition: transform 180ms ease;
+}
+
+/* The current PNG sprites have opaque white backgrounds. On the board the
+   piece wrapper multiplies onto the square so the white drops out (the
+   wrapper, not the img: a positioned piece is its own stacking context).
+   Off the board they sit on a light tile instead. Transparent art (SVG)
+   needs neither — drop these rules once the sprites are re-exported. */
+.piece:has(> .piece-img[src$=".png"]) {
+  border-radius: 18%;
+  background: #fff;
+  overflow: hidden;
+}
+
+.piece-img[src$=".png"] {
+  filter: none;
+}
+
+.sq > .piece:has(> .piece-img[src$=".png"]) {
+  background: transparent;
+  mix-blend-mode: multiply;
+}
+
+.piece-glyph {
+  display: block;
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", "Arial Unicode MS", sans-serif;
+  font-size: calc(var(--ps) * 0.92);
+  line-height: 1;
+  transition: transform 180ms ease;
+}
+
+.piece-tinted .piece-glyph {
+  paint-order: stroke fill;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+}
+
+.piece-tinted.piece-white .piece-glyph {
+  color: var(--piece-white);
+  -webkit-text-stroke: 0.06em var(--piece-outline);
+}
+
+.piece-tinted.piece-black .piece-glyph {
+  color: var(--piece-black);
+  -webkit-text-stroke: 0.03em var(--piece-black);
+}
+
+/* Emoji placeholders can't take a tint, so they sit on a side-coloured disc. */
+.piece-emoji.piece-white,
+.piece-emoji.piece-black {
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.piece-emoji.piece-white {
+  background: var(--piece-white);
+  border: 2px solid var(--piece-outline);
+}
+
+.piece-emoji.piece-black {
+  background: var(--piece-black);
+  border: 2px solid color-mix(in srgb, var(--piece-white) 45%, transparent);
+}
+
+.piece-emoji .piece-glyph {
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: calc(var(--ps) * 0.6);
+}
+
+.piece-emoji.piece-neutral .piece-glyph {
+  font-size: calc(var(--ps) * 0.82);
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* On the board a piece fills its cell. */
+.sq > .piece {
+  position: absolute;
+  inset: 6%;
+  width: auto;
+  height: auto;
+  z-index: 2;
+}
+
+.sq > .piece .piece-glyph {
+  font-size: calc(82cqw / var(--cols));
+}
+
+.sq > .piece-emoji.piece-white,
+.sq > .piece-emoji.piece-black {
+  inset: 11%;
+}
+
+.sq > .piece-emoji .piece-glyph {
+  font-size: calc(48cqw / var(--cols));
+}
+
+.sq > .piece-emoji.piece-neutral .piece-glyph {
+  font-size: calc(70cqw / var(--cols));
+}
+
+/* Carrier passengers ride on top, upright even when a cart rotates. */
+.sq-passengers {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+  gap: 2%;
+  pointer-events: none;
+}
+
+.sq-passengers .piece {
+  width: 42%;
+  height: 42%;
+}
+
+.sq-passengers .piece-glyph {
+  font-size: calc(34cqw / var(--cols));
+}
+
+.sq-passengers[data-count="3"] .piece,
+.sq-passengers[data-count="4"] .piece {
+  width: 32%;
+  height: 32%;
+}
+
+.sq-passengers[data-count="3"] .piece-glyph,
+.sq-passengers[data-count="4"] .piece-glyph {
+  font-size: calc(26cqw / var(--cols));
+}
+
+.sq-passengers[data-count="5"] .piece,
+.sq-passengers[data-count="6"] .piece {
+  width: 26%;
+  height: 26%;
+}
+
+.sq-passengers[data-count="5"] .piece-glyph,
+.sq-passengers[data-count="6"] .piece-glyph {
+  font-size: calc(20cqw / var(--cols));
+}
+
+/* A Goblin's captive, carried in the corner. */
+.sq-captive {
+  position: absolute;
+  right: 2%;
+  bottom: 2%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 44%;
+  height: 44%;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--board-frame) 70%, transparent);
+  box-shadow: 0 0 0 2px var(--danger);
+  pointer-events: none;
+}
+
+.sq-captive .piece {
+  width: 90%;
+  height: 90%;
+}
+
+.sq-captive .piece-glyph {
+  font-size: calc(30cqw / var(--cols));
+}
+
+/* Small numeric badges: Skibidi phase, tornado countdown. */
+.sq-badge {
+  position: absolute;
+  top: 3%;
+  right: 4%;
+  z-index: 5;
+  min-width: 1.5em;
+  padding: 0.1em 0.35em;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: max(9px, calc(17cqw / var(--cols)));
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+  pointer-events: none;
+}
+
+.sq-phase {
+  background: color-mix(in srgb, #18a84a 85%, black);
+}
+
+.sq-coord {
+  position: absolute;
+  z-index: 1;
+  font-size: max(8px, calc(17cqw / var(--cols)));
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.sq-coord-file {
+  right: 5%;
+  bottom: 4%;
+}
+
+.sq-coord-rank {
+  left: 5%;
+  top: 5%;
+}
+
+.sq-light .sq-coord {
+  color: var(--board-dark);
+}
+
+.sq-dark .sq-coord {
+  color: var(--board-light);
+}
+
+/* ── Move hints ── */
+
+.sq.is-target::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 6;
+  width: calc(30cqw / var(--cols));
+  height: calc(30cqw / var(--cols));
+  border-radius: 50%;
+  background: var(--move-hint);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.sq.is-target.has-piece::before {
+  width: 90%;
+  height: 90%;
+  background: transparent;
+  border: calc(7cqw / var(--cols)) solid var(--move-hint);
+}
+
+.sq.target-board::before {
+  border-color: rgba(60, 130, 220, 0.85);
+  background: transparent;
+}
+
+.sq.target-deploy::before {
+  background: rgba(64, 168, 96, 0.7);
+}
+
+.sq.target-deploy.has-piece::before {
+  background: transparent;
+  border-color: rgba(64, 168, 96, 0.9);
+}
+
+/* ── Conditions ── */
+
+.sq.cond-frozen {
+  background-image: repeating-linear-gradient(45deg, rgba(120, 178, 255, 0.6) 0 1px, transparent 1px 6px);
+}
+
+.sq.cond-brainrot {
+  background-image: repeating-linear-gradient(45deg, rgba(20, 200, 80, 0.55) 0 2px, transparent 2px 7px);
+}
+
+.sq.cond-tornado::after {
+  content: "\1F32A\FE0F";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  font-size: calc(55cqw / var(--cols));
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── Substrate square types ── */
+
+.sq-icon {
+  position: absolute;
+  inset: 12%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.sq-icon svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.4));
+}
+
+/* Track rails reach the cell edge so neighbouring tiles connect. */
+.sq.type-track .sq-icon {
+  inset: 0;
+}
+
+.sq.type-vent {
+  box-shadow: inset 0 0 0 2px rgba(80, 80, 80, 0.45);
+  color: rgba(60, 60, 60, 0.85);
+}
+
+.sq.type-turret {
+  box-shadow: inset 0 0 0 3px rgba(180, 90, 30, 0.55);
+  color: rgba(180, 90, 30, 0.95);
+}
+
+.sq.type-block {
+  box-shadow: inset 0 0 0 2px rgba(50, 35, 25, 0.6);
+  color: rgba(90, 70, 50, 0.95);
+}
+
+.sq.type-switch {
+  box-shadow: inset 0 0 0 2px rgba(255, 196, 0, 0.7);
+  color: rgba(255, 196, 0, 0.95);
+}
+
+.sq.type-junction {
+  box-shadow: inset 0 0 0 2px rgba(120, 200, 255, 0.7);
+  color: rgba(120, 200, 255, 0.95);
+}
+
+.sq.type-gate {
+  box-shadow: inset 0 0 0 2px rgba(220, 80, 80, 0.75);
+  color: rgba(220, 80, 80, 0.95);
+}
+
+.sq.type-plate {
+  box-shadow: inset 0 0 0 2px rgba(170, 130, 255, 0.7);
+  color: rgba(170, 130, 255, 0.95);
+}
+
+.sq.type-track {
+  box-shadow: inset 0 0 0 2px rgba(200, 170, 110, 0.7);
+  color: rgba(200, 170, 110, 0.95);
+  background-image: linear-gradient(rgba(160, 110, 60, 0.18), rgba(160, 110, 60, 0.18));
+}
+
+/* Lab: inspected square and receivers wired to it. */
+.sq.is-inspected {
+  box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 6px rgba(0, 0, 0, 0.45);
+}
+
+.sq.is-wired {
+  box-shadow: inset 0 0 0 3px rgba(120, 240, 120, 0.9);
+}
+
+/* ── Overlays on the board ── */
+
+.board-overlay {
+  position: absolute;
+  inset: var(--frame-w);
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: max(2px, calc(var(--radius) - var(--frame-w)));
+  background: color-mix(in srgb, var(--board-frame) 55%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.overlay-card {
+  display: grid;
+  gap: 12px;
+  width: min(380px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.wiring-overlay {
+  position: absolute;
+  inset: var(--frame-w);
+  z-index: 7;
+  width: calc(100% - 2 * var(--frame-w));
+  height: calc(100% - 2 * var(--frame-w));
+  pointer-events: none;
+}
+
+.wiring-overlay line {
+  stroke: rgba(120, 240, 120, 0.85);
+  stroke-width: 3px;
+  stroke-dasharray: 6 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.wiring-overlay circle {
+  fill: rgba(120, 240, 120, 0.95);
+}
+
+.board-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  color: var(--muted);
+}

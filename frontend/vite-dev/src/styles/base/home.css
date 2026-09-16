@@ -1,0 +1,345 @@
+/* home.css — hero, sections, variant gallery, live games, piece strip */
+
+.hero {
+  padding-block: 56px 48px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: 56px;
+}
+
+.hero-title {
+  margin-block: 14px 18px;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 5vw, 56px);
+  font-weight: 700;
+  line-height: 1.05;
+}
+
+.hero-lede {
+  max-width: 32em;
+  font-size: 18px;
+  color: var(--text2);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-block: 30px 16px;
+}
+
+.hero-note {
+  font-size: 14px;
+}
+
+.hero-showcase {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 500px;
+  justify-self: end;
+}
+
+.hero-callout {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  padding: 12px 16px;
+}
+
+.hero-callout > * + * {
+  margin-top: 0;
+}
+
+.hero-callout > div {
+  flex: 1;
+}
+
+.hero-callout-sprite {
+  --ps: 44px;
+}
+
+/* ── Sections ── */
+
+.section {
+  padding-block: 56px;
+}
+
+.section-alt {
+  background: color-mix(in srgb, var(--surface3) 70%, transparent);
+  border-block: 1px solid var(--border);
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+
+/* ── Variant gallery ── */
+
+.variant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.variant-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.variant-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--border2);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.variant-card-board {
+  padding: 16px 16px 0;
+  background: var(--surface2);
+}
+
+.variant-card-board .board-frame {
+  --frame-w: 6px;
+  box-shadow: var(--shadow);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.variant-card-body {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  align-content: start;
+  padding: 14px 16px 16px;
+}
+
+.variant-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.variant-card-title {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.variant-card-tagline {
+  color: var(--text2);
+  font-size: 14px;
+}
+
+.variant-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.variant-card-pieces {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.variant-card-pieces .piece {
+  --ps: 24px;
+}
+
+.variant-card-cta {
+  flex: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ── Live games ── */
+
+.code-form {
+  display: flex;
+  gap: 8px;
+}
+
+.code-form .input {
+  width: 170px;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.game-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.game-row-text {
+  display: grid;
+  min-width: 0;
+}
+
+.game-row-text span {
+  font-size: 13px;
+}
+
+/* ── Pieces strip ── */
+
+.piece-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.piece-chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.piece-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-2px);
+}
+
+.piece-chip .piece {
+  --ps: 40px;
+}
+
+.piece-chip > span:last-child {
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.piece-chip .muted {
+  font-size: 13px;
+}
+
+.piece-chip-compact {
+  padding: 8px 12px;
+}
+
+.piece-chip-compact .piece {
+  --ps: 30px;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    padding-block: 28px 32px;
+  }
+
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .hero-showcase {
+    justify-self: center;
+  }
+
+  .section {
+    padding-block: 40px;
+  }
+}
+
+@media (max-width: 640px) {
+  .code-form {
+    width: 100%;
+  }
+
+  .code-form .input {
+    flex: 1;
+    width: auto;
+  }
+
+  /* Compact variant cards: thumbnail beside the text. */
+  .variant-grid {
+    gap: 12px;
+  }
+
+  .variant-card {
+    flex-direction: row;
+  }
+
+  .variant-card-board {
+    flex: none;
+    width: 118px;
+    padding: 10px;
+    display: grid;
+    align-content: center;
+  }
+
+  .variant-card-board .board-frame {
+    --frame-w: 4px;
+    border-radius: var(--radius-sm);
+  }
+
+  .variant-card-body {
+    padding: 10px 12px;
+    gap: 4px;
+  }
+
+  .variant-card-title {
+    font-size: 18px;
+  }
+
+  .variant-card-tagline {
+    font-size: 13px;
+  }
+
+  .variant-card-foot {
+    margin-top: 2px;
+  }
+
+  .variant-card-pieces .muted {
+    display: none;
+  }
+
+  .hero-actions .btn {
+    flex: 1;
+  }
+}
