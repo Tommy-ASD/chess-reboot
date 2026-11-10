@@ -61,7 +61,13 @@ export type MoveType =
     /// `switch` coord is currently always equal to `GameMove.from`, but
     /// the engine carries it explicitly so a future "throw an adjacent
     /// switch" mechanic doesn't break the wire format.
-    | { kind: "ThrowSwitch"; target: { switch: Coord } };
+    | { kind: "ThrowSwitch"; target: { switch: Coord } }
+    /// Plan 13: Stormcaller stamps a Tornado condition on `target`. The
+    /// engine's adjacently-tagged enum (`tag="kind", content="target"`)
+    /// nests the struct variant's own `target` field, so the wire shape
+    /// is `{ kind, target: { target: Coord } }` — same nesting pattern
+    /// as ThrowSwitch's `{ switch }`.
+    | { kind: "PlaceTornado"; target: { target: Coord } };
 
 
 export type GameMove = { from: Coord; move_type: MoveType };
